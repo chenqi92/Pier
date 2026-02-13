@@ -1,0 +1,236 @@
+import SwiftUI
+
+/// Right panel with switchable modes: Markdown preview, SFTP file browser,
+/// Docker management, Git panel, MySQL client, Log viewer.
+struct RightPanelView: View {
+    @State private var selectedMode: RightPanelMode = .markdown
+    @State private var markdownPath: String? = nil
+    @StateObject private var remoteFileVM = RemoteFileViewModel()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Mode switcher
+            modeSwitcher
+
+            Divider()
+
+            // Content based on selected mode
+            switch selectedMode {
+            case .markdown:
+                MarkdownPreviewView(filePath: markdownPath)
+            case .sftp:
+                RemoteFileView(viewModel: remoteFileVM)
+            case .docker:
+                DockerManageView()
+            case .git:
+                GitPanelView()
+            case .database:
+                DatabaseClientView()
+            case .logViewer:
+                LogViewerView()
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .onReceive(NotificationCenter.default.publisher(for: .previewMarkdown)) { notification in
+            if let path = notification.object as? String {
+                markdownPath = path
+                selectedMode = .markdown
+            }
+        }
+    }
+
+    private var modeSwitcher: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(RightPanelMode.allCases, id: \.self) { mode in
+                    Button(action: { selectedMode = mode }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: mode.iconName)
+                                .font(.caption2)
+                            Text(mode.title)
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(selectedMode == mode
+                            ? Color.accentColor.opacity(0.2)
+                            : Color.clear)
+                        .cornerRadius(4)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+    }
+}
+
+enum RightPanelMode: String, CaseIterable {
+    case markdown = "Markdown"
+    case sftp = "SFTP"
+    case docker = "Docker"
+    case git = "Git"
+    case database = "MySQL"
+    case logViewer = "Logs"
+
+    var title: String { rawValue }
+
+    var iconName: String {
+        switch self {
+        case .markdown: return "doc.text"
+        case .sftp: return "externaldrive.connected.to.line.below"
+        case .docker: return "shippingbox.fill"
+        case .git: return "arrow.triangle.branch"
+        case .database: return "cylinder.fill"
+        case .logViewer: return "doc.text.magnifyingglass"
+        }
+    }
+}
+
+// MARK: - Markdown Preview
+
+struct MarkdownPreviewView: View {
+    let filePath: String?
+    @State private var markdownContent: String = ""
+
+    var body: some View {
+        if let path = filePath {
+            ScrollView {
+                // Simple markdown rendering using Text with AttributedString
+                VStack(alignment: .leading, spacing: 8) {
+                    if let attributed = try? AttributedString(markdown: markdownContent,
+                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+                        Text(attributed)
+                            .font(.system(.body, design: .default))
+                            .textSelection(.enabled)
+                    } else {
+                        Text(markdownContent)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onAppear { loadMarkdown(path) }
+            .onChange(of: filePath) { _, newPath in
+                if let p = newPath { loadMarkdown(p) }
+            }
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 36))
+                    .foregroundColor(.secondary)
+                Text("Select a Markdown file\nfrom the file browser")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func loadMarkdown(_ path: String) {
+        do {
+            markdownContent = try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            markdownContent = "Error loading file: \(error.localizedDescription)"
+        }
+    }
+}
+
+// MARK: - Remote File View (SFTP)
+
+struct RemoteFileView: View {
+    @ObservedObject var viewModel: RemoteFileViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if viewModel.isConnected {
+                // Remote path bar
+                HStack {
+                    Image(systemName: "server.rack")
+                        .foregroundColor(.green)
+                        .font(.caption)
+                    Text(viewModel.currentRemotePath)
+                        .font(.caption)
+                        .lineLimit(1)
+                    Spacer()
+                    Button(action: { viewModel.navigateUp() }) {
+                        Image(systemName: "arrow.up")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+
+                Divider()
+
+                // Remote file list
+                List(viewModel.remoteFiles, id: \.path) { file in
+                    HStack(spacing: 6) {
+                        Image(systemName: file.isDir ? "folder.fill" : "doc.fill")
+                            .foregroundColor(file.isDir ? .accentColor : .secondary)
+                            .font(.caption)
+                        Text(file.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                        Spacer()
+                        if !file.isDir {
+                            Text(formatFileSize(file.size))
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .onTapGesture {
+                        if file.isDir {
+                            viewModel.navigateTo(file.path)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+
+                // Transfer progress
+                if let progress = viewModel.transferProgress {
+                    HStack {
+                        ProgressView(value: progress.fraction)
+                            .progressViewStyle(.linear)
+                        Text(progress.description)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                }
+            } else {
+                // Not connected state
+                VStack(spacing: 16) {
+                    Image(systemName: "network.slash")
+                        .font(.system(size: 36))
+                        .foregroundColor(.secondary)
+                    Text("Not Connected")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button("Connect to Server") {
+                        viewModel.showConnectionSheet = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            viewModel.handleFileDrop(providers: providers)
+        }
+    }
+
+    private func formatFileSize(_ size: UInt64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(size))
+    }
+}

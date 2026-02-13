@@ -1,0 +1,46 @@
+[package]
+name = "pier-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core engine for Pier Terminal - terminal emulation, SSH/SFTP, file search"
+
+[lib]
+name = "pier_core"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+# Terminal emulation
+vte = "0.15"
+
+# SSH / SFTP
+russh = "0.57"
+russh-sftp = "2.1"
+async-trait = "0.1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# File search (ripgrep core)
+ignore = "0.4"
+walkdir = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Crypto
+ring = "0.17"
+
+# C FFI
+libc = "0.2"
+
+[build-dependencies]
+cbindgen = "0.28"

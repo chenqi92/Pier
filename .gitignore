@@ -1,0 +1,20 @@
+# Pier Terminal macOS App
+
+## Build artifacts
+.build/
+pier-core/target/
+
+## IDE
+.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
+.idea/
+*.swp
+*~
+
+## macOS
+.DS_Store
+*.dSYM/
+
+## Derived
+DerivedData/

@@ -1,0 +1,5 @@
+module CPierCore {
+    header "include/pier_core.h"
+    link "pier_core"
+    export *
+}
