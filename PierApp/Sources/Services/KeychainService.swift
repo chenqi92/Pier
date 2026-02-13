@@ -5,7 +5,7 @@ import Security
 class KeychainService {
 
     static let shared = KeychainService()
-    private let serviceName = "com.pier.terminal"
+    private let serviceName = "com.kkape.pier"
 
     // MARK: - Save
 

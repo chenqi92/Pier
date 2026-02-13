@@ -9,13 +9,12 @@ struct TerminalView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> TerminalNSView {
         let view = TerminalNSView()
-        view.session = session
         return view
     }
 
     func updateNSView(_ nsView: TerminalNSView, context: Context) {
-        nsView.session = session
-        nsView.needsDisplay = true
+        // Start or switch terminal when session changes (fixes B2)
+        nsView.updateSession(session)
     }
 }
 
@@ -38,9 +37,11 @@ class TerminalNSView: NSView {
     // PTY handle from Rust
     private var terminalHandle: OpaquePointer?
     private var readTimer: Timer?
+    private var blinkTimer: Timer?
     private var screenBuffer: [[Character]] = []
     private var cursorX: Int = 0
     private var cursorY: Int = 0
+    private var currentSessionId: UUID?
 
     // MARK: - Lifecycle
 
@@ -66,11 +67,37 @@ class TerminalNSView: NSView {
         cellWidth = ceil(charSize.width)
         cellHeight = ceil(charSize.height + 2)
 
-        // Start cursor blink timer
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        // Start cursor blink timer (save reference for cleanup, fixes B6)
+        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.cursorVisible.toggle()
             self?.setNeedsDisplay(self?.bounds ?? .zero)
         }
+    }
+
+    /// Called by updateNSView when the session changes.
+    func updateSession(_ session: TerminalSessionInfo?) {
+        guard let session = session else { return }
+        // Only restart if session changes
+        if currentSessionId == session.id { return }
+        currentSessionId = session.id
+
+        // Clean up previous terminal
+        stopTerminal()
+
+        // Start new terminal for this session
+        startTerminal(shell: session.shellPath)
+    }
+
+    private func stopTerminal() {
+        readTimer?.invalidate()
+        readTimer = nil
+        if let handle = terminalHandle {
+            pier_terminal_destroy(handle)
+            terminalHandle = nil
+        }
+        screenBuffer = []
+        cursorX = 0
+        cursorY = 0
     }
 
     func startTerminal(shell: String = "/bin/zsh") {
@@ -225,6 +252,7 @@ class TerminalNSView: NSView {
 
     deinit {
         readTimer?.invalidate()
+        blinkTimer?.invalidate()
         if let handle = terminalHandle {
             pier_terminal_destroy(handle)
         }

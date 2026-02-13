@@ -7,6 +7,7 @@ class FileViewModel: ObservableObject {
     @Published var displayedFiles: [FileItem] = []
     @Published var currentPath: URL
     @Published var isLoading = false
+    @Published var errorMessage: String?
 
     private var allFiles: [FileItem] = []
     private var fileMonitor: DispatchSourceFileSystemObject?
@@ -63,7 +64,7 @@ class FileViewModel: ObservableObject {
             try FileManager.default.trashItem(at: URL(fileURLWithPath: item.path), resultingItemURL: nil)
             refresh()
         } catch {
-            print("Delete failed: \(error)")
+            errorMessage = "Failed to delete \(item.name): \(error.localizedDescription)"
         }
     }
 

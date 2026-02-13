@@ -123,9 +123,23 @@ impl PtyProcess {
 impl Drop for PtyProcess {
     fn drop(&mut self) {
         unsafe {
-            let mut status: libc::c_int = 0;
+            // Send SIGTERM for graceful shutdown
             libc::kill(self.child_pid, libc::SIGTERM);
-            libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
+
+            // Wait briefly for graceful exit (non-blocking check)
+            let mut status: libc::c_int = 0;
+            let waited = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
+
+            if waited == 0 {
+                // Child still running — give it a moment, then force kill
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let waited2 = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
+                if waited2 == 0 {
+                    libc::kill(self.child_pid, libc::SIGKILL);
+                    // Blocking wait to ensure zombie is reaped
+                    libc::waitpid(self.child_pid, &mut status, 0);
+                }
+            }
         }
     }
 }

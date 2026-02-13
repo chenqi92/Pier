@@ -89,13 +89,21 @@ class GitViewModel: ObservableObject {
         // Default to home dir, will be updated when folder is selected
         repoPath = FileManager.default.homeDirectoryForCurrentUser.path
         checkGitRepo()
+    }
 
-        // Periodic refresh
+    private func startPeriodicRefresh() {
+        // Only poll when in a git repo
+        timer?.cancel()
         timer = Timer.publish(every: 5, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.refresh()
             }
+    }
+
+    private func stopPeriodicRefresh() {
+        timer?.cancel()
+        timer = nil
     }
 
     func setRepoPath(_ path: String) {
@@ -108,10 +116,13 @@ class GitViewModel: ObservableObject {
             let result = await runGit(["rev-parse", "--is-inside-work-tree"])
             isGitRepo = result?.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
             if isGitRepo {
+                startPeriodicRefresh()
                 await loadBranch()
                 await loadStatus()
                 await loadHistory()
                 await loadStashes()
+            } else {
+                stopPeriodicRefresh()
             }
         }
     }
@@ -342,23 +353,12 @@ class GitViewModel: ObservableObject {
     // MARK: - Git Command Runner
 
     private func runGit(_ args: [String]) async -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: repoPath)
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)
-        } catch {
-            return nil
-        }
+        let result = await CommandRunner.shared.run(
+            "git",
+            arguments: args,
+            currentDirectory: repoPath
+        )
+        return result.succeeded ? result.output : nil
     }
 }
 

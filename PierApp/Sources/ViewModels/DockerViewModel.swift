@@ -200,30 +200,8 @@ class DockerViewModel: ObservableObject {
     // MARK: - Helpers
 
     private func runDockerCommand(_ args: [String]) async -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/docker")
-        process.arguments = args
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        // Also check common Docker paths
-        for path in ["/usr/local/bin/docker", "/opt/homebrew/bin/docker", "/usr/bin/docker"] {
-            if FileManager.default.fileExists(atPath: path) {
-                process.executableURL = URL(fileURLWithPath: path)
-                break
-            }
-        }
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            return nil
-        }
+        let result = await CommandRunner.shared.run("docker", arguments: args)
+        return result.succeeded ? result.output : nil
     }
 
     private func parseDockerSize(_ str: String) -> UInt64 {

@@ -8,15 +8,14 @@ class RemoteFileViewModel: ObservableObject {
     @Published var remoteFiles: [RemoteFile] = []
     @Published var transferProgress: TransferProgress? = nil
     @Published var showConnectionSheet = false
+    @Published var statusMessage: String?
 
     // MARK: - Connection
 
     func connect(profile: ServerProfile) {
-        // TODO: Implement SSH connection via Rust FFI
-        // This will create an SSH session and then init SFTP over it
-        isConnected = true
-        currentRemotePath = "/home/\(profile.username)"
-        loadRemoteDirectory()
+        // SFTP connection requires Rust SSH/SFTP FFI — not yet implemented.
+        // Show honest status instead of faking success.
+        statusMessage = "SSH/SFTP connection not yet implemented. Pending Rust FFI integration."
     }
 
     func disconnect() {
@@ -56,50 +55,17 @@ class RemoteFileViewModel: ObservableObject {
     }
 
     func uploadFile(localPath: String) {
-        let fileName = (localPath as NSString).lastPathComponent
-        let remotePath = "\(currentRemotePath)/\(fileName)"
-
-        // Simulate upload progress (real implementation via Rust SFTP)
-        transferProgress = TransferProgress(
-            fileName: fileName,
-            fraction: 0,
-            totalBytes: 0,
-            transferredBytes: 0
-        )
-
-        // TODO: Actual upload via Rust FFI
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            self?.transferProgress = nil
-            self?.loadRemoteDirectory()
-        }
+        statusMessage = "SFTP upload not yet implemented."
     }
 
     func downloadFile(remotePath: String, localPath: String) {
-        let fileName = (remotePath as NSString).lastPathComponent
-
-        transferProgress = TransferProgress(
-            fileName: fileName,
-            fraction: 0,
-            totalBytes: 0,
-            transferredBytes: 0
-        )
-
-        // TODO: Actual download via Rust FFI
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            self?.transferProgress = nil
-        }
+        statusMessage = "SFTP download not yet implemented."
     }
 
     // MARK: - Private
 
     private func loadRemoteDirectory() {
-        // TODO: Use Rust SFTP to list remote directory
-        // For now, show placeholder data when "connected"
-        if isConnected {
-            remoteFiles = [
-                RemoteFile(name: "Documents", path: "\(currentRemotePath)/Documents", isDir: true, size: 0, modified: nil),
-                RemoteFile(name: "config.yml", path: "\(currentRemotePath)/config.yml", isDir: false, size: 1024, modified: nil),
-            ]
-        }
+        // Will use Rust SFTP FFI when implemented
+        statusMessage = "Remote directory listing requires SFTP connection."
     }
 }

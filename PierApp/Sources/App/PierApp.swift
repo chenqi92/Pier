@@ -10,10 +10,6 @@ struct PierApp: App {
         WindowGroup {
             MainView()
                 .frame(minWidth: 1200, minHeight: 700)
-                .onAppear {
-                    // Initialize Rust core
-                    pier_init()
-                }
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
@@ -91,8 +87,9 @@ struct ConnectionSettingsView: View {
 
 struct AISettingsView: View {
     @AppStorage("llmProvider") var llmProvider = "openai"
-    @AppStorage("llmApiKey") var llmApiKey = ""
     @AppStorage("llmModel") var llmModel = "gpt-4"
+    @State private var apiKeyField = ""
+    @State private var saveStatus: String?
 
     var body: some View {
         Form {
@@ -101,10 +98,30 @@ struct AISettingsView: View {
                 Text("Claude").tag("claude")
                 Text("Ollama (Local)").tag("ollama")
             }
-            SecureField("API Key:", text: $llmApiKey)
+            SecureField("API Key:", text: $apiKeyField)
+                .onChange(of: apiKeyField) { _, newValue in
+                    guard !newValue.isEmpty else { return }
+                    do {
+                        try KeychainService.shared.save(key: "llm_api_key", value: newValue)
+                        saveStatus = "✅ Key saved to Keychain"
+                    } catch {
+                        saveStatus = "❌ \(error.localizedDescription)"
+                    }
+                }
             TextField("Model:", text: $llmModel)
+            if let status = saveStatus {
+                Text(status)
+                    .font(.caption)
+                    .foregroundColor(status.hasPrefix("✅") ? .green : .red)
+            }
         }
         .padding()
+        .onAppear {
+            // Load existing key (show placeholder dots, not actual value)
+            if let key = try? KeychainService.shared.load(key: "llm_api_key"), key != nil {
+                apiKeyField = "••••••••"
+            }
+        }
     }
 }
 

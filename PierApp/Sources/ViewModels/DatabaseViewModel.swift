@@ -202,19 +202,6 @@ class DatabaseViewModel: ObservableObject {
         let pw = password ?? currentPassword
         let d = db ?? currentDB
 
-        let process = Process()
-
-        // Find mysql binary
-        var mysqlPath = "/usr/local/bin/mysql"
-        for path in ["/usr/local/bin/mysql", "/opt/homebrew/bin/mysql", "/usr/bin/mysql"] {
-            if FileManager.default.fileExists(atPath: path) {
-                mysqlPath = path
-                break
-            }
-        }
-
-        process.executableURL = URL(fileURLWithPath: mysqlPath)
-
         var args = [
             "-h", h,
             "-P", String(p),
@@ -224,40 +211,29 @@ class DatabaseViewModel: ObservableObject {
             "-e", query
         ]
 
-        if !pw.isEmpty {
-            args.insert(contentsOf: ["-p\(pw)"], at: 6)
-        }
         if !d.isEmpty {
             args.append(contentsOf: ["-D", d])
         }
 
-        process.arguments = args
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-            if process.terminationStatus != 0 {
-                let errorMsg = String(data: stderrData, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown error"
-                return QueryResult(columns: [], rows: [], error: errorMsg)
-            }
-
-            let output = String(data: stdoutData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            return parseTSV(output)
-        } catch {
-            return QueryResult(columns: [], rows: [], error: error.localizedDescription)
+        // Pass password via environment variable (not CLI arg) to prevent
+        // exposure via `ps aux`. MYSQL_PWD is the standard env var for this.
+        var env: [String: String]? = nil
+        if !pw.isEmpty {
+            env = ["MYSQL_PWD": pw]
         }
+
+        let result = await CommandRunner.shared.run(
+            "mysql",
+            arguments: args,
+            environment: env
+        )
+
+        if !result.succeeded {
+            let errorMsg = result.stderr.isEmpty ? "Unknown error" : result.stderr
+            return QueryResult(columns: [], rows: [], error: errorMsg)
+        }
+
+        return parseTSV(result.stdout)
     }
 
     private func parseTSV(_ output: String) -> QueryResult {

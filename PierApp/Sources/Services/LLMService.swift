@@ -1,6 +1,7 @@
 import Foundation
 
 /// Service for interacting with LLM providers (OpenAI, Claude, Ollama).
+@MainActor
 class LLMService: ObservableObject {
     enum Provider: String {
         case openai
@@ -25,7 +26,8 @@ class LLMService: ObservableObject {
     func loadConfiguration() {
         let defaults = UserDefaults.standard
         provider = Provider(rawValue: defaults.string(forKey: "llmProvider") ?? "openai") ?? .openai
-        apiKey = defaults.string(forKey: "llmApiKey") ?? ""
+        // Read API key from Keychain (secure), not UserDefaults (plaintext)
+        apiKey = (try? KeychainService.shared.load(key: "llm_api_key")) ?? ""
         model = defaults.string(forKey: "llmModel") ?? "gpt-4"
 
         switch provider {
