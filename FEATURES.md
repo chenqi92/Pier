@@ -59,6 +59,12 @@ Pier 是一个面向服务器运维场景的 macOS 终端工具。核心价值�
 - [x] MVVM 架构 + Combine 响应式绑定
 - [x] 统一命令执行器（CommandRunner actor）
 
+### 🌍 国际化（i18n）
+- [x] SPM 本地化配置（`defaultLocalization: "en"` + `.process("Resources")`）
+- [x] 英文本地化（`en.lproj/Localizable.strings` — 80 键值）
+- [x] 简体中文本地化（`zh-Hans.lproj/Localizable.strings` — 80 键值）
+- [x] 全部 8 个 Swift 视图文件使用本地化键（Text/Button/.help）
+
 ### 🖥 终端引擎（Rust）
 - [x] VT100/ANSI 终端模拟器（vte 0.15）
 - [x] PTY 进程管理（forkpty + 非阻塞 IO）

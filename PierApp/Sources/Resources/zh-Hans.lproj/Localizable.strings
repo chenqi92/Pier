@@ -1,0 +1,146 @@
+/* Pier Terminal — 简体中文本地化 */
+
+/* ═══════════════════════════════════════
+   主窗口
+   ═══════════════════════════════════════ */
+
+/* 工具栏 */
+"toolbar.toggleFilesBrowser" = "切换文件浏览器";
+"toolbar.newTerminalTab" = "新建终端标签";
+"toolbar.sshConnectionManager" = "SSH 连接管理";
+"toolbar.toggleRightPanel" = "切换右侧面板";
+
+/* 终端容器 */
+"terminal.noSessions" = "无终端会话";
+"terminal.newTerminal" = "新建终端";
+"terminal.sessionCount" = "%lld 个会话";
+
+/* ═══════════════════════════════════════
+   文件面板
+   ═══════════════════════════════════════ */
+
+"files.searchPlaceholder" = "搜索文件...";
+"files.home" = "主目录";
+"files.desktop" = "桌面";
+"files.projects" = "项目";
+"files.chooseFolder" = "选择文件夹...";
+
+/* 右键菜单 */
+"files.openInTerminal" = "在终端中打开";
+"files.revealInFinder" = "在 Finder 中显示";
+"files.copyPath" = "复制路径";
+"files.copyName" = "复制名称";
+"files.previewMarkdown" = "预览 Markdown";
+"files.delete" = "删除";
+
+/* ═══════════════════════════════════════
+   右侧面板标签
+   ═══════════════════════════════════════ */
+
+"panel.markdown" = "Markdown";
+"panel.sftp" = "SFTP";
+"panel.docker" = "Docker";
+"panel.git" = "Git";
+"panel.database" = "数据库";
+"panel.logs" = "日志";
+
+/* ═══════════════════════════════════════
+   Docker 面板
+   ═══════════════════════════════════════ */
+
+"docker.title" = "Docker";
+"docker.containers" = "容器";
+"docker.images" = "镜像";
+"docker.volumes" = "存储卷";
+"docker.noContainers" = "暂无容器";
+"docker.notAvailable" = "Docker 不可用";
+"docker.notAvailableDesc" = "请确保 Docker Desktop\n正在运行";
+"docker.retry" = "重试";
+"docker.start" = "启动";
+"docker.stop" = "停止";
+"docker.restart" = "重启";
+"docker.viewLogs" = "查看日志";
+"docker.execShell" = "进入终端";
+"docker.remove" = "删除";
+"docker.runContainer" = "运行容器";
+
+/* ═══════════════════════════════════════
+   Git 面板
+   ═══════════════════════════════════════ */
+
+"git.title" = "Git";
+"git.changes" = "变更";
+"git.history" = "历史";
+"git.stash" = "暂存";
+"git.stageAll" = "全部暂存";
+"git.commit" = "提交";
+"git.pull" = "拉取";
+"git.push" = "推送";
+"git.stage" = "暂存";
+"git.unstage" = "取消暂存";
+"git.showDiff" = "查看差异";
+"git.discardChanges" = "放弃更改";
+"git.copyHash" = "复制哈希";
+"git.checkout" = "检出";
+"git.cherryPick" = "Cherry-pick";
+"git.stashChanges" = "暂存更改";
+"git.apply" = "应用";
+"git.pop" = "弹出";
+"git.drop" = "丢弃";
+"git.notARepo" = "非 Git 仓库";
+"git.initRepo" = "初始化仓库";
+
+/* ═══════════════════════════════════════
+   数据库面板
+   ═══════════════════════════════════════ */
+
+"db.title" = "MySQL";
+"db.savedConnections" = "已保存连接";
+"db.newConnection" = "新建连接";
+"db.host" = "主机";
+"db.port" = "端口";
+"db.user" = "用户名";
+"db.password" = "密码";
+"db.database" = "数据库（可选）";
+"db.test" = "测试";
+"db.connect" = "连接";
+"db.disconnect" = "断开";
+"db.run" = "执行";
+"db.rowCount" = "%lld 行";
+"db.runQueryHint" = "执行查询以查看结果";
+"db.showCreateTable" = "显示建表语句";
+"db.dropTable" = "删除表";
+
+/* ═══════════════════════════════════════
+   日志查看器
+   ═══════════════════════════════════════ */
+
+"log.title" = "日志查看器";
+"log.openFile" = "打开日志文件";
+"log.autoScroll" = "自动滚动";
+"log.clear" = "清除";
+"log.noFile" = "未打开日志文件";
+"log.noFileDesc" = "打开日志文件或\n从终端导入输出";
+"log.openFileButton" = "打开文件";
+"log.lineCount" = "%lld/%lld 行";
+
+/* ═══════════════════════════════════════
+   SFTP 面板
+   ═══════════════════════════════════════ */
+
+"sftp.notConnected" = "未连接";
+"sftp.selectMarkdown" = "从文件浏览器中\n选择 Markdown 文件";
+"sftp.connectToServer" = "连接到服务器";
+
+/* ═══════════════════════════════════════
+   设置
+   ═══════════════════════════════════════ */
+
+"settings.newTerminalTab" = "新建终端标签";
+"settings.newSSHConnection" = "新建 SSH 连接";
+"settings.fontSize" = "字体大小：%lld";
+"settings.sshProfiles" = "SSH 连接配置";
+"settings.provider" = "提供商：";
+"settings.apiKey" = "API 密钥：";
+"settings.model" = "模型：";
+"settings.keySaved" = "✅ 密钥已保存到钥匙串";

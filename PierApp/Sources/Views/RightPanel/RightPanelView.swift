@@ -122,7 +122,7 @@ struct MarkdownPreviewView: View {
                 Image(systemName: "doc.text")
                     .font(.system(size: 36))
                     .foregroundColor(.secondary)
-                Text("Select a Markdown file\nfrom the file browser")
+                Text("sftp.selectMarkdown")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -210,10 +210,10 @@ struct RemoteFileView: View {
                     Image(systemName: "network.slash")
                         .font(.system(size: 36))
                         .foregroundColor(.secondary)
-                    Text("Not Connected")
+                    Text("sftp.notConnected")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Button("Connect to Server") {
+                    Button("sftp.connectToServer") {
                         viewModel.showConnectionSheet = true
                     }
                     .buttonStyle(.borderedProminent)

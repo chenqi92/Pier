@@ -37,7 +37,7 @@ struct LogViewerView: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .foregroundColor(.green)
                 .font(.caption)
-            Text("Log Viewer")
+            Text("log.title")
                 .font(.caption)
                 .fontWeight(.medium)
 
@@ -48,7 +48,7 @@ struct LogViewerView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help("Open Log File")
+            .help(String(localized: "log.openFile"))
 
             Button(action: { viewModel.toggleAutoScroll() }) {
                 Image(systemName: viewModel.autoScroll ? "arrow.down.to.line.compact" : "arrow.down.to.line")
@@ -56,14 +56,14 @@ struct LogViewerView: View {
                     .foregroundColor(viewModel.autoScroll ? .green : .secondary)
             }
             .buttonStyle(.borderless)
-            .help("Auto-scroll")
+            .help(String(localized: "log.autoScroll"))
 
             Button(action: { viewModel.clearLog() }) {
                 Image(systemName: "trash")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help("Clear")
+            .help(String(localized: "log.clear"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -202,16 +202,16 @@ struct LogViewerView: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 36))
                 .foregroundColor(.secondary)
-            Text("No Log File Opened")
+            Text("log.noFile")
                 .font(.caption)
                 .foregroundColor(.secondary)
-            Text("Open a log file or\npipe output from terminal")
+            Text("log.noFileDesc")
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 8) {
-                Button("Open File") { viewModel.openLogFile() }
+                Button("log.openFileButton") { viewModel.openLogFile() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }

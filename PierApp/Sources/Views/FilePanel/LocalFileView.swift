@@ -43,11 +43,11 @@ struct LocalFileView: View {
             Spacer()
 
             Menu {
-                Button("Home") { viewModel.navigateTo(FileManager.default.homeDirectoryForCurrentUser.path) }
-                Button("Desktop") { viewModel.navigateTo(NSHomeDirectory() + "/Desktop") }
-                Button("Projects") { viewModel.navigateTo(NSHomeDirectory() + "/Projects") }
+                Button("files.home") { viewModel.navigateTo(FileManager.default.homeDirectoryForCurrentUser.path) }
+                Button("files.desktop") { viewModel.navigateTo(NSHomeDirectory() + "/Desktop") }
+                Button("files.projects") { viewModel.navigateTo(NSHomeDirectory() + "/Projects") }
                 Divider()
-                Button("Choose Folder...") { viewModel.openFolderPicker() }
+                Button("files.chooseFolder") { viewModel.openFolderPicker() }
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.caption)
@@ -72,7 +72,7 @@ struct LocalFileView: View {
                 .foregroundColor(.secondary)
                 .font(.caption)
 
-            TextField("Search files...", text: $searchText)
+            TextField("files.searchPlaceholder", text: $searchText)
                 .textFieldStyle(.plain)
                 .font(.caption)
                 .onChange(of: searchText) { _, newValue in
@@ -107,7 +107,7 @@ struct LocalFileView: View {
 
     @ViewBuilder
     private func fileContextMenu(for item: FileItem) -> some View {
-        Button("Open in Terminal") {
+        Button("files.openInTerminal") {
             if item.isDirectory {
                 NotificationCenter.default.post(
                     name: .openPathInTerminal,
@@ -116,18 +116,18 @@ struct LocalFileView: View {
             }
         }
 
-        Button("Reveal in Finder") {
+        Button("files.revealInFinder") {
             NSWorkspace.shared.selectFile(item.path, inFileViewerRootedAtPath: "")
         }
 
         Divider()
 
-        Button("Copy Path") {
+        Button("files.copyPath") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.path, forType: .string)
         }
 
-        Button("Copy Name") {
+        Button("files.copyName") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.name, forType: .string)
         }
@@ -135,7 +135,7 @@ struct LocalFileView: View {
         Divider()
 
         if !item.isDirectory && item.name.hasSuffix(".md") {
-            Button("Preview Markdown") {
+            Button("files.previewMarkdown") {
                 NotificationCenter.default.post(
                     name: .previewMarkdown,
                     object: item.path
@@ -145,7 +145,7 @@ struct LocalFileView: View {
 
         Divider()
 
-        Button("Delete", role: .destructive) {
+        Button("files.delete", role: .destructive) {
             viewModel.deleteFile(item)
         }
     }

@@ -21,9 +21,9 @@ struct GitPanelView: View {
 
                 // Tab: Changes / History / Stash
                 Picker("", selection: $viewModel.selectedTab) {
-                    Text("Changes").tag(GitTab.changes)
-                    Text("History").tag(GitTab.history)
-                    Text("Stash").tag(GitTab.stash)
+                    Text("git.changes").tag(GitTab.changes)
+                    Text("git.history").tag(GitTab.history)
+                    Text("git.stash").tag(GitTab.stash)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 8)
@@ -50,7 +50,7 @@ struct GitPanelView: View {
             Image(systemName: "arrow.triangle.branch")
                 .foregroundColor(.orange)
                 .font(.caption)
-            Text("Git")
+            Text("git.title")
                 .font(.caption)
                 .fontWeight(.medium)
             Spacer()
@@ -105,14 +105,14 @@ struct GitPanelView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help("Git Pull")
+            .help(String(localized: "git.pull"))
 
             Button(action: { viewModel.push() }) {
                 Image(systemName: "arrow.up.circle")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help("Git Push")
+            .help(String(localized: "git.push"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -183,7 +183,7 @@ struct GitPanelView: View {
                         .foregroundColor(.orange)
                 }
                 .buttonStyle(.borderless)
-                .help("Unstage")
+                .help(String(localized: "git.unstage"))
             } else {
                 Button(action: { viewModel.stageFile(file.path) }) {
                     Image(systemName: "plus.circle")
@@ -191,18 +191,18 @@ struct GitPanelView: View {
                         .foregroundColor(.green)
                 }
                 .buttonStyle(.borderless)
-                .help("Stage")
+                .help(String(localized: "git.stage"))
             }
         }
         .padding(.vertical, 1)
         .contextMenu {
-            Button("Show Diff") { viewModel.showDiff(file.path) }
+            Button("git.showDiff") { viewModel.showDiff(file.path) }
             Divider()
             if staged {
-                Button("Unstage") { viewModel.unstageFile(file.path) }
+                Button("git.unstage") { viewModel.unstageFile(file.path) }
             } else {
-                Button("Stage") { viewModel.stageFile(file.path) }
-                Button("Discard Changes", role: .destructive) { viewModel.discardChanges(file.path) }
+                Button("git.stage") { viewModel.stageFile(file.path) }
+                Button("git.discardChanges", role: .destructive) { viewModel.discardChanges(file.path) }
             }
         }
     }
@@ -218,13 +218,13 @@ struct GitPanelView: View {
                 .cornerRadius(4)
 
             HStack {
-                Button("Stage All") { viewModel.stageAll() }
+                Button("git.stageAll") { viewModel.stageAll() }
                     .buttonStyle(.borderless)
                     .font(.caption)
 
                 Spacer()
 
-                Button("Commit") { viewModel.commit() }
+                Button("git.commit") { viewModel.commit() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled(viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty)
@@ -258,12 +258,12 @@ struct GitPanelView: View {
             }
             .padding(.vertical, 2)
             .contextMenu {
-                Button("Copy Hash") {
+                Button("git.copyHash") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(commit.hash, forType: .string)
                 }
-                Button("Checkout") { viewModel.checkout(commit.hash) }
-                Button("Cherry-pick") { viewModel.cherryPick(commit.hash) }
+                Button("git.checkout") { viewModel.checkout(commit.hash) }
+                Button("git.cherryPick") { viewModel.cherryPick(commit.hash) }
             }
         }
         .listStyle(.plain)
@@ -275,7 +275,7 @@ struct GitPanelView: View {
         VStack(spacing: 0) {
             HStack {
                 Spacer()
-                Button("Stash Changes") { viewModel.stashChanges() }
+                Button("git.stashChanges") { viewModel.stashChanges() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
@@ -298,10 +298,10 @@ struct GitPanelView: View {
                     Spacer()
                 }
                 .contextMenu {
-                    Button("Apply") { viewModel.applyStash(stash.index) }
-                    Button("Pop") { viewModel.popStash(stash.index) }
+                    Button("git.apply") { viewModel.applyStash(stash.index) }
+                    Button("git.pop") { viewModel.popStash(stash.index) }
                     Divider()
-                    Button("Drop", role: .destructive) { viewModel.dropStash(stash.index) }
+                    Button("git.drop", role: .destructive) { viewModel.dropStash(stash.index) }
                 }
             }
             .listStyle(.plain)
@@ -315,10 +315,10 @@ struct GitPanelView: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 36))
                 .foregroundColor(.secondary)
-            Text("Not a Git Repository")
-                .font(.caption)
+            Text("git.notARepo")
+                .font(.title3)
                 .foregroundColor(.secondary)
-            Button("Initialize Repository") { viewModel.initRepo() }
+            Button("git.initRepo") { viewModel.initRepo() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }

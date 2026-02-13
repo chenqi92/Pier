@@ -1,0 +1,146 @@
+/* Pier Terminal — English Localization */
+
+/* ═══════════════════════════════════════
+   Main Window
+   ═══════════════════════════════════════ */
+
+/* Toolbar */
+"toolbar.toggleFilesBrowser" = "Toggle file browser";
+"toolbar.newTerminalTab" = "New terminal tab";
+"toolbar.sshConnectionManager" = "SSH connection manager";
+"toolbar.toggleRightPanel" = "Toggle right panel";
+
+/* Terminal Container */
+"terminal.noSessions" = "No Terminal Sessions";
+"terminal.newTerminal" = "New Terminal";
+"terminal.sessionCount" = "%lld session(s)";
+
+/* ═══════════════════════════════════════
+   File Panel
+   ═══════════════════════════════════════ */
+
+"files.searchPlaceholder" = "Search files...";
+"files.home" = "Home";
+"files.desktop" = "Desktop";
+"files.projects" = "Projects";
+"files.chooseFolder" = "Choose Folder...";
+
+/* Context Menu */
+"files.openInTerminal" = "Open in Terminal";
+"files.revealInFinder" = "Reveal in Finder";
+"files.copyPath" = "Copy Path";
+"files.copyName" = "Copy Name";
+"files.previewMarkdown" = "Preview Markdown";
+"files.delete" = "Delete";
+
+/* ═══════════════════════════════════════
+   Right Panel Tabs
+   ═══════════════════════════════════════ */
+
+"panel.markdown" = "Markdown";
+"panel.sftp" = "SFTP";
+"panel.docker" = "Docker";
+"panel.git" = "Git";
+"panel.database" = "Database";
+"panel.logs" = "Logs";
+
+/* ═══════════════════════════════════════
+   Docker Panel
+   ═══════════════════════════════════════ */
+
+"docker.title" = "Docker";
+"docker.containers" = "Containers";
+"docker.images" = "Images";
+"docker.volumes" = "Volumes";
+"docker.noContainers" = "No containers";
+"docker.notAvailable" = "Docker Not Available";
+"docker.notAvailableDesc" = "Make sure Docker Desktop\nis running";
+"docker.retry" = "Retry";
+"docker.start" = "Start";
+"docker.stop" = "Stop";
+"docker.restart" = "Restart";
+"docker.viewLogs" = "View Logs";
+"docker.execShell" = "Exec Shell";
+"docker.remove" = "Remove";
+"docker.runContainer" = "Run Container";
+
+/* ═══════════════════════════════════════
+   Git Panel
+   ═══════════════════════════════════════ */
+
+"git.title" = "Git";
+"git.changes" = "Changes";
+"git.history" = "History";
+"git.stash" = "Stash";
+"git.stageAll" = "Stage All";
+"git.commit" = "Commit";
+"git.pull" = "Git Pull";
+"git.push" = "Git Push";
+"git.stage" = "Stage";
+"git.unstage" = "Unstage";
+"git.showDiff" = "Show Diff";
+"git.discardChanges" = "Discard Changes";
+"git.copyHash" = "Copy Hash";
+"git.checkout" = "Checkout";
+"git.cherryPick" = "Cherry-pick";
+"git.stashChanges" = "Stash Changes";
+"git.apply" = "Apply";
+"git.pop" = "Pop";
+"git.drop" = "Drop";
+"git.notARepo" = "Not a Git Repository";
+"git.initRepo" = "Initialize Repository";
+
+/* ═══════════════════════════════════════
+   Database Panel
+   ═══════════════════════════════════════ */
+
+"db.title" = "MySQL";
+"db.savedConnections" = "Saved Connections";
+"db.newConnection" = "New Connection";
+"db.host" = "Host";
+"db.port" = "Port";
+"db.user" = "User";
+"db.password" = "Password";
+"db.database" = "Database (optional)";
+"db.test" = "Test";
+"db.connect" = "Connect";
+"db.disconnect" = "Disconnect";
+"db.run" = "Run";
+"db.rowCount" = "%lld rows";
+"db.runQueryHint" = "Run a query to see results";
+"db.showCreateTable" = "Show CREATE TABLE";
+"db.dropTable" = "Drop Table";
+
+/* ═══════════════════════════════════════
+   Log Viewer
+   ═══════════════════════════════════════ */
+
+"log.title" = "Log Viewer";
+"log.openFile" = "Open Log File";
+"log.autoScroll" = "Auto-scroll";
+"log.clear" = "Clear";
+"log.noFile" = "No Log File Opened";
+"log.noFileDesc" = "Open a log file or\npipe output from terminal";
+"log.openFileButton" = "Open File";
+"log.lineCount" = "%lld/%lld lines";
+
+/* ═══════════════════════════════════════
+   SFTP Panel
+   ═══════════════════════════════════════ */
+
+"sftp.notConnected" = "Not Connected";
+"sftp.selectMarkdown" = "Select a Markdown file\nfrom the file browser";
+"sftp.connectToServer" = "Connect to Server";
+
+/* ═══════════════════════════════════════
+   Settings
+   ═══════════════════════════════════════ */
+
+"settings.newTerminalTab" = "New Terminal Tab";
+"settings.newSSHConnection" = "New SSH Connection";
+"settings.fontSize" = "Font Size: %lld";
+"settings.sshProfiles" = "SSH Connection Profiles";
+"settings.provider" = "Provider:";
+"settings.apiKey" = "API Key:";
+"settings.model" = "Model:";
+"settings.keySaved" = "✅ Key saved to Keychain";

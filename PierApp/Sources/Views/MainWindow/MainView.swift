@@ -43,24 +43,24 @@ struct MainView: View {
                 Button(action: { withAnimation { showLeftPanel.toggle() } }) {
                     Image(systemName: "sidebar.left")
                 }
-                .help("Toggle file browser")
+                .help(String(localized: "toolbar.toggleFilesBrowser"))
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
                 Button(action: { terminalViewModel.addNewTab() }) {
                     Image(systemName: "plus")
                 }
-                .help("New terminal tab")
+                .help(String(localized: "toolbar.newTerminalTab"))
 
                 Button(action: {}) {
                     Image(systemName: "network")
                 }
-                .help("SSH connection manager")
+                .help(String(localized: "toolbar.sshConnectionManager"))
 
                 Button(action: { withAnimation { showRightPanel.toggle() } }) {
                     Image(systemName: "sidebar.right")
                 }
-                .help("Toggle right panel")
+                .help(String(localized: "toolbar.toggleRightPanel"))
             }
         }
         .frame(minWidth: 900, minHeight: 500)
@@ -120,10 +120,10 @@ struct TerminalContainerView: View {
             Image(systemName: "terminal")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
-            Text("No Terminal Sessions")
+            Text("terminal.noSessions")
                 .font(.title3)
                 .foregroundColor(.secondary)
-            Button("New Terminal") {
+            Button("terminal.newTerminal") {
                 viewModel.addNewTab()
             }
             .buttonStyle(.borderedProminent)
@@ -215,7 +215,7 @@ struct StatusBarView: View {
 
             Spacer()
 
-            Text("\(viewModel.tabs.count) session(s)")
+            Text("terminal.sessionCount \(viewModel.tabs.count)")
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }

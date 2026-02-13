@@ -17,12 +17,12 @@ struct PierApp: App {
         .commands {
             // Custom menu items
             CommandGroup(after: .newItem) {
-                Button("New Terminal Tab") {
+                Button("settings.newTerminalTab") {
                     NotificationCenter.default.post(name: .newTerminalTab, object: nil)
                 }
                 .keyboardShortcut("t", modifiers: .command)
 
-                Button("New SSH Connection") {
+                Button("settings.newSSHConnection") {
                     NotificationCenter.default.post(name: .newSSHConnection, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
@@ -80,7 +80,7 @@ struct AppearanceSettingsView: View {
 
 struct ConnectionSettingsView: View {
     var body: some View {
-        Text("SSH Connection Profiles")
+        Text("settings.sshProfiles")
             .padding()
     }
 }
@@ -103,7 +103,7 @@ struct AISettingsView: View {
                     guard !newValue.isEmpty else { return }
                     do {
                         try KeychainService.shared.save(key: "llm_api_key", value: newValue)
-                        saveStatus = "✅ Key saved to Keychain"
+                        saveStatus = String(localized: "settings.keySaved")
                     } catch {
                         saveStatus = "❌ \(error.localizedDescription)"
                     }

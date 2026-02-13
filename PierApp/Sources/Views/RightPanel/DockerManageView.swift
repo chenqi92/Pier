@@ -16,9 +16,9 @@ struct DockerManageView: View {
             } else {
                 // Tab: Containers / Images / Volumes
                 Picker("", selection: $viewModel.selectedTab) {
-                    Text("Containers").tag(DockerTab.containers)
-                    Text("Images").tag(DockerTab.images)
-                    Text("Volumes").tag(DockerTab.volumes)
+                    Text("docker.containers").tag(DockerTab.containers)
+                    Text("docker.images").tag(DockerTab.images)
+                    Text("docker.volumes").tag(DockerTab.volumes)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 8)
@@ -45,7 +45,7 @@ struct DockerManageView: View {
             Image(systemName: "shippingbox.fill")
                 .foregroundColor(.blue)
                 .font(.caption)
-            Text("Docker")
+            Text("docker.title")
                 .font(.caption)
                 .fontWeight(.medium)
             Spacer()
@@ -97,14 +97,14 @@ struct DockerManageView: View {
                                 .foregroundColor(.red)
                         }
                         .buttonStyle(.borderless)
-                        .help("Stop")
+                        .help(String(localized: "docker.stop"))
 
                         Button(action: { viewModel.restartContainer(container.id) }) {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 9))
                         }
                         .buttonStyle(.borderless)
-                        .help("Restart")
+                        .help(String(localized: "docker.restart"))
                     } else {
                         Button(action: { viewModel.startContainer(container.id) }) {
                             Image(systemName: "play.fill")
@@ -112,7 +112,7 @@ struct DockerManageView: View {
                                 .foregroundColor(.green)
                         }
                         .buttonStyle(.borderless)
-                        .help("Start")
+                        .help(String(localized: "docker.start"))
                     }
 
                     Button(action: { viewModel.viewContainerLogs(container.id) }) {
@@ -120,25 +120,25 @@ struct DockerManageView: View {
                             .font(.system(size: 9))
                     }
                     .buttonStyle(.borderless)
-                    .help("View Logs")
+                    .help(String(localized: "docker.viewLogs"))
                 }
                 .padding(.vertical, 2)
                 .contextMenu {
-                    Button("Start") { viewModel.startContainer(container.id) }
-                        .disabled(container.isRunning)
-                    Button("Stop") { viewModel.stopContainer(container.id) }
-                        .disabled(!container.isRunning)
-                    Button("Restart") { viewModel.restartContainer(container.id) }
+                    Button("docker.start") { viewModel.startContainer(container.id) }
                     Divider()
-                    Button("View Logs") { viewModel.viewContainerLogs(container.id) }
-                    Button("Exec Shell") {
+                    Button("docker.stop") { viewModel.stopContainer(container.id) }
+                    Divider()
+                    Button("docker.restart") { viewModel.restartContainer(container.id) }
+                    Divider()
+                    Button("docker.viewLogs") { viewModel.viewContainerLogs(container.id) }
+                    Button("docker.execShell") {
                         NotificationCenter.default.post(
                             name: .dockerExecShell,
                             object: container.id
                         )
                     }
                     Divider()
-                    Button("Remove", role: .destructive) {
+                    Button("docker.remove", role: .destructive) {
                         viewModel.removeContainer(container.id)
                     }
                 }
@@ -147,7 +147,7 @@ struct DockerManageView: View {
         .listStyle(.plain)
         .overlay {
             if viewModel.containers.isEmpty && !viewModel.isLoading {
-                Text("No containers")
+                Text("docker.noContainers")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -186,9 +186,9 @@ struct DockerManageView: View {
                 }
                 .padding(.vertical, 2)
                 .contextMenu {
-                    Button("Run Container") { viewModel.runImage(image.id) }
+                    Button("docker.runContainer") { viewModel.runImage(image.id) }
                     Divider()
-                    Button("Remove", role: .destructive) { viewModel.removeImage(image.id) }
+                    Button("docker.remove", role: .destructive) { viewModel.removeImage(image.id) }
                 }
             }
         }
@@ -228,14 +228,14 @@ struct DockerManageView: View {
             Image(systemName: "shippingbox.circle")
                 .font(.system(size: 36))
                 .foregroundColor(.secondary)
-            Text("Docker Not Available")
-                .font(.caption)
+            Text("docker.notAvailable")
+                .font(.title3)
                 .foregroundColor(.secondary)
-            Text("Make sure Docker Desktop\nis running")
+            Text("docker.notAvailableDesc")
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Retry") { viewModel.checkDockerAvailability() }
+            Button("docker.retry") { viewModel.checkDockerAvailability() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }

@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "PierApp",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14)
     ],
@@ -19,6 +20,9 @@ let package = Package(
             name: "PierApp",
             dependencies: ["CPierCore"],
             path: "PierApp/Sources",
+            resources: [
+                .process("Resources"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ],

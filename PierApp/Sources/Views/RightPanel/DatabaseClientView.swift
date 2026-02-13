@@ -38,7 +38,7 @@ struct DatabaseClientView: View {
             Image(systemName: "cylinder.fill")
                 .foregroundColor(.cyan)
                 .font(.caption)
-            Text("MySQL")
+            Text("db.title")
                 .font(.caption)
                 .fontWeight(.medium)
 
@@ -59,7 +59,7 @@ struct DatabaseClientView: View {
                         .foregroundColor(.red)
                 }
                 .buttonStyle(.borderless)
-                .help("Disconnect")
+                .help(String(localized: "db.disconnect"))
             }
         }
         .padding(.horizontal, 12)
@@ -73,7 +73,7 @@ struct DatabaseClientView: View {
             // Saved connections
             if !viewModel.savedConnections.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Saved Connections")
+                    Text("db.savedConnections")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
 
@@ -106,19 +106,19 @@ struct DatabaseClientView: View {
 
             // New connection form
             VStack(alignment: .leading, spacing: 8) {
-                Text("New Connection")
+                Text("db.newConnection")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Host").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text("db.host").font(.system(size: 9)).foregroundColor(.secondary)
                         TextField("localhost", text: $viewModel.formHost)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Port").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text("db.port").font(.system(size: 9)).foregroundColor(.secondary)
                         TextField("3306", text: $viewModel.formPort)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
@@ -128,13 +128,13 @@ struct DatabaseClientView: View {
 
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("User").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text("db.user").font(.system(size: 9)).foregroundColor(.secondary)
                         TextField("root", text: $viewModel.formUsername)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Password").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text("db.password").font(.system(size: 9)).foregroundColor(.secondary)
                         SecureField("", text: $viewModel.formPassword)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
@@ -142,7 +142,7 @@ struct DatabaseClientView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Database (optional)").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("db.database").font(.system(size: 9)).foregroundColor(.secondary)
                     TextField("", text: $viewModel.formDatabase)
                         .textFieldStyle(.roundedBorder)
                         .font(.caption)
@@ -156,10 +156,10 @@ struct DatabaseClientView: View {
 
                 HStack {
                     Spacer()
-                    Button("Test") { viewModel.testConnection() }
+                    Button("db.test") { viewModel.testConnection() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                    Button("Connect") { viewModel.connect() }
+                    Button("db.connect") { viewModel.connect() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .disabled(viewModel.formHost.isEmpty || viewModel.formUsername.isEmpty)
@@ -209,12 +209,12 @@ struct DatabaseClientView: View {
                         viewModel.queryText = "DESCRIBE `\(table)`;"
                         viewModel.executeQuery()
                     }
-                    Button("Show CREATE TABLE") {
+                    Button("db.showCreateTable") {
                         viewModel.queryText = "SHOW CREATE TABLE `\(table)`;"
                         viewModel.executeQuery()
                     }
                     Divider()
-                    Button("Drop Table", role: .destructive) {
+                    Button("db.dropTable", role: .destructive) {
                         viewModel.queryText = "DROP TABLE `\(table)`;"
                     }
                 }
@@ -259,7 +259,7 @@ struct DatabaseClientView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 8))
-                        Text("Run")
+                        Text("db.run")
                             .font(.caption)
                     }
                 }
@@ -326,7 +326,7 @@ struct DatabaseClientView: View {
                 }
                 .textSelection(.enabled)
             } else {
-                Text("Run a query to see results")
+                Text("db.runQueryHint")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
