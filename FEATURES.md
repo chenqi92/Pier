@@ -2,6 +2,52 @@
 
 > macOS 终端管理工具 · Bundle ID: `com.kkape.pier`
 
+---
+
+## 🧭 产品定位
+
+Pier 是一个面向服务器运维场景的 macOS 终端工具。核心价值：
+
+**通过 SSH 连接到远程服务器后，自动探测服务器上安装的服务（MySQL、Redis、Docker 等），提供可视化操作面板 — 解决这些服务端口不对外开放、无法使用远程 GUI 客户端的问题。**
+
+---
+
+## 📐 架构设计
+
+### 右侧面板工具分类
+
+右侧面板的工具按 **运行上下文** 分为两类：
+
+#### 🌐 远程上下文工具（需要活跃的 SSH 连接）
+
+这些工具 **依赖当前 SSH 会话**，通过 SSH 隧道或远程命令访问服务器上的服务。解决的核心问题：服务端口仅监听 `127.0.0.1`，外部无法直接连接。
+
+| 工具 | 远程探测方式 | 访问方式 |
+|------|-------------|---------|
+| **MySQL 客户端** | `which mysql && mysql --version` | SSH 隧道(L3306) → 本地连接 |
+| **Redis 客户端** | `which redis-cli && redis-cli ping` | SSH 隧道(L6379) → 本地连接 |
+| **PostgreSQL 客户端** | `which psql && psql --version` | SSH 隧道(L5432) → 本地连接 |
+| **Docker 管理** | `which docker && docker info` | SSH exec → 远程 docker CLI |
+| **日志查看器** | 检查常见日志路径 | SSH exec → `tail -f` |
+| **SFTP 文件管理** | SFTP 子系统 | SSH → SFTP channel |
+
+**工作流程**:
+1. 用户通过 SSH 连接到服务器
+2. Pier 自动在远程执行服务发现脚本
+3. 右侧面板仅显示该服务器上 **实际可用** 的工具标签
+4. 工具通过 SSH 隧道或 SSH exec 与远程服务交互
+
+#### 💻 本地上下文工具（无需 SSH 连接）
+
+这些工具在本地运行，不依赖远程服务器。
+
+| 工具 | 说明 |
+|------|------|
+| **Markdown 预览** | 本地 .md 文件预览与渲染 |
+| **Git 面板** | 本地 Git 仓库状态、提交、分支管理 |
+
+---
+
 ## ✅ 已完成功能
 
 ### 🏗 基础架构
@@ -11,6 +57,7 @@
 - [x] Swift 桥接封装（RustBridge.swift）
 - [x] 三栏布局框架（HSplitView）
 - [x] MVVM 架构 + Combine 响应式绑定
+- [x] 统一命令执行器（CommandRunner actor）
 
 ### 🖥 终端引擎（Rust）
 - [x] VT100/ANSI 终端模拟器（vte 0.15）
@@ -21,7 +68,6 @@
 - [x] SSH 连接管理（russh 0.57）
 - [x] 密码认证 / 密钥认证
 - [x] SFTP 文件操作（列目录 / 上传 / 下载 / 删除 / 创建目录）
-- [x] 远程文件浏览器 UI
 
 ### 🔍 文件系统
 - [x] 本地文件搜索引擎（ignore crate，兼容 .gitignore）
@@ -31,15 +77,15 @@
 
 ### 🔒 安全
 - [x] AES-256-GCM 加密/解密（ring crate）
-- [x] macOS Keychain 凭据存储
+- [x] macOS Keychain 凭据存储（API Key + SSH 密码）
 
-### 📱 右侧面板（6 个模式）
-- [x] **Markdown 预览** — AttributedString 渲染
-- [x] **SFTP 文件管理** — 远程目录浏览 + 文件传输进度
-- [x] **Docker 管理** — 容器/镜像/Volumes 管理，启动/停止/重启/删除/日志
-- [x] **Git 面板** — 分支状态、暂存区、提交历史、Stash、Push/Pull
-- [x] **MySQL 客户端** — 连接管理、表浏览、SQL 编辑器、表格化结果
-- [x] **日志查看器** — 实时追踪(tail -f)、日志级别着色、文本过滤
+### 📱 右侧面板 UI（框架已就绪，待集成远程上下文）
+- [x] 面板标签切换框架
+- [x] Markdown 预览 UI（本地文件，AttributedString 渲染）
+- [x] Docker 管理 UI（容器/镜像/Volumes）
+- [x] Git 面板 UI（分支状态、提交历史、Stash）
+- [x] MySQL 客户端 UI（表浏览、SQL 编辑器、表格化结果）
+- [x] 日志查看器 UI（日志级别着色、文本过滤）
 
 ### 🤖 AI 集成
 - [x] LLM 服务抽象（OpenAI / Claude / Ollama 接口）
@@ -55,6 +101,22 @@
 
 ## 🔲 待完成功能
 
+### 🌐 远程服务发现与隧道（核心特性，高优先级）
+- [ ] SSH 连接后 **自动探测** 远程服务器已安装的服务
+- [ ] SSH 本地端口转发（`-L` 隧道），用于 MySQL/Redis/PostgreSQL
+- [ ] 右侧面板 **动态标签**：仅显示已探测到的服务
+- [ ] 远程服务状态指示器（运行中 / 已停止 / 未安装）
+
+### 🗄️ 数据库客户端（远程上下文）
+- [ ] 通过 SSH 隧道连接远程 MySQL（`127.0.0.1:转发端口`）
+- [ ] Redis 客户端（`redis-cli` 交互 / 键值浏览 / TTL 管理）
+- [ ] PostgreSQL 客户端
+- [ ] SQLite 本地客户端（本地上下文）
+- [ ] SQL 语法高亮
+- [ ] 查询历史记录
+- [ ] 表结构可视化（ER 图）
+- [ ] 数据导出（CSV / JSON）
+
 ### 🖥 终端渲染（高优先级）
 - [ ] Core Text / Metal 高性能终端文本渲染
 - [ ] 终端颜色主题（ANSI 256 色 / TrueColor）
@@ -67,8 +129,22 @@
 - [ ] SSH Agent Forwarding
 - [ ] SSH Known Hosts 验证
 - [ ] SSH 连接管理器 UI（保存的服务器列表）
-- [ ] SSH 隧道 / 端口转发
+- [ ] SSH 隧道 / 端口转发管理 UI
 - [ ] SSH 密钥管理界面
+
+### 📦 Docker 增强（远程上下文）
+- [ ] 通过 SSH exec 执行远程 docker 命令
+- [ ] Docker Compose 支持
+- [ ] 容器资源监控（CPU / 内存）
+- [ ] 容器网络管理
+- [ ] 容器实时日志（通过 SSH 的 `docker logs -f`）
+
+### 📋 日志增强（远程上下文）
+- [ ] 通过 SSH 追踪远程日志文件
+- [ ] 多文件同时监控
+- [ ] JSON 日志格式化
+- [ ] 正则表达式过滤
+- [ ] 日志导出
 
 ### 📝 命令行增强
 - [ ] 命令自动补全（路径 / 命令 / 参数）
@@ -89,30 +165,11 @@
 - [ ] 窗口状态持久化
 - [ ] 快捷键全面配置
 
-### 📦 Docker 增强
-- [ ] Docker Compose 支持
-- [ ] 容器资源监控（CPU / 内存）
-- [ ] 容器网络管理
-- [ ] 镜像构建
-
-### 🗄️ 数据库增强
-- [ ] SQL 语法高亮
-- [ ] 查询历史记录
-- [ ] 表结构可视化（ER 图）
-- [ ] 数据导出（CSV / JSON）
-- [ ] PostgreSQL / SQLite 支持
-
-### 🌿 Git 增强
+### 🌿 Git 增强（本地上下文）
 - [ ] Diff 可视化（inline / side-by-side）
 - [ ] 分支图可视化
 - [ ] Blame 视图
 - [ ] Merge 冲突解决器
-
-### 📋 日志增强
-- [ ] 多文件同时监控
-- [ ] JSON 日志格式化
-- [ ] 正则表达式过滤
-- [ ] 日志导出
 
 ### 🚀 发布准备
 - [ ] 代码签名 & 公证
@@ -134,4 +191,4 @@
 | SSH/SFTP | russh 0.57 + russh-sftp 2.1 |
 | 加密 | ring (AES-256-GCM) |
 | 文件搜索 | ignore (ripgrep 同源) |
-| 外部工具 | docker CLI, git CLI, mysql CLI |
+| 命令执行 | CommandRunner actor (统一路径解析 + 异步) |
