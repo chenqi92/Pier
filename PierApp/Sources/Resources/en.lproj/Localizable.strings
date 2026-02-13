@@ -42,6 +42,7 @@
 "panel.docker" = "Docker";
 "panel.git" = "Git";
 "panel.database" = "Database";
+"panel.redis" = "Redis";
 "panel.logs" = "Logs";
 
 /* ═══════════════════════════════════════
@@ -162,3 +163,29 @@
 "service.notInstalled" = "Not Installed";
 
 "redis.comingSoon" = "Redis Client\nComing Soon";
+
+/* ═══════════════════════════════════════
+   Connection Manager
+   ═══════════════════════════════════════ */
+
+"conn.title" = "SSH Connections";
+"conn.addServer" = "Add Server";
+"conn.editServer" = "Edit Server";
+"conn.deleteServer" = "Delete Server";
+"conn.noServers" = "No saved servers";
+"conn.name" = "Name";
+"conn.host" = "Host";
+"conn.port" = "Port";
+"conn.username" = "Username";
+"conn.password" = "Password";
+"conn.keyFile" = "Key File Path";
+"conn.browse" = "Browse...";
+"conn.authType" = "Auth Type";
+"conn.authPassword" = "Password";
+"conn.authKeyFile" = "Key File";
+"conn.connect" = "Connect";
+"conn.save" = "Save";
+"conn.cancel" = "Cancel";
+
+"tunnel.active" = "Active Tunnels";
+"tunnel.forwarding" = "Forwarding";

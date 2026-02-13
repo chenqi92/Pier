@@ -60,13 +60,35 @@ class RemoteServiceManager: ObservableObject {
     @Published var detectedServices: [DetectedService] = []
     @Published var connectedHost: String = ""
     @Published var errorMessage: String?
+    @Published var activeTunnels: [ServiceTunnel] = []
+    @Published var savedProfiles: [ConnectionProfile] = []
 
     // MARK: - Private
 
     /// Opaque handle to the Rust SSH session.
     private var sshHandle: OpaquePointer?
+    /// Currently connected profile ID (if any).
+    private var currentProfileId: UUID?
+
+    // MARK: - Init
+
+    init() {
+        savedProfiles = ConnectionProfile.loadAll()
+    }
 
     // MARK: - Connection
+
+    /// Connect using a saved profile.
+    func connect(profile: ConnectionProfile) {
+        currentProfileId = profile.id
+        if profile.authType == .keyFile, let keyPath = profile.keyFilePath {
+            connectWithKey(host: profile.host, port: profile.port, username: profile.username, keyPath: keyPath)
+        } else {
+            // Password is stored in Keychain, keyed by profile ID
+            let password = (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)")) ?? ""
+            connect(host: profile.host, port: profile.port, username: profile.username, password: password)
+        }
+    }
 
     /// Connect to a remote server and detect services.
     func connect(host: String, port: UInt16, username: String, password: String) {
@@ -145,14 +167,17 @@ class RemoteServiceManager: ObservableObject {
 
     /// Disconnect from the remote server.
     func disconnect() {
-        guard let handle = sshHandle else { return }
+        // Stop all port forwards first
+        stopAllTunnels()
 
+        guard let handle = sshHandle else { return }
         pier_ssh_disconnect(handle)
         sshHandle = nil
         isConnected = false
         detectedServices = []
         connectedHost = ""
         connectionStatus = String(localized: "ssh.disconnected")
+        currentProfileId = nil
     }
 
     // MARK: - Service Detection
@@ -184,6 +209,7 @@ class RemoteServiceManager: ObservableObject {
                     self.detectedServices = services
                     let runningCount = services.filter(\.isRunning).count
                     self.connectionStatus = String(localized: "ssh.servicesDetected \(services.count) \(runningCount)")
+                    self.autoEstablishTunnels()
                 } else {
                     self.connectionStatus = String(localized: "ssh.connected")
                 }
@@ -194,6 +220,73 @@ class RemoteServiceManager: ObservableObject {
     /// Re-detect services (e.g., after user starts/stops a service).
     func refreshServices() {
         detectServices()
+    }
+
+    // MARK: - Port Forwarding / Tunnels
+
+    /// Auto-establish tunnels for running services that have default port mappings.
+    private func autoEstablishTunnels() {
+        guard let handle = sshHandle else { return }
+
+        for service in detectedServices where service.isRunning {
+            guard let mapping = ServiceTunnel.defaultMappings[service.name] else { continue }
+
+            let result = "127.0.0.1".withCString { hostC in
+                pier_ssh_forward_port(handle, mapping.localPort, hostC, mapping.remotePort)
+            }
+
+            if result == 0 {
+                let tunnel = ServiceTunnel(
+                    serviceName: service.name,
+                    localPort: mapping.localPort,
+                    remoteHost: "127.0.0.1",
+                    remotePort: mapping.remotePort
+                )
+                activeTunnels.append(tunnel)
+            }
+        }
+    }
+
+    /// Stop all active tunnels.
+    func stopAllTunnels() {
+        guard let handle = sshHandle else {
+            activeTunnels.removeAll()
+            return
+        }
+        for tunnel in activeTunnels {
+            pier_ssh_stop_forward(handle, tunnel.localPort)
+        }
+        activeTunnels.removeAll()
+    }
+
+    /// Stop a single tunnel by service name.
+    func stopTunnel(for serviceName: String) {
+        guard let handle = sshHandle,
+              let idx = activeTunnels.firstIndex(where: { $0.serviceName == serviceName }) else { return }
+        let tunnel = activeTunnels[idx]
+        pier_ssh_stop_forward(handle, tunnel.localPort)
+        activeTunnels.remove(at: idx)
+    }
+
+    // MARK: - Profile Management
+
+    func saveProfile(_ profile: ConnectionProfile) {
+        if let idx = savedProfiles.firstIndex(where: { $0.id == profile.id }) {
+            savedProfiles[idx] = profile
+        } else {
+            savedProfiles.append(profile)
+        }
+        ConnectionProfile.saveAll(savedProfiles)
+    }
+
+    func deleteProfile(_ profile: ConnectionProfile) {
+        savedProfiles.removeAll { $0.id == profile.id }
+        ConnectionProfile.saveAll(savedProfiles)
+        try? KeychainService.shared.delete(key: "ssh_\(profile.id.uuidString)")
+    }
+
+    func savePassword(_ password: String, for profile: ConnectionProfile) {
+        try? KeychainService.shared.save(key: "ssh_\(profile.id.uuidString)", value: password)
     }
 
     // MARK: - Remote Execution

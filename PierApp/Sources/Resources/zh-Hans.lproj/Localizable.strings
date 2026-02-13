@@ -42,6 +42,7 @@
 "panel.docker" = "Docker";
 "panel.git" = "Git";
 "panel.database" = "数据库";
+"panel.redis" = "Redis";
 "panel.logs" = "日志";
 
 /* ═══════════════════════════════════════
@@ -162,3 +163,29 @@
 "service.notInstalled" = "未安装";
 
 "redis.comingSoon" = "Redis 客户端\n即将推出";
+
+/* ═══════════════════════════════════════
+   连接管理器
+   ═══════════════════════════════════════ */
+
+"conn.title" = "SSH 连接";
+"conn.addServer" = "添加服务器";
+"conn.editServer" = "编辑服务器";
+"conn.deleteServer" = "删除服务器";
+"conn.noServers" = "无已保存的服务器";
+"conn.name" = "名称";
+"conn.host" = "主机";
+"conn.port" = "端口";
+"conn.username" = "用户名";
+"conn.password" = "密码";
+"conn.keyFile" = "密钥文件路径";
+"conn.browse" = "浏览...";
+"conn.authType" = "认证方式";
+"conn.authPassword" = "密码";
+"conn.authKeyFile" = "密钥文件";
+"conn.connect" = "连接";
+"conn.save" = "保存";
+"conn.cancel" = "取消";
+
+"tunnel.active" = "活动隧道";
+"tunnel.forwarding" = "转发中";

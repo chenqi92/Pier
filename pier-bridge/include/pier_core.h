@@ -107,6 +107,27 @@ char *pier_ssh_detect_services(PierSshHandle handle);
 char *pier_ssh_exec(PierSshHandle handle, const char *command);
 
 /**
+ * Start local port forwarding: 127.0.0.1:local_port → remote_host:remote_port.
+ * Returns 0 on success, -1 on failure.
+ */
+int32_t pier_ssh_forward_port(PierSshHandle handle,
+                              uint16_t local_port,
+                              const char *remote_host,
+                              uint16_t remote_port);
+
+/**
+ * Stop a local port forward.
+ * Returns 0 on success, -1 if no such forward.
+ */
+int32_t pier_ssh_stop_forward(PierSshHandle handle, uint16_t local_port);
+
+/**
+ * List active forward ports as a JSON array.
+ * Caller must free with pier_string_free.
+ */
+char *pier_ssh_list_forwards(PierSshHandle handle);
+
+/**
  * Free a string allocated by Rust.
  */
 void pier_string_free(char *s);

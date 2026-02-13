@@ -2,12 +2,17 @@ use super::{SshConfig, SshAuth};
 use russh::*;
 use russh::keys::*;
 use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::sync::Mutex;
+use tokio::sync::watch;
+use tokio::net::TcpListener;
 
 /// SSH session manager.
 pub struct SshSession {
     config: SshConfig,
     handle: Option<Arc<Mutex<client::Handle<SshHandler>>>>,
+    /// Active port forwards: local_port → cancel sender (send true to stop)
+    forwards: HashMap<u16, watch::Sender<bool>>,
 }
 
 /// Minimal SSH client handler.
@@ -32,6 +37,7 @@ impl SshSession {
         Self {
             config,
             handle: None,
+            forwards: HashMap::new(),
         }
     }
 
@@ -116,6 +122,154 @@ impl SshSession {
 
     pub fn is_connected(&self) -> bool {
         self.handle.is_some()
+    }
+
+    /// Start local port forwarding: 127.0.0.1:local_port → remote_host:remote_port
+    ///
+    /// Spawns an async TCP listener. Each incoming connection opens
+    /// an SSH direct-tcpip channel for bidirectional data transfer.
+    pub async fn start_port_forward(
+        &mut self,
+        local_port: u16,
+        remote_host: &str,
+        remote_port: u16,
+    ) -> Result<(), anyhow::Error> {
+        if self.forwards.contains_key(&local_port) {
+            return Err(anyhow::anyhow!("Port {} already forwarded", local_port));
+        }
+
+        let handle = self
+            .handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Not connected"))?
+            .clone();
+
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", local_port)).await?;
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        let rhost = remote_host.to_string();
+
+        log::info!(
+            "SSH tunnel: 127.0.0.1:{} → {}:{}",
+            local_port, remote_host, remote_port
+        );
+
+        tokio::spawn(async move {
+            let mut rx = cancel_rx;
+            loop {
+                tokio::select! {
+                    _ = async { loop {
+                        if rx.changed().await.is_err() || *rx.borrow() { break; }
+                    }} => {
+                        log::info!("Port forward on {} cancelled", local_port);
+                        break;
+                    }
+                    result = listener.accept() => {
+                        match result {
+                            Ok((mut tcp_stream, peer)) => {
+                                log::debug!("Tunnel connection from {} on port {}", peer, local_port);
+                                let h = handle.clone();
+                                let host = rhost.clone();
+                                let conn_rx = rx.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) = Self::handle_forward_connection(
+                                        &h, &mut tcp_stream, &host, remote_port, conn_rx,
+                                    ).await {
+                                        log::debug!("Tunnel connection ended: {}", e);
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                log::error!("Tunnel accept error on port {}: {}", local_port, e);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        self.forwards.insert(local_port, cancel_tx);
+        Ok(())
+    }
+
+    /// Handle a single forwarded connection.
+    async fn handle_forward_connection(
+        handle: &Arc<Mutex<client::Handle<SshHandler>>>,
+        tcp_stream: &mut tokio::net::TcpStream,
+        remote_host: &str,
+        remote_port: u16,
+        mut cancel_rx: watch::Receiver<bool>,
+    ) -> Result<(), anyhow::Error> {
+        let h = handle.lock().await;
+        let mut channel = h
+            .channel_open_direct_tcpip(
+                remote_host,
+                remote_port as u32,
+                "127.0.0.1",
+                0, // originator port, not important
+            )
+            .await?;
+        drop(h); // Release the lock
+
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut tcp_read, mut tcp_write) = tcp_stream.split();
+        let mut buf = vec![0u8; 8192];
+
+        loop {
+            tokio::select! {
+                res = cancel_rx.changed() => {
+                    if res.is_err() || *cancel_rx.borrow() { break; }
+                }
+                // TCP → SSH channel
+                n = tcp_read.read(&mut buf) => {
+                    match n {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if channel.data(&buf[..n]).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+                // SSH channel → TCP
+                msg = channel.wait() => {
+                    match msg {
+                        Some(russh::ChannelMsg::Data { ref data }) => {
+                            if tcp_write.write_all(data).await.is_err() {
+                                break;
+                            }
+                        }
+                        Some(russh::ChannelMsg::Eof) | None => break,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Stop a port forward.
+    pub fn stop_port_forward(&mut self, local_port: u16) -> Result<(), anyhow::Error> {
+        if let Some(tx) = self.forwards.remove(&local_port) {
+            let _ = tx.send(true);
+            log::info!("Stopped port forward on {}", local_port);
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("No forward on port {}", local_port))
+        }
+    }
+
+    /// Stop all port forwards.
+    pub fn stop_all_forwards(&mut self) {
+        for (port, tx) in self.forwards.drain() {
+            let _ = tx.send(true);
+            log::info!("Stopped port forward on {}", port);
+        }
+    }
+
+    /// List active forwarded local ports.
+    pub fn active_forwards(&self) -> Vec<u16> {
+        self.forwards.keys().copied().collect()
     }
 
     /// Execute a single command over SSH and return (exit_code, stdout).

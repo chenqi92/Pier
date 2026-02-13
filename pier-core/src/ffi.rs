@@ -340,6 +340,70 @@ pub extern "C" fn pier_ssh_exec(
 }
 
 // ═══════════════════════════════════════════════════════════
+// SSH Port Forwarding FFI
+// ═══════════════════════════════════════════════════════════
+
+/// Start local port forwarding: 127.0.0.1:local_port → remote_host:remote_port.
+/// Returns 0 on success, -1 on failure.
+#[no_mangle]
+pub extern "C" fn pier_ssh_forward_port(
+    handle: PierSshHandle,
+    local_port: u16,
+    remote_host: *const c_char,
+    remote_port: u16,
+) -> i32 {
+    if handle.is_null() || remote_host.is_null() {
+        return -1;
+    }
+
+    let session = unsafe { &mut *handle };
+    let host_str = unsafe { CStr::from_ptr(remote_host).to_str().unwrap_or("") };
+
+    match ssh_runtime().block_on(session.start_port_forward(local_port, host_str, remote_port)) {
+        Ok(()) => 0,
+        Err(e) => {
+            log::error!("Port forward failed: {}", e);
+            -1
+        }
+    }
+}
+
+/// Stop a local port forward.
+/// Returns 0 on success, -1 if no such forward.
+#[no_mangle]
+pub extern "C" fn pier_ssh_stop_forward(handle: PierSshHandle, local_port: u16) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+
+    let session = unsafe { &mut *handle };
+    match session.stop_port_forward(local_port) {
+        Ok(()) => 0,
+        Err(e) => {
+            log::error!("Stop forward failed: {}", e);
+            -1
+        }
+    }
+}
+
+/// List active forward ports as a JSON array.
+/// Caller must free with pier_string_free.
+#[no_mangle]
+pub extern "C" fn pier_ssh_list_forwards(handle: PierSshHandle) -> *mut c_char {
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let session = unsafe { &*handle };
+    let ports = session.active_forwards();
+
+    match serde_json::to_string(&ports) {
+        Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 // Utility FFI
 // ═══════════════════════════════════════════════════════════
 
