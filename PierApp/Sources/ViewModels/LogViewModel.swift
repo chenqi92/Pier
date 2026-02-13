@@ -60,10 +60,17 @@ class LogViewModel: ObservableObject {
     @Published var enabledLevels: Set<LogLevel> = Set(LogLevel.allCases)
     @Published var allLines: [LogLine] = []
     @Published var filteredLines: [LogLine] = []
+    @Published var isRemoteMode = false
+    @Published var remoteLogFiles: [String] = []
 
     private var fileMonitor: DispatchSourceFileSystemObject?
     private var lastReadOffset: UInt64 = 0
+    private var remoteLineCount: Int = 0
+    private var remotePollingTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+
+    /// Optional reference to RemoteServiceManager for SSH log tailing.
+    weak var serviceManager: RemoteServiceManager?
 
     init() {
         // Re-filter when filter text or level toggles change
@@ -77,6 +84,7 @@ class LogViewModel: ObservableObject {
 
     deinit {
         fileMonitor?.cancel()
+        remotePollingTimer?.invalidate()
     }
 
     // MARK: - Actions
@@ -256,5 +264,70 @@ class LogViewModel: ObservableObject {
 
             return true
         }
+    }
+
+    // MARK: - Remote Log Support
+
+    /// Load a remote log file via SSH exec (tail -n 500).
+    func loadRemoteFile(_ path: String) {
+        guard let sm = serviceManager, sm.isConnected else { return }
+
+        // Stop local monitoring
+        fileMonitor?.cancel()
+        remotePollingTimer?.invalidate()
+
+        isRemoteMode = true
+        logFilePath = path
+        allLines = []
+        remoteLineCount = 0
+
+        Task {
+            let (exitCode, stdout) = await sm.exec("tail -n 500 '\(path)'")
+            if exitCode == 0 {
+                appendText(stdout)
+                remoteLineCount = allLines.count
+                startRemotePolling(path: path)
+            }
+        }
+    }
+
+    /// Periodically poll remote file for new lines (every 3 seconds).
+    private func startRemotePolling(path: String) {
+        remotePollingTimer?.invalidate()
+        remotePollingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let sm = self.serviceManager, sm.isConnected else { return }
+                let skipLines = self.remoteLineCount
+                let (exitCode, stdout) = await sm.exec("tail -n +\(skipLines + 1) '\(path)' 2>/dev/null")
+                if exitCode == 0 && !stdout.isEmpty {
+                    self.appendText(stdout)
+                    self.remoteLineCount = self.allLines.count
+                }
+            }
+        }
+    }
+
+    /// Discover common log files on the remote server.
+    func discoverRemoteLogFiles() {
+        guard let sm = serviceManager, sm.isConnected else { return }
+
+        Task {
+            let (exitCode, stdout) = await sm.exec(
+                "find /var/log -name '*.log' -type f 2>/dev/null | head -30; " +
+                "find /opt -name '*.log' -type f -maxdepth 4 2>/dev/null | head -20"
+            )
+            if exitCode == 0 {
+                remoteLogFiles = stdout
+                    .split(separator: "\n")
+                    .map(String.init)
+                    .filter { !$0.isEmpty }
+            }
+        }
+    }
+
+    /// Stop remote log polling.
+    func stopRemotePolling() {
+        remotePollingTimer?.invalidate()
+        remotePollingTimer = nil
     }
 }

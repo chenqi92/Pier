@@ -189,3 +189,46 @@
 
 "tunnel.active" = "Active Tunnels";
 "tunnel.forwarding" = "Forwarding";
+
+/* ═══════════════════════════════════════
+   Redis Client
+   ═══════════════════════════════════════ */
+
+"redis.connectPrompt" = "Connect to Redis via SSH tunnel";
+"redis.connect" = "Connect";
+"redis.connectFailed" = "Redis connection failed";
+"redis.port" = "Port";
+"redis.searchKeys" = "Search keys...";
+"redis.keyCount %lld" = "%lld keys";
+"redis.copyKey" = "Copy Key";
+"redis.deleteKey" = "Delete Key";
+"redis.selectKey" = "Select a key to inspect";
+"redis.rawCommand" = "Enter redis command...";
+"redis.clients" = "Clients";
+"redis.memory" = "Memory";
+"redis.uptime" = "Uptime";
+"redis.dbSize" = "Keys";
+
+/* ═══════════════════════════════════════
+   Query History & Export
+   ═══════════════════════════════════════ */
+
+"db.history" = "History";
+"db.clearHistory" = "Clear History";
+"db.noHistory" = "No query history";
+"db.export" = "Export";
+"db.exportCSV" = "Export CSV";
+"db.exportJSON" = "Export JSON";
+"db.exported" = "Exported to Downloads";
+
+/* ═══════════════════════════════════════
+   Remote Docker & Logs
+   ═══════════════════════════════════════ */
+
+"docker.remote" = "Remote";
+"docker.local" = "Local";
+
+"log.remoteLogs" = "Remote Logs";
+"log.discoverFiles" = "Discover Log Files";
+"log.noRemoteLogs" = "No remote log files found";
+"log.remote" = "(Remote)";

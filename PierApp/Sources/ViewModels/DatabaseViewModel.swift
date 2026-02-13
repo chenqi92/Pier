@@ -21,6 +21,26 @@ struct MySQLConnection: Identifiable, Codable {
     }
 }
 
+struct QueryHistoryEntry: Identifiable, Codable {
+    let id: UUID
+    let query: String
+    let database: String
+    let timestamp: Date
+    let rowCount: Int
+    let executionTime: TimeInterval
+    let succeeded: Bool
+
+    init(query: String, database: String, rowCount: Int, executionTime: TimeInterval, succeeded: Bool) {
+        self.id = UUID()
+        self.query = query
+        self.database = database
+        self.timestamp = Date()
+        self.rowCount = rowCount
+        self.executionTime = executionTime
+        self.succeeded = succeeded
+    }
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -53,6 +73,9 @@ class DatabaseViewModel: ObservableObject {
     @Published var lastQueryTime: TimeInterval? = nil
     @Published var resultRowCount: Int? = nil
 
+    // Query History
+    @Published var queryHistory: [QueryHistoryEntry] = []
+
     // Internal
     private var currentHost = ""
     private var currentPort = 3306
@@ -62,6 +85,7 @@ class DatabaseViewModel: ObservableObject {
 
     init() {
         loadSavedConnections()
+        loadHistory()
     }
 
     // MARK: - Connection
@@ -165,6 +189,17 @@ class DatabaseViewModel: ObservableObject {
 
             isExecuting = false
             lastQueryTime = elapsed
+
+            let entry = QueryHistoryEntry(
+                query: queryText,
+                database: currentDB,
+                rowCount: result.rows.count,
+                executionTime: elapsed,
+                succeeded: result.error == nil
+            )
+            queryHistory.insert(entry, at: 0)
+            if queryHistory.count > 200 { queryHistory = Array(queryHistory.prefix(200)) }
+            saveHistory()
 
             if let error = result.error {
                 queryError = error
@@ -285,5 +320,86 @@ class DatabaseViewModel: ObservableObject {
         if let data = try? JSONEncoder().encode(savedConnections) {
             try? data.write(to: path)
         }
+    }
+
+    // MARK: - Query History Persistence
+
+    private static var historyURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("Pier", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("query_history.json")
+    }
+
+    private func loadHistory() {
+        guard let data = try? Data(contentsOf: Self.historyURL),
+              let entries = try? JSONDecoder().decode([QueryHistoryEntry].self, from: data) else { return }
+        queryHistory = entries
+    }
+
+    private func saveHistory() {
+        guard let data = try? JSONEncoder().encode(queryHistory) else { return }
+        try? data.write(to: Self.historyURL, options: .atomic)
+    }
+
+    func clearHistory() {
+        queryHistory.removeAll()
+        saveHistory()
+    }
+
+    // MARK: - Data Export
+
+    /// Export current query results as CSV. Returns the file URL on success.
+    func exportToCSV() -> URL? {
+        guard !resultColumns.isEmpty else { return nil }
+
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let filename = "pier_export_\(timestamp).csv"
+        let url = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+            .appendingPathComponent(filename)
+
+        var csv = resultColumns.joined(separator: ",") + "\n"
+        for row in resultRows {
+            let escaped = row.map { field in
+                let needsQuoting = field.contains(",") || field.contains("\"") || field.contains("\n")
+                if needsQuoting {
+                    return "\"" + field.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+                }
+                return field
+            }
+            csv += escaped.joined(separator: ",") + "\n"
+        }
+
+        guard let data = csv.data(using: .utf8) else { return nil }
+        try? data.write(to: url, options: .atomic)
+        return url
+    }
+
+    /// Export current query results as JSON. Returns the file URL on success.
+    func exportToJSON() -> URL? {
+        guard !resultColumns.isEmpty else { return nil }
+
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let filename = "pier_export_\(timestamp).json"
+        let url = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+            .appendingPathComponent(filename)
+
+        let records: [[String: String]] = resultRows.map { row in
+            var dict: [String: String] = [:]
+            for (i, col) in resultColumns.enumerated() {
+                dict[col] = i < row.count ? row[i] : ""
+            }
+            return dict
+        }
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: records,
+            options: [.prettyPrinted, .sortedKeys]
+        ) else { return nil }
+
+        try? data.write(to: url, options: .atomic)
+        return url
     }
 }

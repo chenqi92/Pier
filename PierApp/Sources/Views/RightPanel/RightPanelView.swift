@@ -35,15 +35,7 @@ struct RightPanelView: View {
             case .database:
                 DatabaseClientView()
             case .redis:
-                VStack {
-                    Image(systemName: "server.rack")
-                        .font(.system(size: 36))
-                        .foregroundColor(.secondary)
-                    Text("redis.comingSoon")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                RedisClientView()
             case .logViewer:
                 LogViewerView()
             }

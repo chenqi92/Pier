@@ -47,11 +47,22 @@ class DockerViewModel: ObservableObject {
     @Published var isDockerAvailable = false
     @Published var isLoading = false
     @Published var containerLogs: String = ""
+    @Published var isRemoteMode = false
 
     private var timer: AnyCancellable?
 
+    /// Optional reference to RemoteServiceManager for SSH exec.
+    weak var serviceManager: RemoteServiceManager?
+
     init() {
         checkDockerAvailability()
+    }
+
+    /// Convenience init with service manager for remote Docker support.
+    convenience init(serviceManager: RemoteServiceManager) {
+        self.init()
+        self.serviceManager = serviceManager
+        self.isRemoteMode = serviceManager.isConnected
     }
 
     func checkDockerAvailability() {
@@ -200,6 +211,16 @@ class DockerViewModel: ObservableObject {
     // MARK: - Helpers
 
     private func runDockerCommand(_ args: [String]) async -> String? {
+        // Route through SSH when connected to remote server
+        if let sm = serviceManager, sm.isConnected {
+            isRemoteMode = true
+            let command = "docker " + args.joined(separator: " ")
+            let (exitCode, stdout) = await sm.exec(command)
+            return exitCode == 0 ? stdout : nil
+        }
+
+        // Fallback to local execution
+        isRemoteMode = false
         let result = await CommandRunner.shared.run("docker", arguments: args)
         return result.succeeded ? result.output : nil
     }

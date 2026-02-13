@@ -189,3 +189,46 @@
 
 "tunnel.active" = "活动隧道";
 "tunnel.forwarding" = "转发中";
+
+/* ═══════════════════════════════════════
+   Redis 客户端
+   ═══════════════════════════════════════ */
+
+"redis.connectPrompt" = "通过 SSH 隧道连接 Redis";
+"redis.connect" = "连接";
+"redis.connectFailed" = "Redis 连接失败";
+"redis.port" = "端口";
+"redis.searchKeys" = "搜索键...";
+"redis.keyCount %lld" = "%lld 个键";
+"redis.copyKey" = "复制键名";
+"redis.deleteKey" = "删除键";
+"redis.selectKey" = "选择一个键以查看";
+"redis.rawCommand" = "输入 redis 命令...";
+"redis.clients" = "客户端";
+"redis.memory" = "内存";
+"redis.uptime" = "运行时间";
+"redis.dbSize" = "键数";
+
+/* ═══════════════════════════════════════
+   查询历史与导出
+   ═══════════════════════════════════════ */
+
+"db.history" = "历史记录";
+"db.clearHistory" = "清除历史";
+"db.noHistory" = "暂无查询历史";
+"db.export" = "导出";
+"db.exportCSV" = "导出 CSV";
+"db.exportJSON" = "导出 JSON";
+"db.exported" = "已导出到下载文件夹";
+
+/* ═══════════════════════════════════════
+   Docker 远程与日志
+   ═══════════════════════════════════════ */
+
+"docker.remote" = "远程";
+"docker.local" = "本地";
+
+"log.remoteLogs" = "远程日志";
+"log.discoverFiles" = "发现日志文件";
+"log.noRemoteLogs" = "未找到远程日志文件";
+"log.remote" = "（远程）";
