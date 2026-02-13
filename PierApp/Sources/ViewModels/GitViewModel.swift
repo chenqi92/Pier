@@ -67,6 +67,17 @@ struct GitStashEntry: Identifiable {
     var id: Int { index }
 }
 
+struct BlameLine: Identifiable {
+    let lineNumber: Int
+    let commitHash: String
+    let shortHash: String
+    let author: String
+    let date: String
+    let content: String
+
+    var id: Int { lineNumber }
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -84,6 +95,10 @@ class GitViewModel: ObservableObject {
 
     private var repoPath: String = ""
     private var timer: AnyCancellable?
+
+    // Blame
+    @Published var blameLines: [BlameLine] = []
+    @Published var blameFilePath: String = ""
 
     init() {
         // Default to home dir, will be updated when folder is selected
@@ -350,6 +365,53 @@ class GitViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Blame
+
+    func blameFile(_ path: String) {
+        Task {
+            guard let output = await runGit(["blame", "--porcelain", path]) else { return }
+            var lines: [BlameLine] = []
+            var lineNum = 0
+            var currentHash = ""
+            var currentAuthor = ""
+            var currentDate = ""
+
+            for rawLine in output.split(separator: "\n", omittingEmptySubsequences: false) {
+                let line = String(rawLine)
+
+                if line.count >= 40, line.prefix(40).allSatisfy({ $0.isHexDigit }) {
+                    currentHash = String(line.prefix(40))
+                } else if line.hasPrefix("author ") {
+                    currentAuthor = String(line.dropFirst(7))
+                } else if line.hasPrefix("author-time ") {
+                    if let ts = TimeInterval(line.dropFirst(12)) {
+                        let date = Date(timeIntervalSince1970: ts)
+                        let fmt = DateFormatter()
+                        fmt.dateFormat = "yyyy-MM-dd"
+                        currentDate = fmt.string(from: date)
+                    }
+                } else if line.hasPrefix("\t") {
+                    lineNum += 1
+                    lines.append(BlameLine(
+                        lineNumber: lineNum,
+                        commitHash: currentHash,
+                        shortHash: String(currentHash.prefix(7)),
+                        author: currentAuthor,
+                        date: currentDate,
+                        content: String(line.dropFirst(1))
+                    ))
+                }
+            }
+
+            blameLines = lines
+            blameFilePath = path
+            NotificationCenter.default.post(
+                name: .gitShowBlame,
+                object: ["path": path]
+            )
+        }
+    }
+
     // MARK: - Git Command Runner
 
     private func runGit(_ args: [String]) async -> String? {
@@ -366,4 +428,5 @@ class GitViewModel: ObservableObject {
 
 extension Notification.Name {
     static let gitShowDiff = Notification.Name("pier.gitShowDiff")
+    static let gitShowBlame = Notification.Name("pier.gitShowBlame")
 }

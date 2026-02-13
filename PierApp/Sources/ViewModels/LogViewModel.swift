@@ -62,6 +62,8 @@ class LogViewModel: ObservableObject {
     @Published var filteredLines: [LogLine] = []
     @Published var isRemoteMode = false
     @Published var remoteLogFiles: [String] = []
+    @Published var isRegexFilter = false
+    @Published var regexError: String? = nil
 
     private var fileMonitor: DispatchSourceFileSystemObject?
     private var lastReadOffset: UInt64 = 0
@@ -251,15 +253,35 @@ class LogViewModel: ObservableObject {
     // MARK: - Filtering
 
     private func applyFilter() {
+        // Compile regex if needed
+        var regex: NSRegularExpression?
+        if isRegexFilter && !filterText.isEmpty {
+            do {
+                regex = try NSRegularExpression(pattern: filterText, options: .caseInsensitive)
+                regexError = nil
+            } catch {
+                regexError = error.localizedDescription
+                // Fall back to plain text search on invalid regex
+                regex = nil
+            }
+        } else {
+            regexError = nil
+        }
+
         filteredLines = allLines.filter { line in
             // Level filter
             if let level = line.level, !enabledLevels.contains(level) {
                 return false
             }
 
-            // Text filter
+            // Text / Regex filter
             if !filterText.isEmpty {
-                return line.rawText.localizedCaseInsensitiveContains(filterText)
+                if isRegexFilter, let regex = regex {
+                    let range = NSRange(line.rawText.startIndex..., in: line.rawText)
+                    return regex.firstMatch(in: line.rawText, range: range) != nil
+                } else {
+                    return line.rawText.localizedCaseInsensitiveContains(filterText)
+                }
             }
 
             return true

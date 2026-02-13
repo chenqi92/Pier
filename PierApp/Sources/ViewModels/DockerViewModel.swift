@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 
 enum DockerTab {
-    case containers, images, volumes
+    case containers, images, volumes, compose
 }
 
 // MARK: - Data Models
@@ -49,6 +49,11 @@ class DockerViewModel: ObservableObject {
     @Published var containerLogs: String = ""
     @Published var isRemoteMode = false
 
+    // Docker Compose
+    @Published var composeServices: [ComposeService] = []
+    @Published var composeFilePath: String?
+    @Published var isComposeAvailable = false
+
     private var timer: AnyCancellable?
 
     /// Optional reference to RemoteServiceManager for SSH exec.
@@ -89,6 +94,7 @@ class DockerViewModel: ObservableObject {
         await loadContainers()
         await loadImages()
         await loadVolumes()
+        await detectComposeFile()
     }
 
     // MARK: - Containers
@@ -234,6 +240,98 @@ class DockerViewModel: ObservableObject {
         if cleaned.hasSuffix("MB") { return UInt64(val * 1_000_000) }
         if cleaned.hasSuffix("KB") || cleaned.hasSuffix("kB") { return UInt64(val * 1_000) }
         return UInt64(val)
+    }
+}
+
+// MARK: - Docker Compose
+
+struct ComposeService: Identifiable {
+    var id: String { name }
+    let name: String
+    let status: String
+    let isRunning: Bool
+    let image: String
+    let ports: String
+}
+
+extension DockerViewModel {
+    /// Detect compose file in working directory.
+    func detectComposeFile() async {
+        // Try docker compose config to see if compose is available
+        if await runComposeCommand(["config", "--services"]) != nil {
+            isComposeAvailable = true
+            await loadComposeStatus()
+        } else {
+            isComposeAvailable = false
+            composeServices = []
+        }
+    }
+
+    func loadComposeStatus() async {
+        guard let output = await runComposeCommand(["ps", "--format", "{{.Service}}\\t{{.Status}}\\t{{.State}}\\t{{.Image}}\\t{{.Ports}}"]) else {
+            composeServices = []
+            return
+        }
+
+        composeServices = output.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "\t", maxSplits: 4, omittingEmptySubsequences: false)
+            guard parts.count >= 3 else { return nil }
+            return ComposeService(
+                name: String(parts[0]),
+                status: String(parts[1]),
+                isRunning: parts[2] == "running",
+                image: parts.count > 3 ? String(parts[3]) : "",
+                ports: parts.count > 4 ? String(parts[4]) : ""
+            )
+        }
+    }
+
+    func composeUp() {
+        Task {
+            isLoading = true
+            _ = await runComposeCommand(["up", "-d"])
+            await loadComposeStatus()
+            await loadContainers()
+            isLoading = false
+        }
+    }
+
+    func composeDown() {
+        Task {
+            isLoading = true
+            _ = await runComposeCommand(["down"])
+            await loadComposeStatus()
+            await loadContainers()
+            isLoading = false
+        }
+    }
+
+    func composeRestart(service: String? = nil) {
+        Task {
+            isLoading = true
+            var args = ["restart"]
+            if let svc = service { args.append(svc) }
+            _ = await runComposeCommand(args)
+            await loadComposeStatus()
+            isLoading = false
+        }
+    }
+
+    func composeLogs(service: String) {
+        Task {
+            if let logs = await runComposeCommand(["logs", "--tail", "500", service]) {
+                containerLogs = logs
+                NotificationCenter.default.post(
+                    name: .dockerContainerLogs,
+                    object: ["id": service, "logs": logs]
+                )
+            }
+        }
+    }
+
+    private func runComposeCommand(_ args: [String]) async -> String? {
+        let fullArgs = ["compose"] + args
+        return await runDockerCommand(fullArgs)
     }
 }
 

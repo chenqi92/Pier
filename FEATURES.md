@@ -127,20 +127,20 @@ Pier 是一个面向服务器运维场景的 macOS 终端工具。核心价值�
 - [ ] Core Text / Metal 高性能终端文本渲染
 - [x] 终端颜色主题（ANSI 256 色 / TrueColor）
 - [x] 光标闪烁动画
-- [ ] 文本选择与复制
-- [ ] 终端滚回缓冲区（scrollback buffer）
-- [ ] URL 自动检测与点击
+- [x] 文本选择与复制
+- [x] 终端滚回缓冲区（scrollback buffer）
+- [x] URL 自动检测与点击
 
 ### 🔗 SSH 增强
 - [ ] SSH Agent Forwarding
-- [ ] SSH Known Hosts 验证
+- [x] SSH Known Hosts 验证
 - [x] SSH 连接管理器 UI（保存的服务器列表）
 - [x] SSH 隧道 / 端口转发管理 UI
 - [ ] SSH 密钥管理界面
 
 ### 📦 Docker 增强（远程上下文）
 - [x] 通过 SSH exec 执行远程 docker 命令
-- [ ] Docker Compose 支持
+- [x] Docker Compose 支持
 - [ ] 容器资源监控（CPU / 内存）
 - [ ] 容器网络管理
 - [x] 容器实时日志（通过 SSH 的 `docker logs -f`）
@@ -149,7 +149,7 @@ Pier 是一个面向服务器运维场景的 macOS 终端工具。核心价值�
 - [x] 通过 SSH 追踪远程日志文件
 - [x] 多文件同时监控
 - [x] JSON 日志格式化
-- [ ] 正则表达式过滤
+- [x] 正则表达式过滤
 - [x] 日志导出
 
 ### 📝 命令行增强
@@ -166,15 +166,15 @@ Pier 是一个面向服务器运维场景的 macOS 终端工具。核心价值�
 ### 🎨 UI / UX 优化
 - [ ] Markdown 渲染升级（代码块高亮、表格、图片）
 - [x] 深色/浅色主题切换
-- [ ] 字体大小与字体选择
-- [ ] 分栏宽度可调 + 记忆
-- [ ] 窗口状态持久化
-- [ ] 快捷键全面配置
+- [x] 字体大小与字体选择
+- [x] 分栏宽度可调 + 记忆
+- [x] 窗口状态持久化
+- [x] 快捷键全面配置
 
 ### 🌿 Git 增强（本地上下文）
 - [x] Diff 可视化（inline / side-by-side）
 - [ ] 分支图可视化
-- [ ] Blame 视图
+- [x] Blame 视图
 - [ ] Merge 冲突解决器
 
 ### 🚀 发布准备

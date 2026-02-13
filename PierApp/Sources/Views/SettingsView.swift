@@ -1,0 +1,228 @@
+import SwiftUI
+
+/// Application preferences/settings panel.
+struct SettingsView: View {
+    @ObservedObject private var themeManager = AppThemeManager.shared
+    @State private var selectedSection: SettingsSection = .general
+
+    enum SettingsSection: String, CaseIterable, Identifiable {
+        case general = "settings.general"
+        case terminal = "settings.terminal"
+        case shortcuts = "settings.shortcuts"
+
+        var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .general: return "gear"
+            case .terminal: return "terminal"
+            case .shortcuts: return "keyboard"
+            }
+        }
+    }
+
+    var body: some View {
+        HSplitView {
+            // Section sidebar
+            List(SettingsSection.allCases, selection: $selectedSection) { section in
+                Label(LocalizedStringKey(section.rawValue), systemImage: section.icon)
+                    .tag(section)
+            }
+            .listStyle(.sidebar)
+            .frame(width: 160)
+
+            // Content
+            ScrollView {
+                switch selectedSection {
+                case .general:
+                    generalSettings
+                case .terminal:
+                    terminalSettings
+                case .shortcuts:
+                    shortcutsSettings
+                }
+            }
+            .frame(minWidth: 400)
+            .padding()
+        }
+        .frame(minWidth: 560, minHeight: 400)
+    }
+
+    // MARK: - General
+
+    private var generalSettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("settings.general")
+                .font(.title2)
+                .fontWeight(.bold)
+
+            GroupBox("theme.appearance") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("theme.mode", selection: $themeManager.appearanceMode) {
+                        ForEach(AppearanceMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 300)
+                }
+                .padding(8)
+            }
+
+            GroupBox("settings.font") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("settings.fontFamily")
+                            .font(.caption)
+                        Spacer()
+                        Picker("", selection: $themeManager.fontFamily) {
+                            Text("SF Mono").tag("SF Mono")
+                            Text("Menlo").tag("Menlo")
+                            Text("Monaco").tag("Monaco")
+                            Text("Courier New").tag("Courier New")
+                            Text("JetBrains Mono").tag("JetBrains Mono")
+                            Text("Fira Code").tag("Fira Code")
+                        }
+                        .frame(width: 180)
+                    }
+
+                    HStack {
+                        Text("settings.fontSize")
+                            .font(.caption)
+                        Spacer()
+                        Slider(value: $themeManager.fontSize, in: 10...24, step: 1)
+                            .frame(width: 150)
+                        Text("\(Int(themeManager.fontSize))pt")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(width: 32)
+                    }
+
+                    // Preview
+                    Text("The quick brown fox jumps over the lazy dog")
+                        .font(.system(size: CGFloat(themeManager.fontSize), design: .monospaced))
+                        .padding(8)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .cornerRadius(4)
+                }
+                .padding(8)
+            }
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Terminal
+
+    private var terminalSettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("settings.terminal")
+                .font(.title2)
+                .fontWeight(.bold)
+
+            GroupBox("theme.terminal") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(TerminalTheme.allThemes, id: \.id) { theme in
+                        themeRow(theme)
+                    }
+                }
+                .padding(8)
+            }
+
+            Spacer()
+        }
+    }
+
+    private func themeRow(_ theme: TerminalTheme) -> some View {
+        let isSelected = themeManager.terminalThemeId == theme.id
+
+        return HStack {
+            themeSwatchView(theme)
+
+            Text(theme.name)
+                .font(.caption)
+
+            Spacer()
+
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.caption)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            themeManager.setTerminalTheme(theme.id)
+        }
+    }
+
+    private func themeSwatchView(_ theme: TerminalTheme) -> some View {
+        HStack(spacing: 2) {
+            Circle().fill(Color(nsColor: theme.background)).frame(width: 14, height: 14)
+            Circle().fill(Color(nsColor: theme.foreground)).frame(width: 14, height: 14)
+            Circle().fill(Color(nsColor: theme.cursor)).frame(width: 14, height: 14)
+            Circle().fill(Color(nsColor: theme.ansiColors[1])).frame(width: 14, height: 14)
+            Circle().fill(Color(nsColor: theme.ansiColors[2])).frame(width: 14, height: 14)
+            Circle().fill(Color(nsColor: theme.ansiColors[4])).frame(width: 14, height: 14)
+        }
+    }
+
+    // MARK: - Keyboard Shortcuts
+
+    private var shortcutsSettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("settings.shortcuts")
+                .font(.title2)
+                .fontWeight(.bold)
+
+            GroupBox("settings.keyboardShortcuts") {
+                VStack(spacing: 0) {
+                    shortcutRow("settings.newTab", shortcut: "⌘T")
+                    Divider()
+                    shortcutRow("settings.closeTab", shortcut: "⌘W")
+                    Divider()
+                    shortcutRow("settings.runQuery", shortcut: "⌘⏎")
+                    Divider()
+                    shortcutRow("settings.toggleSidebar", shortcut: "⌘B")
+                    Divider()
+                    shortcutRow("settings.togglePanel", shortcut: "⌘J")
+                    Divider()
+                    shortcutRow("settings.clearTerminal", shortcut: "⌘K")
+                    Divider()
+                    shortcutRow("settings.copy", shortcut: "⌘C")
+                    Divider()
+                    shortcutRow("settings.paste", shortcut: "⌘V")
+                    Divider()
+                    shortcutRow("settings.find", shortcut: "⌘F")
+                    Divider()
+                    shortcutRow("settings.preferences", shortcut: "⌘,")
+                }
+                .padding(4)
+            }
+
+            Spacer()
+        }
+    }
+
+    private func shortcutRow(_ label: LocalizedStringKey, shortcut: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+            Spacer()
+            Text(shortcut)
+                .font(.system(size: 11, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(4)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+}

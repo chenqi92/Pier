@@ -19,6 +19,9 @@ struct DockerManageView: View {
                     Text("docker.containers").tag(DockerTab.containers)
                     Text("docker.images").tag(DockerTab.images)
                     Text("docker.volumes").tag(DockerTab.volumes)
+                    if viewModel.isComposeAvailable {
+                        Text("docker.compose").tag(DockerTab.compose)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 8)
@@ -33,6 +36,8 @@ struct DockerManageView: View {
                     imageListView
                 case .volumes:
                     volumeListView
+                case .compose:
+                    composeListView
                 }
             }
         }
@@ -240,6 +245,94 @@ struct DockerManageView: View {
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Compose
+
+    private var composeListView: some View {
+        VStack(spacing: 0) {
+            // Action bar
+            HStack(spacing: 8) {
+                Button(action: { viewModel.composeUp() }) {
+                    Label("docker.composeUp", systemImage: "play.fill")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.green)
+
+                Button(action: { viewModel.composeDown() }) {
+                    Label("docker.composeDown", systemImage: "stop.fill")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+
+                Spacer()
+
+                Button(action: {
+                    Task { await viewModel.loadComposeStatus() }
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+
+            Divider()
+
+            List {
+                ForEach(viewModel.composeServices) { service in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(service.isRunning ? Color.green : Color.gray)
+                            .frame(width: 8, height: 8)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(service.name)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            if !service.image.isEmpty {
+                                Text(service.image)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Spacer()
+
+                        Text(service.status)
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+
+                        Button(action: { viewModel.composeRestart(service: service.name) }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 9))
+                        }
+                        .buttonStyle(.borderless)
+                        .help(String(localized: "docker.composeRestart"))
+                    }
+                    .padding(.vertical, 2)
+                    .contextMenu {
+                        Button("docker.composeRestart") { viewModel.composeRestart(service: service.name) }
+                        Button("docker.viewLogs") { viewModel.composeLogs(service: service.name) }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .overlay {
+                if viewModel.composeServices.isEmpty && !viewModel.isLoading {
+                    Text("docker.noContainers")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
     }
 }
 

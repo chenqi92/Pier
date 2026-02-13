@@ -259,3 +259,60 @@
 "db.queryHistory" = "查询历史";
 "db.exportSuccess" = "导出成功";
 "log.exportSuccess" = "日志已导出";
+
+/* ═══════════════════════════════════════
+   Docker Compose
+   ═══════════════════════════════════════ */
+
+"docker.compose" = "编排";
+"docker.composeUp" = "启动编排";
+"docker.composeDown" = "停止编排";
+"docker.composeRestart" = "重启";
+
+/* ═══════════════════════════════════════
+   Git Blame
+   ═══════════════════════════════════════ */
+
+"git.blame" = "追溯";
+"git.blameEmpty" = "无追溯数据";
+
+/* ═══════════════════════════════════════
+   日志正则过滤
+   ═══════════════════════════════════════ */
+
+"log.regexFilter" = "正则过滤";
+
+/* ═══════════════════════════════════════
+   设置
+   ═══════════════════════════════════════ */
+
+"settings.general" = "通用";
+"settings.terminal" = "终端";
+"settings.shortcuts" = "快捷键";
+"settings.font" = "字体";
+"settings.fontFamily" = "字体系列";
+"settings.fontSize" = "字体大小";
+"settings.keyboardShortcuts" = "键盘快捷键";
+"settings.newTab" = "新建标签页";
+"settings.closeTab" = "关闭标签页";
+"settings.runQuery" = "执行查询";
+"settings.toggleSidebar" = "切换侧边栏";
+"settings.togglePanel" = "切换面板";
+"settings.clearTerminal" = "清除终端";
+"settings.copy" = "复制";
+"settings.paste" = "粘贴";
+"settings.find" = "查找";
+"settings.preferences" = "偏好设置";
+"theme.appearance" = "外观";
+"theme.mode" = "模式";
+
+/* ═══════════════════════════════════════
+   SSH 已知主机
+   ═══════════════════════════════════════ */
+
+"ssh.unknownHost" = "未知主机";
+"ssh.unknownHostMsg" = "此主机密钥未被识别，是否接受？";
+"ssh.mismatchHost" = "主机密钥已变更";
+"ssh.mismatchHostMsg" = "警告：主机密钥已变更，可能存在中间人攻击风险。";
+"ssh.acceptKey" = "接受";
+"ssh.rejectKey" = "拒绝";

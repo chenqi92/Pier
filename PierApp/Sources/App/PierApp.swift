@@ -37,55 +37,7 @@ struct PierApp: App {
     }
 }
 
-/// Settings view placeholder.
-struct SettingsView: View {
-    var body: some View {
-        TabView {
-            GeneralSettingsView()
-                .tabItem { Label("General", systemImage: "gear") }
-            AppearanceSettingsView()
-                .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            ConnectionSettingsView()
-                .tabItem { Label("Connections", systemImage: "network") }
-            AISettingsView()
-                .tabItem { Label("AI", systemImage: "brain") }
-        }
-        .frame(width: 500, height: 400)
-    }
-}
-
-struct GeneralSettingsView: View {
-    @AppStorage("defaultShell") var defaultShell = "/bin/zsh"
-
-    var body: some View {
-        Form {
-            TextField("Default Shell:", text: $defaultShell)
-        }
-        .padding()
-    }
-}
-
-struct AppearanceSettingsView: View {
-    @AppStorage("fontSize") var fontSize: Double = 13
-    @AppStorage("fontFamily") var fontFamily = "SF Mono"
-
-    var body: some View {
-        Form {
-            Slider(value: $fontSize, in: 8...24, step: 1) {
-                Text("Font Size: \(Int(fontSize))")
-            }
-            TextField("Font Family:", text: $fontFamily)
-        }
-        .padding()
-    }
-}
-
-struct ConnectionSettingsView: View {
-    var body: some View {
-        Text("settings.sshProfiles")
-            .padding()
-    }
-}
+// Settings view is now in Views/SettingsView.swift
 
 struct AISettingsView: View {
     @AppStorage("llmProvider") var llmProvider = "openai"

@@ -5,6 +5,7 @@ struct GitPanelView: View {
     @StateObject private var viewModel = GitViewModel()
     @State private var diffText: String = ""
     @State private var showingDiff = false
+    @State private var showingBlame = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,6 +51,9 @@ struct GitPanelView: View {
                 showingDiff = true
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .gitShowBlame)) { _ in
+            showingBlame = true
+        }
         .sheet(isPresented: $showingDiff) {
             VStack(spacing: 0) {
                 HStack {
@@ -62,6 +66,19 @@ struct GitPanelView: View {
                 DiffView(diffText: diffText)
             }
             .frame(minWidth: 600, minHeight: 400)
+        }
+        .sheet(isPresented: $showingBlame) {
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button("diff.close") { showingBlame = false }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(8)
+                }
+                BlameView(blameLines: viewModel.blameLines, filePath: viewModel.blameFilePath)
+            }
+            .frame(minWidth: 700, minHeight: 400)
         }
     }
 
@@ -219,6 +236,7 @@ struct GitPanelView: View {
         .padding(.vertical, 1)
         .contextMenu {
             Button("git.showDiff") { viewModel.showDiff(file.path) }
+            Button("git.blame") { viewModel.blameFile(file.path) }
             Divider()
             if staged {
                 Button("git.unstage") { viewModel.unstageFile(file.path) }

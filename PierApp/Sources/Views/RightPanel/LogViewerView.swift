@@ -126,6 +126,30 @@ struct LogViewerView: View {
                 .textFieldStyle(.plain)
                 .font(.caption)
 
+            // Regex toggle
+            Button(action: {
+                viewModel.isRegexFilter.toggle()
+                // Re-trigger filter
+                viewModel.filterText = viewModel.filterText
+            }) {
+                Text(".*")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(viewModel.isRegexFilter ? .blue : .secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(viewModel.isRegexFilter ? Color.blue.opacity(0.15) : Color.clear)
+                    .cornerRadius(3)
+            }
+            .buttonStyle(.borderless)
+            .help(String(localized: "log.regexFilter"))
+
+            if let error = viewModel.regexError {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(.red)
+                    .help(error)
+            }
+
             // Log level filters
             ForEach(LogLevel.allCases, id: \.self) { level in
                 Button(action: { viewModel.toggleLevel(level) }) {

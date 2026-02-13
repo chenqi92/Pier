@@ -259,3 +259,60 @@
 "db.queryHistory" = "Query History";
 "db.exportSuccess" = "Export Successful";
 "log.exportSuccess" = "Log exported";
+
+/* ═══════════════════════════════════════
+   Docker Compose
+   ═══════════════════════════════════════ */
+
+"docker.compose" = "Compose";
+"docker.composeUp" = "Compose Up";
+"docker.composeDown" = "Compose Down";
+"docker.composeRestart" = "Restart";
+
+/* ═══════════════════════════════════════
+   Git Blame
+   ═══════════════════════════════════════ */
+
+"git.blame" = "Blame";
+"git.blameEmpty" = "No blame data";
+
+/* ═══════════════════════════════════════
+   Log Regex Filter
+   ═══════════════════════════════════════ */
+
+"log.regexFilter" = "Regex Filter";
+
+/* ═══════════════════════════════════════
+   Settings
+   ═══════════════════════════════════════ */
+
+"settings.general" = "General";
+"settings.terminal" = "Terminal";
+"settings.shortcuts" = "Shortcuts";
+"settings.font" = "Font";
+"settings.fontFamily" = "Font Family";
+"settings.fontSize" = "Font Size";
+"settings.keyboardShortcuts" = "Keyboard Shortcuts";
+"settings.newTab" = "New Tab";
+"settings.closeTab" = "Close Tab";
+"settings.runQuery" = "Run Query";
+"settings.toggleSidebar" = "Toggle Sidebar";
+"settings.togglePanel" = "Toggle Panel";
+"settings.clearTerminal" = "Clear Terminal";
+"settings.copy" = "Copy";
+"settings.paste" = "Paste";
+"settings.find" = "Find";
+"settings.preferences" = "Preferences";
+"theme.appearance" = "Appearance";
+"theme.mode" = "Mode";
+
+/* ═══════════════════════════════════════
+   SSH Known Hosts
+   ═══════════════════════════════════════ */
+
+"ssh.unknownHost" = "Unknown Host";
+"ssh.unknownHostMsg" = "The host key is not recognized. Accept this key?";
+"ssh.mismatchHost" = "Host Key Changed";
+"ssh.mismatchHostMsg" = "WARNING: The host key has changed. This could indicate a MITM attack.";
+"ssh.acceptKey" = "Accept";
+"ssh.rejectKey" = "Reject";

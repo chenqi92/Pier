@@ -28,6 +28,14 @@ class AppThemeManager: ObservableObject {
 
     @AppStorage("pier.terminalTheme") var terminalThemeId: String = "default_dark"
 
+    // Font settings
+    @AppStorage("pier.fontSize") var fontSize: Double = 13
+    @AppStorage("pier.fontFamily") var fontFamily: String = "SF Mono"
+
+    // Pane width memory
+    @AppStorage("pier.sidebarWidth") var sidebarWidth: Double = 200
+    @AppStorage("pier.rightPanelWidth") var rightPanelWidth: Double = 280
+
     /// Current terminal theme derived from stored ID.
     var currentTerminalTheme: TerminalTheme {
         TerminalTheme.theme(forId: terminalThemeId)
@@ -53,5 +61,12 @@ class AppThemeManager: ObservableObject {
     func setTerminalTheme(_ id: String) {
         terminalThemeId = id
         objectWillChange.send()
+    }
+
+    /// Enable window frame auto-save.
+    func setupWindowPersistence() {
+        DispatchQueue.main.async {
+            NSApp.windows.first?.setFrameAutosaveName("PierMainWindow")
+        }
     }
 }

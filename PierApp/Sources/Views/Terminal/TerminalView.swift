@@ -7,14 +7,23 @@ import CPierCore
 struct TerminalView: NSViewRepresentable {
     let session: TerminalSessionInfo?
 
-    func makeNSView(context: Context) -> TerminalNSView {
-        let view = TerminalNSView()
-        return view
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+
+        let terminalView = TerminalNSView()
+        scrollView.documentView = terminalView
+
+        return scrollView
     }
 
-    func updateNSView(_ nsView: TerminalNSView, context: Context) {
-        // Start or switch terminal when session changes (fixes B2)
-        nsView.updateSession(session)
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let terminalView = scrollView.documentView as? TerminalNSView else { return }
+        terminalView.updateSession(session)
     }
 }
 
@@ -38,10 +47,24 @@ class TerminalNSView: NSView {
     private var terminalHandle: OpaquePointer?
     private var readTimer: Timer?
     private var blinkTimer: Timer?
+    private var currentSessionId: UUID?
+
+    // Screen buffer (visible area)
     private var screenBuffer: [[Character]] = []
     private var cursorX: Int = 0
     private var cursorY: Int = 0
-    private var currentSessionId: UUID?
+
+    // Scrollback buffer (max 10,000 lines)
+    private let maxScrollback = 10_000
+    private var scrollbackBuffer: [[Character]] = []
+
+    // Text selection
+    private var selectionStart: (row: Int, col: Int)?
+    private var selectionEnd: (row: Int, col: Int)?
+    private var isSelecting = false
+
+    // URL detection
+    private var detectedURLs: [(range: NSRange, url: URL, row: Int, startCol: Int, endCol: Int)] = []
 
     // MARK: - Lifecycle
 
@@ -102,13 +125,14 @@ class TerminalNSView: NSView {
             terminalHandle = nil
         }
         screenBuffer = []
+        scrollbackBuffer = []
         cursorX = 0
         cursorY = 0
     }
 
     func startTerminal(shell: String = "/bin/zsh") {
-        let cols = UInt16(bounds.width / cellWidth)
-        let rows = UInt16(bounds.height / cellHeight)
+        let cols = max(UInt16(1), UInt16(bounds.width / cellWidth))
+        let rows = max(UInt16(1), UInt16(bounds.height / cellHeight))
 
         terminalHandle = shell.withCString { shellPtr in
             pier_terminal_create(cols, rows, shellPtr)
@@ -134,21 +158,39 @@ class TerminalNSView: NSView {
         if bytesRead > 0 {
             let data = Array(buffer[0..<Int(bytesRead)])
             processTerminalOutput(data)
+            updateDocumentSize()
+            detectURLsInBuffer()
             needsDisplay = true
         }
     }
 
+    // MARK: - Terminal Output Processing
+
+    private var visibleRows: Int {
+        max(1, Int(enclosingScrollView?.contentView.bounds.height ?? bounds.height) / Int(cellHeight))
+    }
+
     private func processTerminalOutput(_ bytes: [UInt8]) {
-        // Simple line-based rendering for MVP
-        // In production, this would use the VT emulator from Rust
+        let cols = max(1, Int(bounds.width / cellWidth))
         if let text = String(bytes: bytes, encoding: .utf8) {
             for char in text {
                 switch char {
                 case "\n":
                     cursorY += 1
                     cursorX = 0
+                    // Push to scrollback when exceeding visible rows
+                    if cursorY >= visibleRows {
+                        let overflow = screenBuffer.first ?? []
+                        scrollbackBuffer.append(overflow)
+                        screenBuffer.removeFirst()
+                        cursorY = screenBuffer.count
+                        // Trim scrollback
+                        if scrollbackBuffer.count > maxScrollback {
+                            scrollbackBuffer.removeFirst(scrollbackBuffer.count - maxScrollback)
+                        }
+                    }
                     if cursorY >= screenBuffer.count {
-                        screenBuffer.append(Array(repeating: " ", count: Int(bounds.width / cellWidth)))
+                        screenBuffer.append(Array(repeating: " ", count: cols))
                     }
                 case "\r":
                     cursorX = 0
@@ -156,13 +198,54 @@ class TerminalNSView: NSView {
                     if cursorX > 0 { cursorX -= 1 }
                 default:
                     while cursorY >= screenBuffer.count {
-                        screenBuffer.append(Array(repeating: " ", count: Int(bounds.width / cellWidth)))
+                        screenBuffer.append(Array(repeating: " ", count: cols))
                     }
                     if cursorX < screenBuffer[cursorY].count {
                         screenBuffer[cursorY][cursorX] = char
                         cursorX += 1
                     }
                 }
+            }
+        }
+    }
+
+    private func updateDocumentSize() {
+        let totalLines = scrollbackBuffer.count + screenBuffer.count
+        let requiredHeight = max(
+            enclosingScrollView?.contentView.bounds.height ?? bounds.height,
+            CGFloat(totalLines) * cellHeight
+        )
+        let width = enclosingScrollView?.contentView.bounds.width ?? bounds.width
+        setFrameSize(NSSize(width: width, height: requiredHeight))
+
+        // Auto-scroll to bottom
+        if let scrollView = enclosingScrollView {
+            let clipBounds = scrollView.contentView.bounds
+            let docHeight = frame.height
+            let isNearBottom = (clipBounds.origin.y + clipBounds.height) >= (docHeight - cellHeight * 3)
+            if isNearBottom || !isSelecting {
+                scroll(NSPoint(x: 0, y: max(0, frame.height - clipBounds.height)))
+            }
+        }
+    }
+
+    // MARK: - URL Detection
+
+    private func detectURLsInBuffer() {
+        detectedURLs.removeAll()
+        let allLines = scrollbackBuffer + screenBuffer
+
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return }
+
+        for (row, line) in allLines.enumerated() {
+            let text = String(line)
+            let range = NSRange(text.startIndex..., in: text)
+            let matches = detector.matches(in: text, range: range)
+            for match in matches {
+                guard let url = match.url else { continue }
+                let startCol = match.range.location
+                let endCol = match.range.location + match.range.length
+                detectedURLs.append((range: match.range, url: url, row: row, startCol: startCol, endCol: endCol))
             }
         }
     }
@@ -179,24 +262,73 @@ class TerminalNSView: NSView {
         let font = NSFont(name: fontFamily, size: fontSize)
             ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
-        let attrs: [NSAttributedString.Key: Any] = [
+        let normalAttrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: theme.foreground,
         ]
 
-        // Render screen buffer
-        for (row, line) in screenBuffer.enumerated() {
-            let y = bounds.height - CGFloat(row + 1) * cellHeight
-            let text = String(line)
-            let attrString = NSAttributedString(string: text, attributes: attrs)
-            attrString.draw(at: NSPoint(x: 2, y: y))
+        let urlAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.systemBlue,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
+
+        let allLines = scrollbackBuffer + screenBuffer
+        let totalLines = allLines.count
+
+        // Calculate visible range from scroll position
+        let clipBounds = enclosingScrollView?.contentView.bounds ?? bounds
+        let firstVisibleRow = max(0, Int(clipBounds.origin.y / cellHeight) - 1)
+        let lastVisibleRow = min(totalLines, firstVisibleRow + Int(clipBounds.height / cellHeight) + 2)
+
+        // Render visible lines
+        for row in firstVisibleRow..<lastVisibleRow {
+            guard row < allLines.count else { break }
+            let line = allLines[row]
+            let y = frame.height - CGFloat(row + 1) * cellHeight
+
+            // Check if this row has URLs
+            let rowURLs = detectedURLs.filter { $0.row == row }
+
+            // Render selection highlight
+            if let start = selectionStart, let end = selectionEnd {
+                let (sRow, sCol) = normalizeSelection(start: start, end: end).start
+                let (eRow, eCol) = normalizeSelection(start: start, end: end).end
+                if row >= sRow && row <= eRow {
+                    let startCol = (row == sRow) ? sCol : 0
+                    let endCol = (row == eRow) ? eCol : line.count
+                    let selRect = NSRect(
+                        x: CGFloat(startCol) * cellWidth + 2,
+                        y: y,
+                        width: CGFloat(endCol - startCol) * cellWidth,
+                        height: cellHeight
+                    )
+                    context.setFillColor(theme.selection.cgColor)
+                    context.fill(selRect)
+                }
+            }
+
+            // Render text character by character for URL styling
+            if !rowURLs.isEmpty {
+                for (col, char) in line.enumerated() {
+                    let isURL = rowURLs.contains { col >= $0.startCol && col < $0.endCol }
+                    let attrs = isURL ? urlAttrs : normalAttrs
+                    let str = NSAttributedString(string: String(char), attributes: attrs)
+                    str.draw(at: NSPoint(x: CGFloat(col) * cellWidth + 2, y: y))
+                }
+            } else {
+                let text = String(line)
+                let attrString = NSAttributedString(string: text, attributes: normalAttrs)
+                attrString.draw(at: NSPoint(x: 2, y: y))
+            }
         }
 
-        // Render cursor
+        // Render cursor (only in screen area, not scrollback)
         if cursorVisible {
+            let cursorAbsRow = scrollbackBuffer.count + cursorY
             let cursorRect = NSRect(
                 x: CGFloat(cursorX) * cellWidth + 2,
-                y: bounds.height - CGFloat(cursorY + 1) * cellHeight,
+                y: frame.height - CGFloat(cursorAbsRow + 1) * cellHeight,
                 width: cellWidth,
                 height: cellHeight
             )
@@ -205,11 +337,106 @@ class TerminalNSView: NSView {
         }
     }
 
+    // MARK: - Text Selection
+
+    private func cellPosition(for point: NSPoint) -> (row: Int, col: Int) {
+        let row = Int((frame.height - point.y) / cellHeight)
+        let col = max(0, Int((point.x - 2) / cellWidth))
+        return (row, col)
+    }
+
+    private func normalizeSelection(start: (row: Int, col: Int), end: (row: Int, col: Int))
+        -> (start: (row: Int, col: Int), end: (row: Int, col: Int))
+    {
+        if start.row < end.row || (start.row == end.row && start.col <= end.col) {
+            return (start, end)
+        }
+        return (end, start)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+
+        // ⌘+click on URL
+        if event.modifierFlags.contains(.command) {
+            let pos = cellPosition(for: point)
+            if let urlMatch = detectedURLs.first(where: { $0.row == pos.row && pos.col >= $0.startCol && pos.col < $0.endCol }) {
+                NSWorkspace.shared.open(urlMatch.url)
+                return
+            }
+        }
+
+        selectionStart = cellPosition(for: point)
+        selectionEnd = selectionStart
+        isSelecting = true
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isSelecting else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        selectionEnd = cellPosition(for: point)
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        isSelecting = false
+    }
+
+    /// Get the selected text as a string.
+    private func selectedText() -> String? {
+        guard let start = selectionStart, let end = selectionEnd else { return nil }
+        let normalized = normalizeSelection(start: start, end: end)
+        let sRow = normalized.start.row
+        let sCol = normalized.start.col
+        let eRow = normalized.end.row
+        let eCol = normalized.end.col
+
+        let allLines = scrollbackBuffer + screenBuffer
+        var result = ""
+
+        for row in sRow..<min(eRow + 1, allLines.count) {
+            let line = allLines[row]
+            let startCol = (row == sRow) ? min(sCol, line.count) : 0
+            let endCol = (row == eRow) ? min(eCol, line.count) : line.count
+
+            if startCol < endCol {
+                let slice = line[startCol..<endCol]
+                result += String(slice)
+            }
+            if row < eRow {
+                result += "\n"
+            }
+        }
+
+        return result.isEmpty ? nil : result
+    }
+
     // MARK: - Input Handling
 
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
+        // ⌘C: copy selection
+        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "c" {
+            if let text = selectedText() {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                return
+            }
+        }
+
+        // ⌘V: paste
+        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+            if let text = NSPasteboard.general.string(forType: .string) {
+                let bytes = Array(text.utf8)
+                if let handle = terminalHandle, !bytes.isEmpty {
+                    pier_terminal_write(handle, bytes, UInt(bytes.count))
+                }
+                return
+            }
+        }
+
         guard let handle = terminalHandle else { return }
 
         var bytes: [UInt8] = []
@@ -234,13 +461,30 @@ class TerminalNSView: NSView {
             case 48: // Tab
                 bytes = [0x09]
             default:
-                bytes = Array(chars.utf8)
+                // Ctrl+key shortcuts
+                if event.modifierFlags.contains(.control) {
+                    let lower = chars.lowercased()
+                    if let ch = lower.first, ch >= "a" && ch <= "z" {
+                        bytes = [UInt8(ch.asciiValue! - 96)]  // Ctrl+A = 0x01, etc.
+                    }
+                } else {
+                    bytes = Array(chars.utf8)
+                }
             }
         }
 
         if !bytes.isEmpty {
+            // Clear selection on typing
+            selectionStart = nil
+            selectionEnd = nil
             pier_terminal_write(handle, bytes, UInt(bytes.count))
         }
+    }
+
+    // MARK: - Scroll
+
+    override func scrollWheel(with event: NSEvent) {
+        super.scrollWheel(with: event)
     }
 
     // MARK: - Resize
@@ -248,8 +492,8 @@ class TerminalNSView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         if let handle = terminalHandle {
-            let cols = UInt16(newSize.width / cellWidth)
-            let rows = UInt16(newSize.height / cellHeight)
+            let cols = max(UInt16(1), UInt16(newSize.width / cellWidth))
+            let rows = max(UInt16(1), UInt16((enclosingScrollView?.contentView.bounds.height ?? newSize.height) / cellHeight))
             pier_terminal_resize(handle, cols, rows)
         }
     }
