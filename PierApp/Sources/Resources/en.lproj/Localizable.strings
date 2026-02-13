@@ -232,3 +232,30 @@
 "log.discoverFiles" = "Discover Log Files";
 "log.noRemoteLogs" = "No remote log files found";
 "log.remote" = "(Remote)";
+
+/* ═══════════════════════════════════════
+   Diff View
+   ═══════════════════════════════════════ */
+
+"diff.title" = "Diff";
+"diff.close" = "Close";
+"diff.empty" = "No diff data";
+"diff.inline" = "Inline";
+"diff.sideBySide" = "Side by Side";
+
+/* ═══════════════════════════════════════
+   App Themes
+   ═══════════════════════════════════════ */
+
+"theme.system" = "System";
+"theme.light" = "Light";
+"theme.dark" = "Dark";
+"theme.terminal" = "Terminal Theme";
+
+/* ═══════════════════════════════════════
+   Extended DB & Log
+   ═══════════════════════════════════════ */
+
+"db.queryHistory" = "Query History";
+"db.exportSuccess" = "Export Successful";
+"log.exportSuccess" = "Log exported";

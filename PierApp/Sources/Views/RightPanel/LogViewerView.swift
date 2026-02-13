@@ -41,7 +41,52 @@ struct LogViewerView: View {
                 .font(.caption)
                 .fontWeight(.medium)
 
+            if viewModel.isRemoteMode {
+                Text("log.remote")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.orange.opacity(0.15))
+                    .cornerRadius(3)
+            }
+
             Spacer()
+
+            // Remote logs dropdown
+            if !viewModel.remoteLogFiles.isEmpty {
+                Menu {
+                    ForEach(viewModel.remoteLogFiles, id: \.self) { path in
+                        Button((path as NSString).lastPathComponent) {
+                            viewModel.loadRemoteFile(path)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "server.rack")
+                        .font(.caption)
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 20)
+                .help(String(localized: "log.remoteLogs"))
+            }
+
+            Button(action: { viewModel.discoverRemoteLogFiles() }) {
+                Image(systemName: "magnifyingglass.circle")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help(String(localized: "log.discoverFiles"))
+
+            // JSON toggle
+            Button(action: {
+                viewModel.isJsonMode.toggle()
+            }) {
+                Image(systemName: viewModel.isJsonMode ? "curlybraces.square.fill" : "curlybraces.square")
+                    .font(.caption)
+                    .foregroundColor(viewModel.isJsonMode ? .blue : .secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("JSON")
 
             Button(action: { viewModel.openLogFile() }) {
                 Image(systemName: "folder")
@@ -186,6 +231,20 @@ struct LogViewerView: View {
                     .lineLimit(1)
             }
             Spacer()
+
+            // Export button
+            Button(action: {
+                if let url = viewModel.exportLog() {
+                    NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+                }
+            }) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.borderless)
+            .help(String(localized: "db.export"))
+            .disabled(viewModel.filteredLines.isEmpty)
+
             Text("\(viewModel.filteredLines.count)/\(viewModel.allLines.count) lines")
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)

@@ -29,10 +29,10 @@ class TerminalNSView: NSView {
     private var cellHeight: CGFloat = 16
     private var cursorVisible = true
 
-    // Colors
-    private let backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
-    private let foregroundColor = NSColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1.0)
-    private let cursorColor = NSColor(red: 0.3, green: 0.8, blue: 1.0, alpha: 0.8)
+    // Theme (replaces hardcoded colors)
+    var theme: TerminalTheme = .defaultDark {
+        didSet { applyTheme() }
+    }
 
     // PTY handle from Rust
     private var terminalHandle: OpaquePointer?
@@ -57,7 +57,7 @@ class TerminalNSView: NSView {
 
     private func setupView() {
         wantsLayer = true
-        layer?.backgroundColor = backgroundColor.cgColor
+        layer?.backgroundColor = theme.background.cgColor
 
         // Calculate cell dimensions from font
         let font = NSFont(name: fontFamily, size: fontSize)
@@ -67,11 +67,17 @@ class TerminalNSView: NSView {
         cellWidth = ceil(charSize.width)
         cellHeight = ceil(charSize.height + 2)
 
-        // Start cursor blink timer (save reference for cleanup, fixes B6)
-        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        // Cursor blink timer (0.6s interval)
+        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
             self?.cursorVisible.toggle()
             self?.setNeedsDisplay(self?.bounds ?? .zero)
         }
+    }
+
+    /// Apply the current theme colors to the view.
+    func applyTheme() {
+        layer?.backgroundColor = theme.background.cgColor
+        needsDisplay = true
     }
 
     /// Called by updateNSView when the session changes.
@@ -167,7 +173,7 @@ class TerminalNSView: NSView {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
 
         // Background
-        context.setFillColor(backgroundColor.cgColor)
+        context.setFillColor(theme.background.cgColor)
         context.fill(bounds)
 
         let font = NSFont(name: fontFamily, size: fontSize)
@@ -175,7 +181,7 @@ class TerminalNSView: NSView {
 
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: foregroundColor,
+            .foregroundColor: theme.foreground,
         ]
 
         // Render screen buffer
@@ -194,7 +200,7 @@ class TerminalNSView: NSView {
                 width: cellWidth,
                 height: cellHeight
             )
-            context.setFillColor(cursorColor.cgColor)
+            context.setFillColor(theme.cursor.cgColor)
             context.fill(cursorRect)
         }
     }

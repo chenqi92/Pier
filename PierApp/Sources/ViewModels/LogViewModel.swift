@@ -330,4 +330,46 @@ class LogViewModel: ObservableObject {
         remotePollingTimer?.invalidate()
         remotePollingTimer = nil
     }
+
+    // MARK: - JSON Log Support
+
+    @Published var isJsonMode = false
+
+    /// Auto-detect if log lines appear to be JSON.
+    func detectJsonLog() {
+        let sample = allLines.prefix(10)
+        let jsonCount = sample.filter { $0.rawText.trimmingCharacters(in: .whitespaces).hasPrefix("{") }.count
+        isJsonMode = jsonCount > sample.count / 2
+    }
+
+    /// Format a JSON log line as pretty-printed string.
+    func formatJsonLine(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
+              let output = String(data: pretty, encoding: .utf8) else {
+            return text
+        }
+        return output
+    }
+
+    // MARK: - Log Export
+
+    /// Export filtered log lines to ~/Downloads. Returns file URL on success.
+    func exportLog() -> URL? {
+        guard !filteredLines.isEmpty else { return nil }
+
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let filename = "pier_log_\(timestamp).log"
+        let url = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+            .appendingPathComponent(filename)
+
+        let content = filteredLines.map(\.rawText).joined(separator: "\n")
+        guard let data = content.data(using: .utf8) else { return nil }
+        try? data.write(to: url, options: .atomic)
+        return url
+    }
 }

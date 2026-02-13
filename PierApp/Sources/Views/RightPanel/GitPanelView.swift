@@ -3,6 +3,8 @@ import SwiftUI
 /// Git repository status and operations panel.
 struct GitPanelView: View {
     @StateObject private var viewModel = GitViewModel()
+    @State private var diffText: String = ""
+    @State private var showingDiff = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +42,26 @@ struct GitPanelView: View {
                     stashView
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gitShowDiff)) { notification in
+            if let info = notification.object as? [String: String],
+               let diff = info["diff"] {
+                diffText = diff
+                showingDiff = true
+            }
+        }
+        .sheet(isPresented: $showingDiff) {
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button("diff.close") { showingDiff = false }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(8)
+                }
+                DiffView(diffText: diffText)
+            }
+            .frame(minWidth: 600, minHeight: 400)
         }
     }
 
