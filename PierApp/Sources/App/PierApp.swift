@@ -5,10 +5,12 @@ import CPierCore
 @main
 struct PierApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var serviceManager = RemoteServiceManager()
 
     var body: some Scene {
         WindowGroup {
             MainView()
+                .environmentObject(serviceManager)
                 .frame(minWidth: 1200, minHeight: 700)
         }
         .windowStyle(.titleBar)

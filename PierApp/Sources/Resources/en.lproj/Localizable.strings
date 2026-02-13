@@ -144,3 +144,21 @@
 "settings.apiKey" = "API Key:";
 "settings.model" = "Model:";
 "settings.keySaved" = "✅ Key saved to Keychain";
+
+/* ═══════════════════════════════════════
+   SSH & Remote Services
+   ═══════════════════════════════════════ */
+
+"ssh.connecting" = "Connecting...";
+"ssh.connected" = "Connected";
+"ssh.disconnected" = "Disconnected";
+"ssh.disconnect" = "Disconnect";
+"ssh.detectingServices" = "Detecting services...";
+"ssh.connectFailed" = "Connection failed";
+"ssh.servicesDetected %lld %lld" = "%lld services found (%lld running)";
+
+"service.running" = "Running";
+"service.stopped" = "Stopped";
+"service.notInstalled" = "Not Installed";
+
+"redis.comingSoon" = "Redis Client\nComing Soon";

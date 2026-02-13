@@ -1,14 +1,22 @@
 import SwiftUI
 
 /// Right panel with switchable modes: Markdown preview, SFTP file browser,
-/// Docker management, Git panel, MySQL client, Log viewer.
+/// Docker management, Git panel, MySQL client, Redis, Log viewer.
+/// Remote-context tabs only appear when services are detected via SSH.
 struct RightPanelView: View {
     @State private var selectedMode: RightPanelMode = .markdown
     @State private var markdownPath: String? = nil
     @StateObject private var remoteFileVM = RemoteFileViewModel()
+    @EnvironmentObject var serviceManager: RemoteServiceManager
 
     var body: some View {
         VStack(spacing: 0) {
+            // Connection status bar
+            if serviceManager.isConnected || serviceManager.isConnecting {
+                connectionStatusBar
+                Divider()
+            }
+
             // Mode switcher
             modeSwitcher
 
@@ -26,6 +34,16 @@ struct RightPanelView: View {
                 GitPanelView()
             case .database:
                 DatabaseClientView()
+            case .redis:
+                VStack {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 36))
+                        .foregroundColor(.secondary)
+                    Text("redis.comingSoon")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .logViewer:
                 LogViewerView()
             }
@@ -37,12 +55,59 @@ struct RightPanelView: View {
                 selectedMode = .markdown
             }
         }
+        .onChange(of: serviceManager.isConnected) { _, connected in
+            if !connected && selectedMode.context == .remote {
+                selectedMode = .markdown
+            }
+        }
     }
+
+    // MARK: - Connection Status Bar
+
+    private var connectionStatusBar: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(serviceManager.isConnected ? Color.green : Color.orange)
+                .frame(width: 6, height: 6)
+
+            if serviceManager.isConnecting {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .frame(width: 12, height: 12)
+            }
+
+            Text(serviceManager.connectionStatus)
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+
+            Spacer()
+
+            if serviceManager.isConnected {
+                Text(serviceManager.connectedHost)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.secondary)
+
+                Button(action: { serviceManager.disconnect() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help(String(localized: "ssh.disconnect"))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+    }
+
+    // MARK: - Mode Switcher
 
     private var modeSwitcher: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 2) {
-                ForEach(RightPanelMode.allCases, id: \.self) { mode in
+                ForEach(serviceManager.availablePanelModes, id: \.self) { mode in
                     Button(action: { selectedMode = mode }) {
                         HStack(spacing: 4) {
                             Image(systemName: mode.iconName)
@@ -72,18 +137,29 @@ enum RightPanelMode: String, CaseIterable {
     case docker = "Docker"
     case git = "Git"
     case database = "MySQL"
+    case redis = "Redis"
     case logViewer = "Logs"
 
     var title: String { rawValue }
 
     var iconName: String {
         switch self {
-        case .markdown: return "doc.text"
-        case .sftp: return "externaldrive.connected.to.line.below"
-        case .docker: return "shippingbox.fill"
-        case .git: return "arrow.triangle.branch"
-        case .database: return "cylinder.fill"
+        case .markdown:  return "doc.text"
+        case .sftp:      return "externaldrive.connected.to.line.below"
+        case .docker:    return "shippingbox.fill"
+        case .git:       return "arrow.triangle.branch"
+        case .database:  return "cylinder.fill"
+        case .redis:     return "server.rack"
         case .logViewer: return "doc.text.magnifyingglass"
+        }
+    }
+
+    enum Context { case local, remote }
+
+    var context: Context {
+        switch self {
+        case .markdown, .git: return .local
+        case .sftp, .docker, .database, .redis, .logViewer: return .remote
         }
     }
 }

@@ -1,5 +1,6 @@
 pub mod session;
 pub mod sftp;
+pub mod service_detector;
 
 /// SSH connection configuration.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

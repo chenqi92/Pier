@@ -4,6 +4,11 @@
 #include <stdlib.h>
 
 /**
+ * SSH session manager.
+ */
+typedef struct SshSession SshSession;
+
+/**
  * Represents a terminal session with a PTY backend and VT parser.
  */
 typedef struct TerminalSession TerminalSession;
@@ -12,6 +17,11 @@ typedef struct TerminalSession TerminalSession;
  * Opaque pointer to a TerminalSession.
  */
 typedef struct TerminalSession *PierTerminalHandle;
+
+/**
+ * Opaque pointer to an SSH session.
+ */
+typedef struct SshSession *PierSshHandle;
 
 /**
  * Create a new terminal session.
@@ -58,6 +68,43 @@ char *pier_search_files(const char *root, const char *pattern, uintptr_t max_res
  * Caller must free the returned string with pier_string_free.
  */
 char *pier_list_directory(const char *path);
+
+/**
+ * Connect to an SSH server.
+ * auth_type: 0 = password, 1 = key file
+ * credential: password string (auth_type=0) or key file path (auth_type=1)
+ * Returns null on failure.
+ */
+PierSshHandle pier_ssh_connect(const char *host,
+                               uint16_t port,
+                               const char *username,
+                               int32_t auth_type,
+                               const char *credential);
+
+/**
+ * Disconnect an SSH session and free the handle.
+ */
+int32_t pier_ssh_disconnect(PierSshHandle handle);
+
+/**
+ * Check if SSH session is connected.
+ * Returns 1 if connected, 0 if not, -1 on invalid handle.
+ */
+int32_t pier_ssh_is_connected(PierSshHandle handle);
+
+/**
+ * Detect services installed on the remote server.
+ * Returns a JSON array of DetectedService.
+ * Caller must free with pier_string_free.
+ */
+char *pier_ssh_detect_services(PierSshHandle handle);
+
+/**
+ * Execute a command on the remote server.
+ * Returns JSON: {"exit_code": N, "stdout": "..."}
+ * Caller must free with pier_string_free.
+ */
+char *pier_ssh_exec(PierSshHandle handle, const char *command);
 
 /**
  * Free a string allocated by Rust.

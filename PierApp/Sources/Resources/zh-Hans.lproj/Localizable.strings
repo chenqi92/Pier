@@ -144,3 +144,21 @@
 "settings.apiKey" = "API 密钥：";
 "settings.model" = "模型：";
 "settings.keySaved" = "✅ 密钥已保存到钥匙串";
+
+/* ═══════════════════════════════════════
+   SSH 与远程服务
+   ═══════════════════════════════════════ */
+
+"ssh.connecting" = "连接中...";
+"ssh.connected" = "已连接";
+"ssh.disconnected" = "已断开";
+"ssh.disconnect" = "断开连接";
+"ssh.detectingServices" = "正在检测服务...";
+"ssh.connectFailed" = "连接失败";
+"ssh.servicesDetected %lld %lld" = "发现 %lld 个服务（%lld 个运行中）";
+
+"service.running" = "运行中";
+"service.stopped" = "已停止";
+"service.notInstalled" = "未安装";
+
+"redis.comingSoon" = "Redis 客户端\n即将推出";

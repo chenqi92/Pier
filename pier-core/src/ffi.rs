@@ -7,6 +7,22 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use crate::terminal::TerminalSession;
 use crate::search;
+use crate::ssh::session::SshSession;
+use crate::ssh::{SshConfig, SshAuth};
+use crate::ssh::service_detector;
+use std::sync::OnceLock;
+
+/// Global tokio runtime for async SSH operations.
+fn ssh_runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to create SSH tokio runtime")
+    })
+}
 
 // ═══════════════════════════════════════════════════════════
 // Terminal FFI
@@ -169,6 +185,157 @@ pub extern "C" fn pier_list_directory(path: *const c_char) -> *mut c_char {
             }
         }
         Err(_) => std::ptr::null_mut(),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// SSH FFI
+// ═══════════════════════════════════════════════════════════
+
+/// Opaque pointer to an SSH session.
+pub type PierSshHandle = *mut SshSession;
+
+/// Connect to an SSH server.
+/// auth_type: 0 = password, 1 = key file
+/// credential: password string (auth_type=0) or key file path (auth_type=1)
+/// Returns null on failure.
+#[no_mangle]
+pub extern "C" fn pier_ssh_connect(
+    host: *const c_char,
+    port: u16,
+    username: *const c_char,
+    auth_type: i32,
+    credential: *const c_char,
+) -> PierSshHandle {
+    if host.is_null() || username.is_null() || credential.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let host_str = unsafe { CStr::from_ptr(host).to_str().unwrap_or("") };
+    let username_str = unsafe { CStr::from_ptr(username).to_str().unwrap_or("") };
+    let credential_str = unsafe { CStr::from_ptr(credential).to_str().unwrap_or("") };
+
+    let auth = match auth_type {
+        0 => SshAuth::Password(credential_str.to_string()),
+        1 => SshAuth::KeyFile {
+            path: credential_str.to_string(),
+            passphrase: None,
+        },
+        _ => {
+            log::error!("Unknown SSH auth type: {}", auth_type);
+            return std::ptr::null_mut();
+        }
+    };
+
+    let config = SshConfig {
+        host: host_str.to_string(),
+        port,
+        username: username_str.to_string(),
+        auth,
+    };
+
+    let mut session = SshSession::new(config);
+
+    // Block on async connect using the global runtime
+    match ssh_runtime().block_on(session.connect()) {
+        Ok(()) => {
+            log::info!("SSH connected to {}:{}", host_str, port);
+            Box::into_raw(Box::new(session))
+        }
+        Err(e) => {
+            log::error!("SSH connect failed: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Disconnect an SSH session and free the handle.
+#[no_mangle]
+pub extern "C" fn pier_ssh_disconnect(handle: PierSshHandle) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+
+    let mut session = unsafe { Box::from_raw(handle) };
+    match ssh_runtime().block_on(session.disconnect()) {
+        Ok(()) => {
+            log::info!("SSH disconnected");
+            0
+        }
+        Err(e) => {
+            log::error!("SSH disconnect error: {}", e);
+            -1
+        }
+    }
+}
+
+/// Check if SSH session is connected.
+/// Returns 1 if connected, 0 if not, -1 on invalid handle.
+#[no_mangle]
+pub extern "C" fn pier_ssh_is_connected(handle: PierSshHandle) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    // Safety: we only read, handle is valid
+    let session = unsafe { &*handle };
+    if session.is_connected() { 1 } else { 0 }
+}
+
+/// Detect services installed on the remote server.
+/// Returns a JSON array of DetectedService.
+/// Caller must free with pier_string_free.
+#[no_mangle]
+pub extern "C" fn pier_ssh_detect_services(handle: PierSshHandle) -> *mut c_char {
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let session = unsafe { &*handle };
+    let services = ssh_runtime().block_on(service_detector::detect_all(session));
+
+    match serde_json::to_string(&services) {
+        Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
+        Err(e) => {
+            log::error!("Failed to serialize services: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Execute a command on the remote server.
+/// Returns JSON: {"exit_code": N, "stdout": "..."}
+/// Caller must free with pier_string_free.
+#[no_mangle]
+pub extern "C" fn pier_ssh_exec(
+    handle: PierSshHandle,
+    command: *const c_char,
+) -> *mut c_char {
+    if handle.is_null() || command.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let session = unsafe { &*handle };
+    let cmd_str = unsafe { CStr::from_ptr(command).to_str().unwrap_or("") };
+
+    match ssh_runtime().block_on(session.exec_command(cmd_str)) {
+        Ok((exit_code, stdout)) => {
+            let result = serde_json::json!({
+                "exit_code": exit_code,
+                "stdout": stdout,
+            });
+            match CString::new(result.to_string()) {
+                Ok(cs) => cs.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        Err(e) => {
+            log::error!("SSH exec failed: {}", e);
+            let err = serde_json::json!({
+                "exit_code": -1,
+                "stdout": format!("Error: {}", e),
+            });
+            CString::new(err.to_string()).unwrap_or_default().into_raw()
+        }
     }
 }
 

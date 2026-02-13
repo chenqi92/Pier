@@ -117,4 +117,55 @@ impl SshSession {
     pub fn is_connected(&self) -> bool {
         self.handle.is_some()
     }
+
+    /// Execute a single command over SSH and return (exit_code, stdout).
+    pub async fn exec_command(&self, command: &str) -> Result<(i32, String), anyhow::Error> {
+        let handle = self
+            .handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Not connected"))?;
+
+        let handle = handle.lock().await;
+        let mut channel = handle.channel_open_session().await?;
+        channel.exec(true, command).await?;
+
+        let mut stdout = Vec::new();
+        let mut exit_code: i32 = -1;
+
+        loop {
+            // Safety: channel_read with timeout to avoid hanging
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                channel.wait(),
+            ).await {
+                Ok(Some(msg)) => {
+                    match msg {
+                        russh::ChannelMsg::Data { ref data } => {
+                            stdout.extend_from_slice(data);
+                        }
+                        russh::ChannelMsg::ExtendedData { ref data, .. } => {
+                            // stderr — append to stdout for simplicity
+                            stdout.extend_from_slice(data);
+                        }
+                        russh::ChannelMsg::ExitStatus { exit_status } => {
+                            exit_code = exit_status as i32;
+                        }
+                        russh::ChannelMsg::Eof => {
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(None) => break, // Channel closed
+                Err(_) => {
+                    // Timeout — command took too long
+                    log::warn!("SSH exec timeout for command: {}", command);
+                    break;
+                }
+            }
+        }
+
+        let output = String::from_utf8_lossy(&stdout).trim().to_string();
+        Ok((exit_code, output))
+    }
 }
