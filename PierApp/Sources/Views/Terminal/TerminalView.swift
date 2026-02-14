@@ -112,9 +112,9 @@ class TerminalNSView: NSView {
     private var ptyCols: Int = 80
     private var ptyRows: Int = 24
 
-    // Terminal → SFTP directory sync
+    // Terminal → SFTP directory sync (trailing-edge: check after output stops)
     private var lastDetectedCwd: String?
-    private var lastCwdCheckTime: CFAbsoluteTime = 0
+    private var pendingCwdCheck = false
 
     // Screen buffer (visible area)
     private var screenBuffer: [[Character]] = []
@@ -445,12 +445,13 @@ class TerminalNSView: NSView {
                 lastURLDetectionTime = now
                 detectURLsInBuffer()
             }
-            // Throttle CWD detection to at most once per second
-            if now - lastCwdCheckTime > 1.0 {
-                lastCwdCheckTime = now
-                detectPromptCwd()
-            }
             needsDisplay = true
+            // Mark that we need to check CWD once output settles
+            pendingCwdCheck = true
+        } else if pendingCwdCheck {
+            // Trailing-edge: output just stopped → prompt is fully rendered
+            pendingCwdCheck = false
+            detectPromptCwd()
         }
     }
 

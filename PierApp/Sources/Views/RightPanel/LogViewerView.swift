@@ -43,6 +43,15 @@ struct LogViewerView: View {
                 viewModel.discoverRemoteLogFiles()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalCwdChanged)) { notification in
+            guard let info = notification.object as? [String: String],
+                  let path = info["path"] else { return }
+            viewModel.currentRemoteCwd = path
+            // Re-discover logs when terminal directory changes
+            if viewModel.serviceManager?.isConnected == true {
+                viewModel.discoverRemoteLogFiles(cwdPath: path)
+            }
+        }
     }
 
     // MARK: - Header

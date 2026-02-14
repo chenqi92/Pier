@@ -582,15 +582,42 @@ struct RemoteFileView: View {
     // MARK: - Path Bar
 
     private var pathBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Image(systemName: "server.rack")
                 .foregroundColor(.green)
                 .font(.caption)
-            Text(viewModel.currentRemotePath)
-                .font(.system(size: 11, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
+
+            // Clickable breadcrumb segments
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    let segments = pathSegments(from: viewModel.currentRemotePath)
+                    ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                        if index > 0 {
+                            Text("/")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        Button(action: {
+                            viewModel.navigateTo(segment.fullPath)
+                        }) {
+                            Text(segment.name)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(index == segments.count - 1 ? .primary : .blue)
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { hovering in
+                            if hovering {
+                                NSCursor.pointingHand.push()
+                            } else {
+                                NSCursor.pop()
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer()
+
             Button(action: {
                 showNewFolderAlert = true
             }) {
@@ -616,6 +643,22 @@ struct RemoteFileView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+    }
+
+    /// Split a path into breadcrumb segments with their full paths.
+    private func pathSegments(from path: String) -> [(name: String, fullPath: String)] {
+        guard path.hasPrefix("/") else {
+            return [(name: path, fullPath: path)]
+        }
+        var segments: [(name: String, fullPath: String)] = [
+            (name: "/", fullPath: "/")
+        ]
+        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        for (index, part) in parts.enumerated() {
+            let fullPath = "/" + parts[0...index].joined(separator: "/")
+            segments.append((name: String(part), fullPath: fullPath))
+        }
+        return segments
     }
 
     // MARK: - File List

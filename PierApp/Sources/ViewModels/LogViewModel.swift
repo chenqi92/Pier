@@ -329,22 +329,48 @@ class LogViewModel: ObservableObject {
         }
     }
 
-    /// Discover common log files on the remote server.
-    func discoverRemoteLogFiles() {
+    /// Discover log files on the remote server.
+    /// Searches the current terminal CWD first, then /var/log and /opt.
+    func discoverRemoteLogFiles(cwdPath: String? = nil) {
         guard let sm = serviceManager, sm.isConnected else { return }
 
         Task {
-            let (exitCode, stdout) = await sm.exec(
+            var allPaths: [String] = []
+
+            // 1. Search the current terminal working directory first
+            let searchDir = cwdPath ?? currentRemoteCwd
+            if let cwd = searchDir, !cwd.isEmpty {
+                let (ec1, stdout1) = await sm.exec(
+                    "find \(shellEscape(cwd)) -maxdepth 3 -name '*.log' -type f 2>/dev/null | head -20"
+                )
+                if ec1 == 0 {
+                    let cwdLogs = stdout1.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+                    allPaths.append(contentsOf: cwdLogs)
+                }
+            }
+
+            // 2. Then search standard log directories
+            let (ec2, stdout2) = await sm.exec(
                 "find /var/log -name '*.log' -type f 2>/dev/null | head -30; " +
                 "find /opt -name '*.log' -type f -maxdepth 4 2>/dev/null | head -20"
             )
-            if exitCode == 0 {
-                remoteLogFiles = stdout
-                    .split(separator: "\n")
-                    .map(String.init)
-                    .filter { !$0.isEmpty }
+            if ec2 == 0 {
+                let stdLogs = stdout2.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+                // Add only those not already discovered from CWD
+                let existing = Set(allPaths)
+                allPaths.append(contentsOf: stdLogs.filter { !existing.contains($0) })
             }
+
+            remoteLogFiles = allPaths
         }
+    }
+
+    /// Current terminal working directory (updated via notification).
+    var currentRemoteCwd: String?
+
+    /// Shell-escape a path for remote commands.
+    private func shellEscape(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// Stop remote log polling.
