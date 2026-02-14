@@ -62,6 +62,9 @@ class TerminalScrollView: NSScrollView {
 class TerminalNSView: NSView {
     var session: TerminalSessionInfo?
 
+    // Use top-left origin (standard for terminal rendering)
+    override var isFlipped: Bool { true }
+
     // Terminal display configuration
     private var fontSize: CGFloat = 13
     private var fontFamily = "SF Mono"
@@ -79,6 +82,10 @@ class TerminalNSView: NSView {
     private var readTimer: Timer?
     private var blinkTimer: Timer?
     private var currentSessionId: UUID?
+
+    // PTY dimensions (authoritative — never recalculate from view size during processing)
+    private var ptyCols: Int = 80
+    private var ptyRows: Int = 24
 
     // Screen buffer (visible area)
     private var screenBuffer: [[Character]] = []
@@ -202,18 +209,20 @@ class TerminalNSView: NSView {
     func startTerminal(shell: String = "/bin/zsh") {
         // Use the scroll view's visible area for size, not document view bounds
         let visibleSize = enclosingScrollView?.contentView.bounds.size ?? bounds.size
-        let cols = max(UInt16(80), UInt16(visibleSize.width / cellWidth))
-        let rows = max(UInt16(24), UInt16(visibleSize.height / cellHeight))
+        let cols = max(Int(80), Int(visibleSize.width / cellWidth))
+        let rows = max(Int(24), Int(visibleSize.height / cellHeight))
+
+        // Store authoritative PTY dimensions
+        ptyCols = cols
+        ptyRows = rows
 
         terminalHandle = shell.withCString { shellPtr in
-            pier_terminal_create(cols, rows, shellPtr)
+            pier_terminal_create(UInt16(cols), UInt16(rows), shellPtr)
         }
 
         if terminalHandle != nil {
             // Initialize screen buffer to match PTY size
-            let colsInt = Int(cols)
-            let rowsInt = Int(rows)
-            screenBuffer = Array(repeating: Array(repeating: Character(" "), count: colsInt), count: rowsInt)
+            screenBuffer = Array(repeating: Array(repeating: Character(" "), count: cols), count: rows)
             startReadLoop()
         }
     }
@@ -249,11 +258,11 @@ class TerminalNSView: NSView {
     }
 
     private var visibleRows: Int {
-        max(1, Int(visibleSize.height / cellHeight))
+        ptyRows
     }
 
     private var visibleCols: Int {
-        max(1, Int(visibleSize.width / cellWidth))
+        ptyCols
     }
 
     /// State for the ANSI escape sequence parser
@@ -465,20 +474,20 @@ class TerminalNSView: NSView {
 
     private func updateDocumentSize() {
         let totalLines = scrollbackBuffer.count + screenBuffer.count
-        let requiredHeight = max(
-            enclosingScrollView?.contentView.bounds.height ?? bounds.height,
-            CGFloat(totalLines) * cellHeight
-        )
+        let visibleHeight = enclosingScrollView?.contentView.bounds.height ?? bounds.height
+        let requiredHeight = max(visibleHeight, CGFloat(totalLines) * cellHeight)
         let width = enclosingScrollView?.contentView.bounds.width ?? bounds.width
         setFrameSize(NSSize(width: width, height: requiredHeight))
 
-        // Auto-scroll to bottom
+        // Auto-scroll to bottom (isFlipped=true: origin at top, scroll down)
         if let scrollView = enclosingScrollView {
             let clipBounds = scrollView.contentView.bounds
             let docHeight = frame.height
-            let isNearBottom = (clipBounds.origin.y + clipBounds.height) >= (docHeight - cellHeight * 3)
+            let maxScrollY = max(0, docHeight - clipBounds.height)
+            let isNearBottom = clipBounds.origin.y >= maxScrollY - cellHeight * 3
             if isNearBottom || !isSelecting {
-                scroll(NSPoint(x: 0, y: max(0, frame.height - clipBounds.height)))
+                scrollView.contentView.scroll(to: NSPoint(x: 0, y: maxScrollY))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
             }
         }
     }
@@ -532,14 +541,15 @@ class TerminalNSView: NSView {
 
         // Calculate visible range from scroll position
         let clipBounds = enclosingScrollView?.contentView.bounds ?? bounds
+        // isFlipped=true: origin.y is the top of the visible area
         let firstVisibleRow = max(0, Int(clipBounds.origin.y / cellHeight) - 1)
         let lastVisibleRow = min(totalLines, firstVisibleRow + Int(clipBounds.height / cellHeight) + 2)
 
-        // Render visible lines
+        // Render visible lines (isFlipped: row 0 at y=0, row 1 at y=cellHeight, etc.)
         for row in firstVisibleRow..<lastVisibleRow {
             guard row < allLines.count else { break }
             let line = allLines[row]
-            let y = frame.height - CGFloat(row + 1) * cellHeight
+            let y = CGFloat(row) * cellHeight
 
             // Check if this row has URLs
             let rowURLs = detectedURLs.filter { $0.row == row }
@@ -582,7 +592,7 @@ class TerminalNSView: NSView {
             let cursorAbsRow = scrollbackBuffer.count + cursorY
             let cursorRect = NSRect(
                 x: CGFloat(cursorX) * cellWidth + 2,
-                y: frame.height - CGFloat(cursorAbsRow + 1) * cellHeight,
+                y: CGFloat(cursorAbsRow) * cellHeight,
                 width: cellWidth,
                 height: cellHeight
             )
@@ -594,7 +604,8 @@ class TerminalNSView: NSView {
     // MARK: - Text Selection
 
     private func cellPosition(for point: NSPoint) -> (row: Int, col: Int) {
-        let row = Int((frame.height - point.y) / cellHeight)
+        // isFlipped=true: point.y=0 is at the top
+        let row = Int(point.y / cellHeight)
         let col = max(0, Int((point.x - 2) / cellWidth))
         return (row, col)
     }
@@ -749,9 +760,31 @@ class TerminalNSView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         if let handle = terminalHandle {
-            let cols = max(UInt16(1), UInt16(newSize.width / cellWidth))
-            let rows = max(UInt16(1), UInt16((enclosingScrollView?.contentView.bounds.height ?? newSize.height) / cellHeight))
-            pier_terminal_resize(handle, cols, rows)
+            let newCols = max(1, Int(newSize.width / cellWidth))
+            let newRows = max(1, Int((enclosingScrollView?.contentView.bounds.height ?? newSize.height) / cellHeight))
+            if newCols != ptyCols || newRows != ptyRows {
+                ptyCols = newCols
+                ptyRows = newRows
+                pier_terminal_resize(handle, UInt16(newCols), UInt16(newRows))
+
+                // Resize screen buffer to match new dimensions
+                while screenBuffer.count < ptyRows {
+                    screenBuffer.append(Array(repeating: Character(" "), count: ptyCols))
+                }
+                while screenBuffer.count > ptyRows {
+                    let overflow = screenBuffer.removeFirst()
+                    scrollbackBuffer.append(overflow)
+                }
+                for i in 0..<screenBuffer.count {
+                    if screenBuffer[i].count < ptyCols {
+                        screenBuffer[i].append(contentsOf: Array(repeating: Character(" "), count: ptyCols - screenBuffer[i].count))
+                    } else if screenBuffer[i].count > ptyCols {
+                        screenBuffer[i] = Array(screenBuffer[i].prefix(ptyCols))
+                    }
+                }
+                cursorX = min(cursorX, ptyCols - 1)
+                cursorY = min(cursorY, ptyRows - 1)
+            }
         }
     }
 
