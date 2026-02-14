@@ -290,17 +290,19 @@ class TerminalNSView: NSView {
                     ansiState = .escape
                 case 0x0A: // LF (\n)
                     cursorY += 1
-                    cursorX = 0
                     if cursorY >= visibleRows {
-                        let overflow = screenBuffer.first ?? []
-                        scrollbackBuffer.append(overflow)
-                        screenBuffer.removeFirst()
-                        cursorY = screenBuffer.count
+                        // Scroll: move top line to scrollback
+                        if !screenBuffer.isEmpty {
+                            scrollbackBuffer.append(screenBuffer.removeFirst())
+                        }
+                        screenBuffer.append(Array(repeating: " ", count: cols))
+                        cursorY = visibleRows - 1
                         if scrollbackBuffer.count > maxScrollback {
                             scrollbackBuffer.removeFirst(scrollbackBuffer.count - maxScrollback)
                         }
                     }
-                    if cursorY >= screenBuffer.count {
+                    // Ensure screenBuffer has enough rows
+                    while cursorY >= screenBuffer.count {
                         screenBuffer.append(Array(repeating: " ", count: cols))
                     }
                 case 0x0D: // CR (\r)
@@ -323,12 +325,13 @@ class TerminalNSView: NSView {
                         cursorX = 0
                         cursorY += 1
                         if cursorY >= visibleRows {
-                            let overflow = screenBuffer.first ?? []
-                            scrollbackBuffer.append(overflow)
-                            screenBuffer.removeFirst()
-                            cursorY = screenBuffer.count
+                            if !screenBuffer.isEmpty {
+                                scrollbackBuffer.append(screenBuffer.removeFirst())
+                            }
+                            screenBuffer.append(Array(repeating: " ", count: cols))
+                            cursorY = visibleRows - 1
                         }
-                        if cursorY >= screenBuffer.count {
+                        while cursorY >= screenBuffer.count {
                             screenBuffer.append(Array(repeating: " ", count: cols))
                         }
                     }

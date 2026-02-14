@@ -100,7 +100,7 @@ class FileViewModel: ObservableObject {
         stopMonitoring()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let items = self?.buildFileTree(at: path, depth: 0, maxDepth: 2) ?? []
+            let items = self?.buildFileTree(at: path, depth: 0, maxDepth: 6) ?? []
 
             DispatchQueue.main.async {
                 self?.allFiles = items
@@ -113,7 +113,7 @@ class FileViewModel: ObservableObject {
 
     private func loadChildren(for item: FileItem) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let children = self?.buildFileTree(at: item.path, depth: 0, maxDepth: 1) ?? []
+            let children = self?.buildFileTree(at: item.path, depth: 0, maxDepth: 3) ?? []
 
             DispatchQueue.main.async {
                 item.children = children
