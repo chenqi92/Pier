@@ -3,6 +3,7 @@ import SwiftUI
 /// Docker container/image management panel.
 struct DockerManageView: View {
     @StateObject private var viewModel = DockerViewModel()
+    var serviceManager: RemoteServiceManager?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +41,15 @@ struct DockerManageView: View {
                     composeListView
                 case .networks:
                     networkListView
+                }
+            }
+        }
+        .onAppear {
+            if let sm = serviceManager {
+                viewModel.serviceManager = sm
+                viewModel.isRemoteMode = sm.isConnected
+                if sm.isConnected {
+                    viewModel.checkDockerAvailability()
                 }
             }
         }

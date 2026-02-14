@@ -309,11 +309,19 @@ class RemoteServiceManager: ObservableObject {
             let jsonString = String(cString: resultPtr)
             pier_string_free(resultPtr)
 
+            // Parse JSON with mixed types: exit_code is Int, stdout is String
             if let data = jsonString.data(using: .utf8),
-               let json = try? JSONDecoder().decode([String: String].self, from: data),
-               let exitCodeStr = json["exit_code"],
-               let exitCode = Int(exitCodeStr) {
-                return (exitCode, json["stdout"] ?? "")
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let exitCode: Int
+                if let code = json["exit_code"] as? Int {
+                    exitCode = code
+                } else if let codeStr = json["exit_code"] as? String, let code = Int(codeStr) {
+                    exitCode = code
+                } else {
+                    exitCode = -1
+                }
+                let stdout = json["stdout"] as? String ?? ""
+                return (exitCode, stdout)
             }
 
             return (-1, jsonString)

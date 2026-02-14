@@ -36,9 +36,22 @@ class RemoteFileViewModel: ObservableObject {
         if connected {
             // Load home directory on connect
             loadHomeDirectory()
-            startPwdPolling()
+            // Listen for terminal directory changes
+            NotificationCenter.default.addObserver(
+                forName: .terminalCwdChanged,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self,
+                      let info = notification.object as? [String: String],
+                      let path = info["path"] else { return }
+                // Navigate SFTP without posting back to terminal (avoids loop)
+                Task { @MainActor in
+                    self.navigateFromTerminal(path)
+                }
+            }
         } else {
-            stopPwdPolling()
+            NotificationCenter.default.removeObserver(self, name: .terminalCwdChanged, object: nil)
             remoteFiles = []
             currentRemotePath = "~"
             statusMessage = nil
@@ -56,6 +69,13 @@ class RemoteFileViewModel: ObservableObject {
             name: .sftpDirectoryChanged,
             object: ["path": path]
         )
+    }
+
+    /// Navigate from terminal prompt detection — no notification back to terminal.
+    func navigateFromTerminal(_ path: String) {
+        guard path != currentRemotePath else { return }
+        currentRemotePath = path
+        loadRemoteDirectory()
     }
 
     func navigateUp() {
@@ -328,4 +348,6 @@ class RemoteFileViewModel: ObservableObject {
 extension Notification.Name {
     /// Posted by SFTP panel when user navigates to a new directory.
     static let sftpDirectoryChanged = Notification.Name("pier.sftpDirectoryChanged")
+    /// Posted by terminal when detected CWD changes from prompt.
+    static let terminalCwdChanged = Notification.Name("pier.terminalCwdChanged")
 }

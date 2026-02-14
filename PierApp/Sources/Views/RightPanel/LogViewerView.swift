@@ -3,6 +3,7 @@ import SwiftUI
 /// Real-time log file viewer with filtering and highlighting.
 struct LogViewerView: View {
     @StateObject private var viewModel = LogViewModel()
+    var serviceManager: RemoteServiceManager?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +27,20 @@ struct LogViewerView: View {
 
                 // Status bar
                 logStatusBar
+            }
+        }
+        .onAppear {
+            if let sm = serviceManager {
+                viewModel.serviceManager = sm
+                if sm.isConnected {
+                    viewModel.discoverRemoteLogFiles()
+                }
+            }
+        }
+        .onChange(of: serviceManager?.isConnected) { _, connected in
+            if connected == true {
+                viewModel.serviceManager = serviceManager
+                viewModel.discoverRemoteLogFiles()
             }
         }
     }

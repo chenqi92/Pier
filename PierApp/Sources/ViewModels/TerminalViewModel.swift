@@ -24,11 +24,26 @@ class TerminalViewModel: ObservableObject {
         return sessions[id]
     }
 
+    /// The active tab's per-tab RemoteServiceManager (nil for local tabs).
+    var activeServiceManager: RemoteServiceManager? {
+        currentSession?.remoteServiceManager
+    }
+
     // MARK: - Tab Management
 
-    func addNewTab(title: String = "Terminal", shell: String = "/bin/zsh", isSSH: Bool = false) {
+    func addNewTab(title: String = "Terminal", shell: String = "/bin/zsh", isSSH: Bool = false, profile: ConnectionProfile? = nil) {
         let tab = TerminalTab(title: title, isSSH: isSSH, shellPath: shell)
         let session = TerminalSessionInfo(shellPath: shell, isSSH: isSSH, title: title)
+
+        // If SSH profile provided, create a per-tab service manager
+        if let profile = profile {
+            Task { @MainActor in
+                let sm = RemoteServiceManager()
+                session.remoteServiceManager = sm
+                session.connectedProfile = profile
+                sm.connect(profile: profile)
+            }
+        }
 
         tabs.append(tab)
         sessions[tab.id] = session
@@ -37,9 +52,22 @@ class TerminalViewModel: ObservableObject {
 
     func selectTab(_ id: UUID) {
         selectedTabId = id
+        // Notify that active service manager changed
+        objectWillChange.send()
     }
 
     func closeTab(_ id: UUID) {
+        // Notify TerminalNSView to destroy the cached PTY
+        NotificationCenter.default.post(name: .terminalTabClosed, object: id)
+
+        // Disconnect per-tab SSH if any
+        if let session = sessions[id], let sm = session.remoteServiceManager {
+            Task { @MainActor in
+                sm.disconnect()
+            }
+            session.remoteServiceManager = nil
+        }
+
         tabs.removeAll { $0.id == id }
         sessions.removeValue(forKey: id)
 
@@ -51,8 +79,6 @@ class TerminalViewModel: ObservableObject {
     // MARK: - Terminal Input
 
     func sendInput(_ text: String) {
-        // This would forward to the active terminal's PTY via Rust FFI
-        // For now, post notification that the terminal view can consume
         guard let id = selectedTabId else { return }
         NotificationCenter.default.post(
             name: .terminalInput,
@@ -64,4 +90,5 @@ class TerminalViewModel: ObservableObject {
 extension Notification.Name {
     static let terminalInput = Notification.Name("pier.terminalInput")
     static let terminalSSHDetected = Notification.Name("pier.terminalSSHDetected")
+    static let terminalTabClosed = Notification.Name("pier.terminalTabClosed")
 }

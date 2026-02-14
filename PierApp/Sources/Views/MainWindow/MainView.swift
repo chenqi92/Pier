@@ -13,6 +13,12 @@ struct MainView: View {
     @StateObject private var terminalViewModel = TerminalViewModel()
     @EnvironmentObject var serviceManager: RemoteServiceManager
 
+    /// The service manager for the currently selected terminal tab.
+    /// Falls back to the global service manager for local tabs.
+    private var activeServiceManager: RemoteServiceManager {
+        terminalViewModel.activeServiceManager ?? serviceManager
+    }
+
     @State private var showLeftPanel = true
     @State private var showRightPanel = true
     @State private var leftPanelWidth: CGFloat = 250
@@ -38,8 +44,9 @@ struct MainView: View {
 
             // ── Right Panel: Multi-function Area ──
             if showRightPanel {
-                RightPanelView()
+                RightPanelView(serviceManager: activeServiceManager)
                     .frame(minWidth: 200, idealWidth: rightPanelWidth, maxWidth: 500)
+                    .id(terminalViewModel.selectedTabId)
             }
         }
         .toolbar {
@@ -206,15 +213,33 @@ struct NewTabChooserView: View {
     }
 
     private func openSSHTab(_ profile: ConnectionProfile) {
-        let sshCommand = "ssh \(profile.username)@\(profile.host) -p \(profile.port)"
+        // Build SSH command with correct auth parameters
+        var sshCommand = "ssh \(profile.username)@\(profile.host) -p \(profile.port)"
+        sshCommand += " -o StrictHostKeyChecking=no"
+
+        if profile.authType == .keyFile, let keyPath = profile.keyFilePath {
+            sshCommand += " -i \(keyPath)"
+        }
+
         let title = profile.name.isEmpty ? profile.host : profile.name
-        terminalViewModel.addNewTab(title: title, shell: "/bin/zsh", isSSH: true)
+        // Creates a per-tab RemoteServiceManager and connects it
+        terminalViewModel.addNewTab(title: title, shell: "/bin/zsh", isSSH: true, profile: profile)
         // Send the SSH command to the new terminal after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            terminalViewModel.sendInput(sshCommand + "\n")
+            self.terminalViewModel.sendInput(sshCommand + "\n")
         }
-        // Also establish the managed SSH connection for SFTP/Docker/Redis panels
-        serviceManager.connect(profile: profile)
+
+        // For password auth, auto-type the stored password when the prompt appears
+        if profile.authType == .password {
+            if let password = try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)"),
+               !password.isEmpty {
+                // Wait for the password prompt to appear, then type it
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.terminalViewModel.sendInput(password + "\n")
+                }
+            }
+        }
+
         dismiss()
     }
 }

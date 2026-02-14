@@ -7,7 +7,7 @@ struct RightPanelView: View {
     @State private var selectedMode: RightPanelMode = .markdown
     @State private var markdownPath: String? = nil
     @StateObject private var remoteFileVM = RemoteFileViewModel()
-    @EnvironmentObject var serviceManager: RemoteServiceManager
+    @ObservedObject var serviceManager: RemoteServiceManager
 
     // Detected SSH from terminal (for inline connect prompt)
     @State private var detectedSSHHost: String?
@@ -49,7 +49,7 @@ struct RightPanelView: View {
                 case .sftp:
                     RemoteFileView(viewModel: remoteFileVM)
                 case .docker:
-                    DockerManageView()
+                    DockerManageView(serviceManager: serviceManager)
                 case .git:
                     GitPanelView()
                 case .database:
@@ -57,7 +57,7 @@ struct RightPanelView: View {
                 case .redis:
                     RedisClientView()
                 case .logViewer:
-                    LogViewerView()
+                    LogViewerView(serviceManager: serviceManager)
                 }
             }
         }
@@ -96,6 +96,18 @@ struct RightPanelView: View {
                 $0.host == host && $0.username == username && $0.port == port
             }) ?? serviceManager.savedProfiles.first(where: { $0.host == host }) {
                 serviceManager.connect(profile: profile)
+                // Auto-type password into terminal if password auth
+                if profile.authType == .password {
+                    if let password = try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)"),
+                       !password.isEmpty {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            NotificationCenter.default.post(
+                                name: .terminalInput,
+                                object: ["text": password + "\n"]
+                            )
+                        }
+                    }
+                }
                 return
             }
 

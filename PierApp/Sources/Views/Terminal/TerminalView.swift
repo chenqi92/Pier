@@ -83,9 +83,38 @@ class TerminalNSView: NSView {
     private var blinkTimer: Timer?
     private var currentSessionId: UUID?
 
+    // MARK: - PTY Cache (persists across tab switches)
+
+    /// Cached PTY state for a terminal session.
+    struct PTYCacheEntry {
+        let handle: OpaquePointer
+        var screenBuffer: [[Character]]
+        var scrollbackBuffer: [[Character]]
+        var cursorX: Int
+        var cursorY: Int
+        var ptyCols: Int
+        var ptyRows: Int
+        var savedCursorX: Int
+        var savedCursorY: Int
+    }
+
+    /// Static cache: session ID → PTY state. Persists across view re-creation.
+    private static var ptyCache: [UUID: PTYCacheEntry] = [:]
+
+    /// Destroy a cached PTY when its tab is closed.
+    static func destroyCachedPTY(sessionId: UUID) {
+        if let entry = ptyCache.removeValue(forKey: sessionId) {
+            pier_terminal_destroy(entry.handle)
+        }
+    }
+
     // PTY dimensions (authoritative — never recalculate from view size during processing)
     private var ptyCols: Int = 80
     private var ptyRows: Int = 24
+
+    // Terminal → SFTP directory sync
+    private var lastDetectedCwd: String?
+    private var lastCwdCheckTime: CFAbsoluteTime = 0
 
     // Screen buffer (visible area)
     private var screenBuffer: [[Character]] = []
@@ -141,15 +170,20 @@ class TerminalNSView: NSView {
         // Calculate cell dimensions from font
         let font = NSFont(name: fontFamily, size: fontSize)
             ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font]
-        let charSize = ("M" as NSString).size(withAttributes: attrs)
-        cellWidth = ceil(charSize.width)
-        cellHeight = ceil(charSize.height + 2)
 
-        // Cursor blink timer (0.6s interval)
+        let attrStr = NSAttributedString(string: "M", attributes: [
+            .font: font
+        ])
+        let size = attrStr.size()
+        cellWidth = ceil(size.width)
+        cellHeight = ceil(size.height * 1.2)   // slight line spacing
+
+        rebuildCachedAttrs()
+
+        // Blink timer for cursor
         blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
             self?.cursorVisible.toggle()
-            self?.setNeedsDisplay(self?.bounds ?? .zero)
+            self?.needsDisplay = true
         }
 
         // Listen for SFTP directory changes → cd in terminal
@@ -159,6 +193,52 @@ class TerminalNSView: NSView {
             name: .sftpDirectoryChanged,
             object: nil
         )
+
+        // Listen for tab close to destroy PTY
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTabClosed(_:)),
+            name: .terminalTabClosed,
+            object: nil
+        )
+
+        // Listen for programmatic text input (auto-type SSH password, etc.)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTerminalInput(_:)),
+            name: .terminalInput,
+            object: nil
+        )
+    }
+
+    @objc private func handleTerminalInput(_ notification: Notification) {
+        guard let handle = terminalHandle else { return }
+        var text: String?
+        if let info = notification.object as? [String: Any] {
+            // From TerminalViewModel.sendInput: ["sessionId": UUID, "text": String]
+            if let sessionId = info["sessionId"] as? UUID {
+                guard sessionId == currentSessionId else { return }
+            }
+            text = info["text"] as? String
+        }
+        guard let inputText = text, !inputText.isEmpty else { return }
+        let bytes = Array(inputText.utf8)
+        pier_terminal_write(handle, bytes, UInt(bytes.count))
+    }
+
+    @objc private func handleTabClosed(_ notification: Notification) {
+        guard let sessionId = notification.object as? UUID else { return }
+        // If this is the currently displayed session, stop it
+        if currentSessionId == sessionId {
+            stopTimers()
+            if let handle = terminalHandle {
+                pier_terminal_destroy(handle)
+                terminalHandle = nil
+            }
+            currentSessionId = nil
+        }
+        // Also remove from static cache
+        TerminalNSView.destroyCachedPTY(sessionId: sessionId)
     }
 
     @objc private func handleSftpDirectoryChanged(_ notification: Notification) {
@@ -206,20 +286,67 @@ class TerminalNSView: NSView {
     /// Called by updateNSView when the session changes.
     func updateSession(_ session: TerminalSessionInfo?) {
         guard let session = session else { return }
-        // Only restart if session changes
+        // Only switch if session actually changes
         if currentSessionId == session.id { return }
+
+        // ── Save current PTY state to cache ──
+        saveCurrentToCache()
+        stopTimers()
+
         currentSessionId = session.id
-        pendingSession = session
 
-        // Clean up previous terminal
-        stopTerminal()
+        // ── Try to restore from cache ──
+        if let cached = TerminalNSView.ptyCache.removeValue(forKey: session.id) {
+            terminalHandle = cached.handle
+            screenBuffer = cached.screenBuffer
+            scrollbackBuffer = cached.scrollbackBuffer
+            cursorX = cached.cursorX
+            cursorY = cached.cursorY
+            ptyCols = cached.ptyCols
+            ptyRows = cached.ptyRows
+            savedCursorX = cached.savedCursorX
+            savedCursorY = cached.savedCursorY
+            startReadLoop()
+            needsDisplay = true
+        } else {
+            // New session — need to create PTY
+            terminalHandle = nil
+            screenBuffer = []
+            scrollbackBuffer = []
+            cursorX = 0
+            cursorY = 0
+            pendingSession = session
 
-        // Try to start if we have real dimensions from the scroll view
-        let visibleSize = enclosingScrollView?.contentView.bounds.size ?? .zero
-        if window != nil && visibleSize.width > 1 && visibleSize.height > 1 {
-            startTerminalForPendingSession()
+            let visibleSize = enclosingScrollView?.contentView.bounds.size ?? .zero
+            if window != nil && visibleSize.width > 1 && visibleSize.height > 1 {
+                startTerminalForPendingSession()
+            }
         }
-        // Otherwise, layout() will start it once dimensions are available
+
+        // Make ourselves first responder
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.window?.makeFirstResponder(self)
+        }
+    }
+
+    /// Save the current terminal state into the static cache.
+    private func saveCurrentToCache() {
+        guard let sessionId = currentSessionId, let handle = terminalHandle else { return }
+        let entry = PTYCacheEntry(
+            handle: handle,
+            screenBuffer: screenBuffer,
+            scrollbackBuffer: scrollbackBuffer,
+            cursorX: cursorX,
+            cursorY: cursorY,
+            ptyCols: ptyCols,
+            ptyRows: ptyRows,
+            savedCursorX: savedCursorX,
+            savedCursorY: savedCursorY
+        )
+        TerminalNSView.ptyCache[sessionId] = entry
+        // Detach handle from this view (cache now owns it)
+        terminalHandle = nil
     }
 
     /// Stored session waiting for view to be attached to window
@@ -234,8 +361,6 @@ class TerminalNSView: NSView {
             guard let self = self else { return }
             self.window?.makeFirstResponder(self)
         }
-
-        // Don't start terminal here — layout() will handle it once real dimensions are available
     }
 
     override func layout() {
@@ -255,9 +380,15 @@ class TerminalNSView: NSView {
         pendingSession = nil
     }
 
-    private func stopTerminal() {
+    /// Stop timers only (PTY handle is preserved in cache).
+    private func stopTimers() {
         readTimer?.invalidate()
         readTimer = nil
+    }
+
+    /// Full cleanup — only called when the tab is physically closed.
+    private func stopTerminal() {
+        stopTimers()
         blinkTimer?.invalidate()
         blinkTimer = nil
         NotificationCenter.default.removeObserver(self, name: .sftpDirectoryChanged, object: nil)
@@ -314,7 +445,55 @@ class TerminalNSView: NSView {
                 lastURLDetectionTime = now
                 detectURLsInBuffer()
             }
+            // Throttle CWD detection to at most once per second
+            if now - lastCwdCheckTime > 1.0 {
+                lastCwdCheckTime = now
+                detectPromptCwd()
+            }
             needsDisplay = true
+        }
+    }
+
+    /// Detect the current working directory from the terminal prompt.
+    /// Matches patterns like: `user@host:path#` or `user@host:path$`
+    private func detectPromptCwd() {
+        guard cursorY >= 0 && cursorY < screenBuffer.count else { return }
+        let line = String(screenBuffer[cursorY]).trimmingCharacters(in: .whitespaces)
+        guard !line.isEmpty else { return }
+
+        // Match common prompt patterns:
+        // root@host:/path#    root@host:/path$    root@host:~#    root@host:~/sub$
+        // user@host:/path %   (zsh style)
+        let pattern = #"[\w.-]+@[\w.-]+:([^\s#$%]+)[#$%]\s*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              match.numberOfRanges > 1,
+              let pathRange = Range(match.range(at: 1), in: line) else { return }
+
+        var path = String(line[pathRange])
+
+        // Expand ~ to home directory
+        if path == "~" || path.hasPrefix("~/") {
+            // For root user, ~ = /root; for others, ~ = /home/user
+            // Extract username from prompt
+            let userPattern = #"^([\w.-]+)@"#
+            if let userRegex = try? NSRegularExpression(pattern: userPattern),
+               let userMatch = userRegex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+               userMatch.numberOfRanges > 1,
+               let userRange = Range(userMatch.range(at: 1), in: line) {
+                let user = String(line[userRange])
+                let home = user == "root" ? "/root" : "/home/\(user)"
+                path = path == "~" ? home : home + path.dropFirst() // drop "~"
+            }
+        }
+
+        // Only post notification if the path actually changed
+        if path != lastDetectedCwd && !path.isEmpty {
+            lastDetectedCwd = path
+            NotificationCenter.default.post(
+                name: .terminalCwdChanged,
+                object: ["path": path]
+            )
         }
     }
 
