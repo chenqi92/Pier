@@ -86,7 +86,7 @@ struct RightPanelView: View {
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.borderless)
-                .help(String(localized: "ssh.disconnect"))
+                .help(LS("ssh.disconnect"))
             }
         }
         .padding(.horizontal, 10)
@@ -190,7 +190,7 @@ struct MarkdownPreviewView: View {
                 Image(systemName: "doc.text")
                     .font(.system(size: 36))
                     .foregroundColor(.secondary)
-                Text("sftp.selectMarkdown")
+                Text(LS("sftp.selectMarkdown"))
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -278,7 +278,7 @@ struct RemoteFileView: View {
                     Image(systemName: "network.slash")
                         .font(.system(size: 36))
                         .foregroundColor(.secondary)
-                    Text("sftp.notConnected")
+                    Text(LS("sftp.notConnected"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Button("sftp.connectToServer") {

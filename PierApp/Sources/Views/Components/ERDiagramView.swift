@@ -37,7 +37,7 @@ struct ERDiagramView: View {
                 Image(systemName: "diagram")
                     .foregroundColor(.purple)
                     .font(.caption)
-                Text("er.title")
+                Text(LS("er.title"))
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
@@ -69,7 +69,7 @@ struct ERDiagramView: View {
                     Image(systemName: "diagram")
                         .font(.system(size: 30))
                         .foregroundColor(.secondary)
-                    Text("er.noTables")
+                    Text(LS("er.noTables"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

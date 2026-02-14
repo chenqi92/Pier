@@ -44,13 +44,13 @@ struct SSHKeyManagerView: View {
             Image(systemName: "key.fill")
                 .foregroundColor(.orange)
                 .font(.caption)
-            Text("ssh.keyManager")
+            Text(LS("ssh.keyManager"))
                 .font(.caption)
                 .fontWeight(.medium)
             Spacer()
 
             Button(action: { isGeneratingKey = true }) {
-                Label("ssh.generateKey", systemImage: "plus")
+                Label(LS("ssh.generateKey"), systemImage: "plus")
                     .font(.caption)
             }
             .buttonStyle(.bordered)
@@ -129,7 +129,7 @@ struct SSHKeyManagerView: View {
 
                                 HStack {
                                     Button(action: { copyPublicKey() }) {
-                                        Label("ssh.copyPublicKey", systemImage: "doc.on.doc")
+                                        Label(LS("ssh.copyPublicKey"), systemImage: "doc.on.doc")
                                             .font(.system(size: 9))
                                     }
                                     .buttonStyle(.bordered)
@@ -147,7 +147,7 @@ struct SSHKeyManagerView: View {
                     HStack {
                         Spacer()
                         Button(role: .destructive, action: { deleteKey(key) }) {
-                            Label("ssh.deleteKey", systemImage: "trash")
+                            Label(LS("ssh.deleteKey"), systemImage: "trash")
                                 .font(.system(size: 9))
                         }
                         .buttonStyle(.bordered)
@@ -160,7 +160,7 @@ struct SSHKeyManagerView: View {
                     Image(systemName: "key.fill")
                         .font(.system(size: 30))
                         .foregroundColor(.secondary)
-                    Text("ssh.selectKey")
+                    Text(LS("ssh.selectKey"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -185,7 +185,7 @@ struct SSHKeyManagerView: View {
 
     private var generateKeySheet: some View {
         VStack(spacing: 16) {
-            Text("ssh.generateNewKey")
+            Text(LS("ssh.generateNewKey"))
                 .font(.headline)
 
             Form {
@@ -195,8 +195,8 @@ struct SSHKeyManagerView: View {
                     Text("ECDSA").tag("ecdsa")
                 }
 
-                TextField("ssh.keyName", text: $newKeyName)
-                TextField("ssh.comment", text: $newKeyComment)
+                TextField(LS("ssh.keyName"), text: $newKeyName)
+                TextField(LS("ssh.comment"), text: $newKeyComment)
 
                 Toggle("ssh.usePassphrase", isOn: $showPassphraseField)
                 if showPassphraseField {

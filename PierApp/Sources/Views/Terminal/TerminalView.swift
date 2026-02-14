@@ -229,21 +229,37 @@ class TerminalNSView: NSView {
         max(1, Int(enclosingScrollView?.contentView.bounds.height ?? bounds.height) / Int(cellHeight))
     }
 
+    /// State for the ANSI escape sequence parser
+    private enum AnsiState {
+        case normal
+        case escape       // Just saw ESC (0x1B)
+        case csi          // In CSI sequence (ESC [)
+        case osc          // In OSC sequence (ESC ])
+        case oscEsc       // In OSC, just saw ESC (waiting for \)
+    }
+
+    private var ansiState: AnsiState = .normal
+    private var csiParams: String = ""
+
     private func processTerminalOutput(_ bytes: [UInt8]) {
         let cols = max(1, Int(bounds.width / cellWidth))
-        if let text = String(bytes: bytes, encoding: .utf8) {
-            for char in text {
-                switch char {
-                case "\n":
+
+        for byte in bytes {
+            let char = Character(UnicodeScalar(byte))
+
+            switch ansiState {
+            case .normal:
+                switch byte {
+                case 0x1B: // ESC
+                    ansiState = .escape
+                case 0x0A: // LF (\n)
                     cursorY += 1
                     cursorX = 0
-                    // Push to scrollback when exceeding visible rows
                     if cursorY >= visibleRows {
                         let overflow = screenBuffer.first ?? []
                         scrollbackBuffer.append(overflow)
                         screenBuffer.removeFirst()
                         cursorY = screenBuffer.count
-                        // Trim scrollback
                         if scrollbackBuffer.count > maxScrollback {
                             scrollbackBuffer.removeFirst(scrollbackBuffer.count - maxScrollback)
                         }
@@ -251,22 +267,174 @@ class TerminalNSView: NSView {
                     if cursorY >= screenBuffer.count {
                         screenBuffer.append(Array(repeating: " ", count: cols))
                     }
-                case "\r":
+                case 0x0D: // CR (\r)
                     cursorX = 0
-                case "\u{8}": // backspace
+                case 0x08: // BS (backspace)
                     if cursorX > 0 { cursorX -= 1 }
+                case 0x09: // TAB
+                    cursorX = min(((cursorX / 8) + 1) * 8, cols - 1)
+                case 0x07: // BEL
+                    break // Ignore bell
+                case 0x00...0x06, 0x0B, 0x0C, 0x0E...0x1A, 0x1C...0x1F:
+                    break // Ignore other control characters
                 default:
+                    // Printable character
                     while cursorY >= screenBuffer.count {
                         screenBuffer.append(Array(repeating: " ", count: cols))
                     }
-                    if cursorX < screenBuffer[cursorY].count {
+                    if cursorX >= cols {
+                        // Line wrap
+                        cursorX = 0
+                        cursorY += 1
+                        if cursorY >= visibleRows {
+                            let overflow = screenBuffer.first ?? []
+                            scrollbackBuffer.append(overflow)
+                            screenBuffer.removeFirst()
+                            cursorY = screenBuffer.count
+                        }
+                        if cursorY >= screenBuffer.count {
+                            screenBuffer.append(Array(repeating: " ", count: cols))
+                        }
+                    }
+                    if cursorY < screenBuffer.count && cursorX < screenBuffer[cursorY].count {
                         screenBuffer[cursorY][cursorX] = char
                         cursorX += 1
                     }
                 }
+
+            case .escape:
+                switch byte {
+                case 0x5B: // '[' -> CSI sequence
+                    ansiState = .csi
+                    csiParams = ""
+                case 0x5D: // ']' -> OSC sequence
+                    ansiState = .osc
+                case 0x28, 0x29: // '(', ')' -> character set designation, skip next byte
+                    ansiState = .normal // simplified: just reset
+                default:
+                    // Single-character escape sequence, ignore and return to normal
+                    ansiState = .normal
+                }
+
+            case .csi:
+                if byte >= 0x30 && byte <= 0x3F {
+                    // Parameter bytes (0-9, ;, <, =, >, ?)
+                    csiParams.append(char)
+                } else if byte >= 0x20 && byte <= 0x2F {
+                    // Intermediate bytes (space through /)
+                    csiParams.append(char)
+                } else if byte >= 0x40 && byte <= 0x7E {
+                    // Final byte — execute CSI command
+                    handleCSI(finalByte: byte, params: csiParams)
+                    ansiState = .normal
+                } else {
+                    // Invalid, reset
+                    ansiState = .normal
+                }
+
+            case .osc:
+                if byte == 0x07 {
+                    // BEL terminates OSC
+                    ansiState = .normal
+                } else if byte == 0x1B {
+                    ansiState = .oscEsc
+                }
+                // Otherwise just consume the byte
+
+            case .oscEsc:
+                // Expecting '\' (0x5C) to terminate OSC
+                ansiState = .normal
             }
         }
     }
+
+    private func handleCSI(finalByte: UInt8, params: String) {
+        let cols = max(1, Int(bounds.width / cellWidth))
+        let parts = params.split(separator: ";").map { Int($0) ?? 0 }
+        let p1 = parts.first ?? 0
+        let p2 = parts.count > 1 ? parts[1] : 0
+
+        switch finalByte {
+        case 0x41: // 'A' — Cursor Up
+            let n = max(1, p1)
+            cursorY = max(0, cursorY - n)
+
+        case 0x42: // 'B' — Cursor Down
+            let n = max(1, p1)
+            cursorY = min(visibleRows - 1, cursorY + n)
+
+        case 0x43: // 'C' — Cursor Forward
+            let n = max(1, p1)
+            cursorX = min(cols - 1, cursorX + n)
+
+        case 0x44: // 'D' — Cursor Back
+            let n = max(1, p1)
+            cursorX = max(0, cursorX - n)
+
+        case 0x48, 0x66: // 'H'/'f' — Cursor Position
+            let row = max(1, p1) - 1
+            let col = max(1, p2) - 1
+            cursorY = min(visibleRows - 1, row)
+            cursorX = min(cols - 1, col)
+
+        case 0x4A: // 'J' — Erase in Display
+            switch p1 {
+            case 0: // Clear from cursor to end
+                if cursorY < screenBuffer.count {
+                    for x in cursorX..<min(cols, screenBuffer[cursorY].count) {
+                        screenBuffer[cursorY][x] = " "
+                    }
+                    for y in (cursorY + 1)..<screenBuffer.count {
+                        screenBuffer[y] = Array(repeating: " ", count: cols)
+                    }
+                }
+            case 1: // Clear from start to cursor
+                for y in 0..<cursorY {
+                    if y < screenBuffer.count {
+                        screenBuffer[y] = Array(repeating: " ", count: cols)
+                    }
+                }
+                if cursorY < screenBuffer.count {
+                    for x in 0...min(cursorX, screenBuffer[cursorY].count - 1) {
+                        screenBuffer[cursorY][x] = " "
+                    }
+                }
+            case 2, 3: // Clear entire screen
+                for y in 0..<screenBuffer.count {
+                    screenBuffer[y] = Array(repeating: " ", count: cols)
+                }
+            default:
+                break
+            }
+
+        case 0x4B: // 'K' — Erase in Line
+            guard cursorY < screenBuffer.count else { break }
+            switch p1 {
+            case 0: // Clear from cursor to end of line
+                for x in cursorX..<min(cols, screenBuffer[cursorY].count) {
+                    screenBuffer[cursorY][x] = " "
+                }
+            case 1: // Clear from start to cursor
+                for x in 0...min(cursorX, screenBuffer[cursorY].count - 1) {
+                    screenBuffer[cursorY][x] = " "
+                }
+            case 2: // Clear entire line
+                screenBuffer[cursorY] = Array(repeating: " ", count: cols)
+            default:
+                break
+            }
+
+        case 0x6D: // 'm' — SGR (Select Graphic Rendition)
+            break // Ignore color/style codes for now
+
+        case 0x68, 0x6C: // 'h'/'l' — Set/Reset Mode (e.g., ?2004h for bracketed paste)
+            break // Ignore mode set/reset
+
+        default:
+            break // Ignore unknown CSI sequences
+        }
+    }
+
 
     private func updateDocumentSize() {
         let totalLines = scrollbackBuffer.count + screenBuffer.count

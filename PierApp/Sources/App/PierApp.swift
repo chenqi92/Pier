@@ -57,7 +57,7 @@ struct AISettingsView: View {
                     guard !newValue.isEmpty else { return }
                     do {
                         try KeychainService.shared.save(key: "llm_api_key", value: newValue)
-                        saveStatus = String(localized: "settings.keySaved")
+                        saveStatus = LS("settings.keySaved")
                     } catch {
                         saveStatus = "❌ \(error.localizedDescription)"
                     }

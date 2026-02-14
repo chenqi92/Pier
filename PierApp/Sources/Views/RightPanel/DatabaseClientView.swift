@@ -40,7 +40,7 @@ struct DatabaseClientView: View {
             Image(systemName: "cylinder.fill")
                 .foregroundColor(.cyan)
                 .font(.caption)
-            Text("db.title")
+            Text(LS("db.title"))
                 .font(.caption)
                 .fontWeight(.medium)
 
@@ -61,7 +61,7 @@ struct DatabaseClientView: View {
                         .foregroundColor(.red)
                 }
                 .buttonStyle(.borderless)
-                .help(String(localized: "db.disconnect"))
+                .help(LS("db.disconnect"))
             }
         }
         .padding(.horizontal, 12)
@@ -75,7 +75,7 @@ struct DatabaseClientView: View {
             // Saved connections
             if !viewModel.savedConnections.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("db.savedConnections")
+                    Text(LS("db.savedConnections"))
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
 
@@ -108,19 +108,19 @@ struct DatabaseClientView: View {
 
             // New connection form
             VStack(alignment: .leading, spacing: 8) {
-                Text("db.newConnection")
+                Text(LS("db.newConnection"))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("db.host").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text(LS("db.host")).font(.system(size: 9)).foregroundColor(.secondary)
                         TextField("localhost", text: $viewModel.formHost)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("db.port").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text(LS("db.port")).font(.system(size: 9)).foregroundColor(.secondary)
                         TextField("3306", text: $viewModel.formPort)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
@@ -130,13 +130,13 @@ struct DatabaseClientView: View {
 
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("db.user").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text(LS("db.user")).font(.system(size: 9)).foregroundColor(.secondary)
                         TextField("root", text: $viewModel.formUsername)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("db.password").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text(LS("db.password")).font(.system(size: 9)).foregroundColor(.secondary)
                         SecureField("", text: $viewModel.formPassword)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
@@ -144,7 +144,7 @@ struct DatabaseClientView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("db.database").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text(LS("db.database")).font(.system(size: 9)).foregroundColor(.secondary)
                     TextField("", text: $viewModel.formDatabase)
                         .textFieldStyle(.roundedBorder)
                         .font(.caption)
@@ -264,7 +264,7 @@ struct DatabaseClientView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 8))
-                        Text("db.run")
+                        Text(LS("db.run"))
                             .font(.caption)
                     }
                 }
@@ -372,13 +372,13 @@ struct DatabaseClientView: View {
                 }
                 .textSelection(.enabled)
             } else {
-                Text("db.runQueryHint")
+                Text(LS("db.runQueryHint"))
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .alert("db.exportSuccess", isPresented: $showExportAlert) {
+        .alert(LS("db.exportSuccess"), isPresented: $showExportAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(exportedFileName)
@@ -395,7 +395,7 @@ struct DatabaseClientView: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
-                Text("db.queryHistory")
+                Text(LS("db.queryHistory"))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.secondary)
                 Spacer()
@@ -405,14 +405,14 @@ struct DatabaseClientView: View {
                             .font(.system(size: 9))
                     }
                     .buttonStyle(.borderless)
-                    .help(String(localized: "db.clearHistory"))
+                    .help(LS("db.clearHistory"))
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
 
             if viewModel.queryHistory.isEmpty {
-                Text("db.noHistory")
+                Text(LS("db.noHistory"))
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
                     .padding(.vertical, 8)

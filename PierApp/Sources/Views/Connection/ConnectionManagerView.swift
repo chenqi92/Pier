@@ -13,7 +13,7 @@ struct ConnectionManagerView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("conn.title")
+                Text(LS("conn.title"))
                     .font(.headline)
                 Spacer()
                 Button(action: addNew) {
@@ -21,7 +21,7 @@ struct ConnectionManagerView: View {
                         .font(.title3)
                 }
                 .buttonStyle(.borderless)
-                .help(String(localized: "conn.addServer"))
+                .help(LS("conn.addServer"))
             }
             .padding()
 
@@ -65,7 +65,7 @@ struct ConnectionManagerView: View {
             Image(systemName: "server.rack")
                 .font(.system(size: 40))
                 .foregroundColor(.secondary)
-            Text("conn.noServers")
+            Text(LS("conn.noServers"))
                 .font(.callout)
                 .foregroundColor(.secondary)
             Button("conn.addServer") { addNew() }
@@ -104,14 +104,14 @@ struct ConnectionManagerView: View {
                                 .foregroundColor(.red)
                         }
                         .buttonStyle(.borderless)
-                        .help(String(localized: "ssh.disconnect"))
+                        .help(LS("ssh.disconnect"))
                     } else {
                         Button(action: { connectProfile(profile) }) {
                             Image(systemName: "bolt.circle.fill")
                                 .foregroundColor(.accentColor)
                         }
                         .buttonStyle(.borderless)
-                        .help(String(localized: "conn.connect"))
+                        .help(LS("conn.connect"))
                         .disabled(serviceManager.isConnecting || serviceManager.isConnected)
                     }
                 }
@@ -136,7 +136,7 @@ struct ConnectionManagerView: View {
                 Image(systemName: "network")
                     .font(.caption2)
                     .foregroundColor(.green)
-                Text("tunnel.active")
+                Text(LS("tunnel.active"))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.secondary)
             }
@@ -203,17 +203,17 @@ struct ProfileEditorView: View {
             Divider()
 
             Form {
-                TextField("conn.name", text: $profile.name)
+                TextField(LS("conn.name"), text: $profile.name)
                     .textFieldStyle(.roundedBorder)
-                TextField("conn.host", text: $profile.host)
+                TextField(LS("conn.host"), text: $profile.host)
                     .textFieldStyle(.roundedBorder)
                 HStack {
-                    Text("conn.port")
+                    Text(LS("conn.port"))
                     TextField("", value: $profile.port, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 80)
                 }
-                TextField("conn.username", text: $profile.username)
+                TextField(LS("conn.username"), text: $profile.username)
                     .textFieldStyle(.roundedBorder)
 
                 Picker("conn.authType", selection: $profile.authType) {

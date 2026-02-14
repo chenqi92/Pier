@@ -28,12 +28,12 @@ struct RedisClientView: View {
                     .foregroundColor(.red)
             }
 
-            Text("redis.connectPrompt")
+            Text(LS("redis.connectPrompt"))
                 .font(.callout)
                 .foregroundColor(.secondary)
 
             HStack(spacing: 8) {
-                Text("redis.port")
+                Text(LS("redis.port"))
                     .font(.caption)
                 TextField("", value: $viewModel.redisPort, format: .number)
                     .textFieldStyle(.roundedBorder)
@@ -59,7 +59,7 @@ struct RedisClientView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    TextField("redis.searchKeys", text: $viewModel.searchPattern)
+                    TextField(LS("redis.searchKeys"), text: $viewModel.searchPattern)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11))
                         .onSubmit { viewModel.refreshKeys() }
@@ -81,7 +81,7 @@ struct RedisClientView: View {
 
                 // Key count badge
                 HStack {
-                    Text("redis.keyCount \(viewModel.keys.count)")
+                    Text(LS("redis.keyCount \(viewModel.keys.count)"))
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                     Spacer()
@@ -215,7 +215,7 @@ struct RedisClientView: View {
                 }
                 .padding()
             } else {
-                Text("redis.selectKey")
+                Text(LS("redis.selectKey"))
                     .font(.callout)
                     .foregroundColor(.secondary)
             }
@@ -263,7 +263,7 @@ struct RedisClientView: View {
                 Text(">")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(.accentColor)
-                TextField("redis.rawCommand", text: $viewModel.commandInput)
+                TextField(LS("redis.rawCommand"), text: $viewModel.commandInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11, design: .monospaced))
                     .onSubmit { viewModel.executeRawCommand() }

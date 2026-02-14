@@ -26,7 +26,7 @@ struct BranchGraphView: View {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
                     .foregroundColor(.green)
                     .font(.caption)
-                Text("git.branchGraph")
+                Text(LS("git.branchGraph"))
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
@@ -41,7 +41,7 @@ struct BranchGraphView: View {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: 30))
                         .foregroundColor(.secondary)
-                    Text("git.noGraph")
+                    Text(LS("git.noGraph"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

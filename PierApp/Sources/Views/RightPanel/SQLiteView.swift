@@ -53,7 +53,7 @@ struct SQLiteView: View {
                 .buttonStyle(.borderless)
             } else {
                 Button(action: { viewModel.browseFile() }) {
-                    Label("sqlite.open", systemImage: "folder")
+                    Label(LS("sqlite.open"), systemImage: "folder")
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -101,7 +101,7 @@ struct SQLiteView: View {
     private var columnInfoPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
-                Text("sqlite.columns")
+                Text(LS("sqlite.columns"))
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 8)
@@ -135,7 +135,7 @@ struct SQLiteView: View {
     private var queryEditor: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("sqlite.query")
+                Text(LS("sqlite.query"))
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.secondary)
                 Spacer()
@@ -155,7 +155,7 @@ struct SQLiteView: View {
                 .disabled(viewModel.queryHistory.isEmpty)
 
                 Button(action: { viewModel.executeQuery() }) {
-                    Label("sqlite.execute", systemImage: "play.fill")
+                    Label(LS("sqlite.execute"), systemImage: "play.fill")
                         .font(.system(size: 9))
                 }
                 .buttonStyle(.bordered)
@@ -211,7 +211,7 @@ struct SQLiteView: View {
                     Image(systemName: "tablecells")
                         .font(.system(size: 24))
                         .foregroundColor(.secondary)
-                    Text("sqlite.noResults")
+                    Text(LS("sqlite.noResults"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -259,12 +259,12 @@ struct SQLiteView: View {
             Image(systemName: "cylinder")
                 .font(.system(size: 30))
                 .foregroundColor(.secondary)
-            Text("sqlite.notConnected")
+            Text(LS("sqlite.notConnected"))
                 .font(.caption)
                 .foregroundColor(.secondary)
 
             Button(action: { viewModel.browseFile() }) {
-                Label("sqlite.open", systemImage: "folder")
+                Label(LS("sqlite.open"), systemImage: "folder")
             }
             .buttonStyle(.bordered)
         }

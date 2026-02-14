@@ -24,9 +24,9 @@ struct GitPanelView: View {
 
                 // Tab: Changes / History / Stash
                 Picker("", selection: $viewModel.selectedTab) {
-                    Text("git.changes").tag(GitTab.changes)
-                    Text("git.history").tag(GitTab.history)
-                    Text("git.stash").tag(GitTab.stash)
+                    Text(LS("git.changes")).tag(GitTab.changes)
+                    Text(LS("git.history")).tag(GitTab.history)
+                    Text(LS("git.stash")).tag(GitTab.stash)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 8)
@@ -89,7 +89,7 @@ struct GitPanelView: View {
             Image(systemName: "arrow.triangle.branch")
                 .foregroundColor(.orange)
                 .font(.caption)
-            Text("git.title")
+            Text(LS("git.title"))
                 .font(.caption)
                 .fontWeight(.medium)
             Spacer()
@@ -144,14 +144,14 @@ struct GitPanelView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "git.pull"))
+            .help(LS("git.pull"))
 
             Button(action: { viewModel.push() }) {
                 Image(systemName: "arrow.up.circle")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "git.push"))
+            .help(LS("git.push"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -222,7 +222,7 @@ struct GitPanelView: View {
                         .foregroundColor(.orange)
                 }
                 .buttonStyle(.borderless)
-                .help(String(localized: "git.unstage"))
+                .help(LS("git.unstage"))
             } else {
                 Button(action: { viewModel.stageFile(file.path) }) {
                     Image(systemName: "plus.circle")
@@ -230,7 +230,7 @@ struct GitPanelView: View {
                         .foregroundColor(.green)
                 }
                 .buttonStyle(.borderless)
-                .help(String(localized: "git.stage"))
+                .help(LS("git.stage"))
             }
         }
         .padding(.vertical, 1)
@@ -355,7 +355,7 @@ struct GitPanelView: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 36))
                 .foregroundColor(.secondary)
-            Text("git.notARepo")
+            Text(LS("git.notARepo"))
                 .font(.title3)
                 .foregroundColor(.secondary)
             Button("git.initRepo") { viewModel.initRepo() }

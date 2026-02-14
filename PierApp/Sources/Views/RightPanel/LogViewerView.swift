@@ -37,12 +37,12 @@ struct LogViewerView: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .foregroundColor(.green)
                 .font(.caption)
-            Text("log.title")
+            Text(LS("log.title"))
                 .font(.caption)
                 .fontWeight(.medium)
 
             if viewModel.isRemoteMode {
-                Text("log.remote")
+                Text(LS("log.remote"))
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.orange)
                     .padding(.horizontal, 4)
@@ -67,7 +67,7 @@ struct LogViewerView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .frame(width: 20)
-                .help(String(localized: "log.remoteLogs"))
+                .help(LS("log.remoteLogs"))
             }
 
             Button(action: { viewModel.discoverRemoteLogFiles() }) {
@@ -75,7 +75,7 @@ struct LogViewerView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "log.discoverFiles"))
+            .help(LS("log.discoverFiles"))
 
             // JSON toggle
             Button(action: {
@@ -93,7 +93,7 @@ struct LogViewerView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "log.openFile"))
+            .help(LS("log.openFile"))
 
             Button(action: { viewModel.toggleAutoScroll() }) {
                 Image(systemName: viewModel.autoScroll ? "arrow.down.to.line.compact" : "arrow.down.to.line")
@@ -101,14 +101,14 @@ struct LogViewerView: View {
                     .foregroundColor(viewModel.autoScroll ? .green : .secondary)
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "log.autoScroll"))
+            .help(LS("log.autoScroll"))
 
             Button(action: { viewModel.clearLog() }) {
                 Image(systemName: "trash")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "log.clear"))
+            .help(LS("log.clear"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -141,7 +141,7 @@ struct LogViewerView: View {
                     .cornerRadius(3)
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "log.regexFilter"))
+            .help(LS("log.regexFilter"))
 
             if let error = viewModel.regexError {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -266,7 +266,7 @@ struct LogViewerView: View {
                     .font(.system(size: 9))
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "db.export"))
+            .help(LS("db.export"))
             .disabled(viewModel.filteredLines.isEmpty)
 
             Text("\(viewModel.filteredLines.count)/\(viewModel.allLines.count) lines")
@@ -285,10 +285,10 @@ struct LogViewerView: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 36))
                 .foregroundColor(.secondary)
-            Text("log.noFile")
+            Text(LS("log.noFile"))
                 .font(.caption)
                 .foregroundColor(.secondary)
-            Text("log.noFileDesc")
+            Text(LS("log.noFileDesc"))
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

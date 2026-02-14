@@ -31,6 +31,7 @@ struct MainView: View {
             // ── Center Panel: Terminal ──
             TerminalContainerView(viewModel: terminalViewModel)
                 .frame(minWidth: 400)
+                .layoutPriority(1)
                 .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: nil) { providers in
                     handleFileDrop(providers: providers)
                 }
@@ -46,24 +47,24 @@ struct MainView: View {
                 Button(action: { withAnimation { showLeftPanel.toggle() } }) {
                     Image(systemName: "sidebar.left")
                 }
-                .help(String(localized: "toolbar.toggleFilesBrowser"))
+                .help(LS("toolbar.toggleFilesBrowser"))
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
                 Button(action: { showNewTabChooser = true }) {
                     Image(systemName: "plus")
                 }
-                .help(String(localized: "toolbar.newTerminalTab"))
+                .help(LS("toolbar.newTerminalTab"))
 
                 Button(action: { showConnectionManager = true }) {
-                    Image(systemName: "network")
+                    Image(systemName: "server.rack")
                 }
-                .help(String(localized: "toolbar.sshConnectionManager"))
+                .help(LS("toolbar.sshConnectionManager"))
 
                 Button(action: { withAnimation { showRightPanel.toggle() } }) {
                     Image(systemName: "sidebar.right")
                 }
-                .help(String(localized: "toolbar.toggleRightPanel"))
+                .help(LS("toolbar.toggleRightPanel"))
             }
         }
         .frame(minWidth: 900, minHeight: 500)
@@ -113,7 +114,7 @@ struct NewTabChooserView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("conn.newSession")
+                Text(LS("conn.newSession"))
                     .font(.headline)
                 Spacer()
                 Button(action: { dismiss() }) {
@@ -135,10 +136,10 @@ struct NewTabChooserView: View {
                             .frame(width: 32)
                             .foregroundColor(.accentColor)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("conn.localTerminal")
+                            Text(LS("conn.localTerminal"))
                                 .font(.body)
                                 .fontWeight(.medium)
-                            Text("conn.localTerminalDesc")
+                            Text(LS("conn.localTerminalDesc"))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -160,7 +161,7 @@ struct NewTabChooserView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("conn.savedConnections")
+                    Text(LS("conn.savedConnections"))
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundColor(.secondary)
@@ -252,7 +253,7 @@ struct TerminalContainerView: View {
             Image(systemName: "terminal")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
-            Text("terminal.noSessions")
+            Text(LS("terminal.noSessions"))
                 .font(.title3)
                 .foregroundColor(.secondary)
             Button("terminal.newTerminal") {
@@ -349,7 +350,7 @@ struct StatusBarView: View {
 
             Spacer()
 
-            Text("terminal.sessionCount \(viewModel.tabs.count)")
+            Text(LS("terminal.sessionCount \(viewModel.tabs.count)"))
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }

@@ -67,7 +67,7 @@ struct AIChatView: View {
             Image(systemName: "brain")
                 .foregroundColor(.purple)
                 .font(.caption)
-            Text("ai.title")
+            Text(LS("ai.title"))
                 .font(.caption)
                 .fontWeight(.medium)
             Spacer()
@@ -171,7 +171,7 @@ struct AIChatView: View {
 
     private var chatInputBar: some View {
         HStack(spacing: 8) {
-            TextField("ai.inputPlaceholder", text: $viewModel.inputText)
+            TextField(LS("ai.inputPlaceholder"), text: $viewModel.inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
                 .onSubmit {

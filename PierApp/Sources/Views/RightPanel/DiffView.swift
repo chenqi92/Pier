@@ -67,7 +67,7 @@ struct DiffView: View {
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .lineLimit(1)
             } else {
-                Text("diff.title")
+                Text(LS("diff.title"))
                     .font(.caption)
                     .fontWeight(.medium)
             }
@@ -204,7 +204,7 @@ struct DiffView: View {
             Image(systemName: "doc.text.fill.viewfinder")
                 .font(.system(size: 36))
                 .foregroundColor(.secondary)
-            Text("diff.empty")
+            Text(LS("diff.empty"))
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

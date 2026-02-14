@@ -44,7 +44,7 @@ struct PostgreSQLView: View {
             Spacer()
 
             if viewModel.isConnected {
-                Text("pg.connected")
+                Text(LS("pg.connected"))
                     .font(.system(size: 9))
                     .foregroundColor(.green)
 
@@ -55,7 +55,7 @@ struct PostgreSQLView: View {
                 .buttonStyle(.borderless)
             } else {
                 Button(action: { viewModel.connect() }) {
-                    Label("pg.connect", systemImage: "link")
+                    Label(LS("pg.connect"), systemImage: "link")
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -121,7 +121,7 @@ struct PostgreSQLView: View {
     private var columnInfoPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
-                Text("pg.columns")
+                Text(LS("pg.columns"))
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 8)
@@ -160,7 +160,7 @@ struct PostgreSQLView: View {
     private var queryEditor: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("pg.query")
+                Text(LS("pg.query"))
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.secondary)
                 Spacer()
@@ -180,7 +180,7 @@ struct PostgreSQLView: View {
                 .disabled(viewModel.queryHistory.isEmpty)
 
                 Button(action: { viewModel.executeQuery() }) {
-                    Label("pg.execute", systemImage: "play.fill")
+                    Label(LS("pg.execute"), systemImage: "play.fill")
                         .font(.system(size: 9))
                 }
                 .buttonStyle(.bordered)
@@ -237,7 +237,7 @@ struct PostgreSQLView: View {
                     Image(systemName: "tablecells")
                         .font(.system(size: 24))
                         .foregroundColor(.secondary)
-                    Text("pg.noResults")
+                    Text(LS("pg.noResults"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -287,7 +287,7 @@ struct PostgreSQLView: View {
             Image(systemName: "externaldrive.connected.to.line.below")
                 .font(.system(size: 30))
                 .foregroundColor(.secondary)
-            Text("pg.notConnected")
+            Text(LS("pg.notConnected"))
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

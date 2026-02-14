@@ -16,11 +16,11 @@ struct DockerManageView: View {
             } else {
                 // Tab: Containers / Images / Volumes
                 Picker("", selection: $viewModel.selectedTab) {
-                    Text("docker.containers").tag(DockerTab.containers)
-                    Text("docker.images").tag(DockerTab.images)
-                    Text("docker.volumes").tag(DockerTab.volumes)
+                    Text(LS("docker.containers")).tag(DockerTab.containers)
+                    Text(LS("docker.images")).tag(DockerTab.images)
+                    Text(LS("docker.volumes")).tag(DockerTab.volumes)
                     if viewModel.isComposeAvailable {
-                        Text("docker.compose").tag(DockerTab.compose)
+                        Text(LS("docker.compose")).tag(DockerTab.compose)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -52,7 +52,7 @@ struct DockerManageView: View {
             Image(systemName: "shippingbox.fill")
                 .foregroundColor(.blue)
                 .font(.caption)
-            Text("docker.title")
+            Text(LS("docker.title"))
                 .font(.caption)
                 .fontWeight(.medium)
             Spacer()
@@ -104,14 +104,14 @@ struct DockerManageView: View {
                                 .foregroundColor(.red)
                         }
                         .buttonStyle(.borderless)
-                        .help(String(localized: "docker.stop"))
+                        .help(LS("docker.stop"))
 
                         Button(action: { viewModel.restartContainer(container.id) }) {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 9))
                         }
                         .buttonStyle(.borderless)
-                        .help(String(localized: "docker.restart"))
+                        .help(LS("docker.restart"))
                     } else {
                         Button(action: { viewModel.startContainer(container.id) }) {
                             Image(systemName: "play.fill")
@@ -119,7 +119,7 @@ struct DockerManageView: View {
                                 .foregroundColor(.green)
                         }
                         .buttonStyle(.borderless)
-                        .help(String(localized: "docker.start"))
+                        .help(LS("docker.start"))
                     }
 
                     Button(action: { viewModel.viewContainerLogs(container.id) }) {
@@ -127,7 +127,7 @@ struct DockerManageView: View {
                             .font(.system(size: 9))
                     }
                     .buttonStyle(.borderless)
-                    .help(String(localized: "docker.viewLogs"))
+                    .help(LS("docker.viewLogs"))
                 }
                 .padding(.vertical, 2)
                 .contextMenu {
@@ -154,7 +154,7 @@ struct DockerManageView: View {
         .listStyle(.plain)
         .overlay {
             if viewModel.containers.isEmpty && !viewModel.isLoading {
-                Text("docker.noContainers")
+                Text(LS("docker.noContainers"))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -235,10 +235,10 @@ struct DockerManageView: View {
             Image(systemName: "shippingbox.circle")
                 .font(.system(size: 36))
                 .foregroundColor(.secondary)
-            Text("docker.notAvailable")
+            Text(LS("docker.notAvailable"))
                 .font(.title3)
                 .foregroundColor(.secondary)
-            Text("docker.notAvailableDesc")
+            Text(LS("docker.notAvailableDesc"))
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -256,7 +256,7 @@ struct DockerManageView: View {
             // Action bar
             HStack(spacing: 8) {
                 Button(action: { viewModel.composeUp() }) {
-                    Label("docker.composeUp", systemImage: "play.fill")
+                    Label(LS("docker.composeUp"), systemImage: "play.fill")
                         .font(.caption)
                 }
                 .buttonStyle(.borderedProminent)
@@ -264,7 +264,7 @@ struct DockerManageView: View {
                 .tint(.green)
 
                 Button(action: { viewModel.composeDown() }) {
-                    Label("docker.composeDown", systemImage: "stop.fill")
+                    Label(LS("docker.composeDown"), systemImage: "stop.fill")
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -317,7 +317,7 @@ struct DockerManageView: View {
                                 .font(.system(size: 9))
                         }
                         .buttonStyle(.borderless)
-                        .help(String(localized: "docker.composeRestart"))
+                        .help(LS("docker.composeRestart"))
                     }
                     .padding(.vertical, 2)
                     .contextMenu {
@@ -329,7 +329,7 @@ struct DockerManageView: View {
             .listStyle(.plain)
             .overlay {
                 if viewModel.composeServices.isEmpty && !viewModel.isLoading {
-                    Text("docker.noContainers")
+                    Text(LS("docker.noContainers"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -345,7 +345,7 @@ struct DockerManageView: View {
                 Button(action: {
                     viewModel.createNetwork(name: "pier-network-\(Int.random(in: 1000...9999))")
                 }) {
-                    Label("docker.createNetwork", systemImage: "plus")
+                    Label(LS("docker.createNetwork"), systemImage: "plus")
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)

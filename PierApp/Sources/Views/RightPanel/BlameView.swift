@@ -26,7 +26,7 @@ struct BlameView: View {
                 Image(systemName: "person.text.rectangle")
                     .foregroundColor(.purple)
                     .font(.caption)
-                Text("git.blame")
+                Text(LS("git.blame"))
                     .font(.caption)
                     .fontWeight(.medium)
                 Text("—")
@@ -44,7 +44,7 @@ struct BlameView: View {
             Divider()
 
             if blameLines.isEmpty {
-                Text("git.blameEmpty")
+                Text(LS("git.blameEmpty"))
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

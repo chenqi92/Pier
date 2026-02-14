@@ -24,7 +24,7 @@ struct MergeConflictView: View {
             Image(systemName: "arrow.triangle.merge")
                 .foregroundColor(.red)
                 .font(.caption)
-            Text("git.mergeConflicts")
+            Text(LS("git.mergeConflicts"))
                 .font(.caption)
                 .fontWeight(.medium)
             Spacer()
@@ -79,7 +79,7 @@ struct MergeConflictView: View {
                 conflictHunkList(file)
             } else {
                 VStack {
-                    Text("git.selectConflictFile")
+                    Text(LS("git.selectConflictFile"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -93,14 +93,14 @@ struct MergeConflictView: View {
             // Bulk actions
             HStack {
                 Button(action: { gitViewModel.acceptAllOurs(file) }) {
-                    Label("git.acceptAllOurs", systemImage: "arrow.left.circle")
+                    Label(LS("git.acceptAllOurs"), systemImage: "arrow.left.circle")
                         .font(.system(size: 9))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
 
                 Button(action: { gitViewModel.acceptAllTheirs(file) }) {
-                    Label("git.acceptAllTheirs", systemImage: "arrow.right.circle")
+                    Label(LS("git.acceptAllTheirs"), systemImage: "arrow.right.circle")
                         .font(.system(size: 9))
                 }
                 .buttonStyle(.bordered)
@@ -109,7 +109,7 @@ struct MergeConflictView: View {
                 Spacer()
 
                 Button(action: { gitViewModel.markResolved(file) }) {
-                    Label("git.markResolved", systemImage: "checkmark.circle.fill")
+                    Label(LS("git.markResolved"), systemImage: "checkmark.circle.fill")
                         .font(.system(size: 9))
                 }
                 .buttonStyle(.borderedProminent)
@@ -221,7 +221,7 @@ struct MergeConflictView: View {
             Image(systemName: "checkmark.circle")
                 .font(.system(size: 30))
                 .foregroundColor(.green)
-            Text("git.noConflicts")
+            Text(LS("git.noConflicts"))
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

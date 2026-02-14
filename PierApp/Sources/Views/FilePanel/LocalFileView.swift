@@ -72,7 +72,7 @@ struct LocalFileView: View {
                 .foregroundColor(.secondary)
                 .font(.caption)
 
-            TextField("files.searchPlaceholder", text: $searchText)
+            TextField(LS("files.searchPlaceholder"), text: $searchText)
                 .textFieldStyle(.plain)
                 .font(.caption)
                 .onChange(of: searchText) { _, newValue in

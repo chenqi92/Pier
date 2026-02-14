@@ -52,7 +52,7 @@ struct SettingsView: View {
 
     private var generalSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("settings.general")
+            Text(LS("settings.general"))
                 .font(.title2)
                 .fontWeight(.bold)
 
@@ -72,7 +72,7 @@ struct SettingsView: View {
             GroupBox("settings.font") {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("settings.fontFamily")
+                        Text(LS("settings.fontFamily"))
                             .font(.caption)
                         Spacer()
                         Picker("", selection: $themeManager.fontFamily) {
@@ -87,7 +87,7 @@ struct SettingsView: View {
                     }
 
                     HStack {
-                        Text("settings.fontSize")
+                        Text(LS("settings.fontSize"))
                             .font(.caption)
                         Spacer()
                         Slider(value: $themeManager.fontSize, in: 10...24, step: 1)
@@ -116,7 +116,7 @@ struct SettingsView: View {
 
     private var terminalSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("settings.terminal")
+            Text(LS("settings.terminal"))
                 .font(.title2)
                 .fontWeight(.bold)
 
@@ -177,7 +177,7 @@ struct SettingsView: View {
 
     private var shortcutsSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("settings.shortcuts")
+            Text(LS("settings.shortcuts"))
                 .font(.title2)
                 .fontWeight(.bold)
 
