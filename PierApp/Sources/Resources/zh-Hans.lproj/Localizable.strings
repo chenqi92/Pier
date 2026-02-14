@@ -316,3 +316,22 @@
 "ssh.mismatchHostMsg" = "警告：主机密钥已变更，可能存在中间人攻击风险。";
 "ssh.acceptKey" = "接受";
 "ssh.rejectKey" = "拒绝";
+
+/* ═══════════════════════════════════════
+   AI 聊天
+   ═══════════════════════════════════════ */
+
+"ai.title" = "AI 助手";
+"ai.inputPlaceholder" = "随意提问…";
+"ai.generate" = "生成";
+"ai.explain" = "解释";
+"ai.fixError" = "修复错误";
+"ai.noApiKey" = "未配置 API 密钥";
+"ai.streaming" = "正在生成…";
+
+/* ═══════════════════════════════════════
+   Git 分支图
+   ═══════════════════════════════════════ */
+
+"git.branchGraph" = "分支图";
+"git.noGraph" = "无图数据";

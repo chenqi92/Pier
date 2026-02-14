@@ -100,6 +100,9 @@ class GitViewModel: ObservableObject {
     @Published var blameLines: [BlameLine] = []
     @Published var blameFilePath: String = ""
 
+    // Branch graph
+    @Published var graphEntries: [BranchGraphView.GraphEntry] = []
+
     init() {
         // Default to home dir, will be updated when folder is selected
         repoPath = FileManager.default.homeDirectoryForCurrentUser.path
@@ -409,6 +412,22 @@ class GitViewModel: ObservableObject {
                 name: .gitShowBlame,
                 object: ["path": path]
             )
+        }
+    }
+
+    // MARK: - Branch Graph
+
+    /// Load commit graph for all branches.
+    func loadBranchGraph() {
+        Task {
+            guard let output = await runGit([
+                "log", "--all", "--oneline", "--graph", "--decorate",
+                "-n", "100"
+            ]) else {
+                graphEntries = []
+                return
+            }
+            graphEntries = GitViewModel.parseGraphOutput(output)
         }
     }
 

@@ -316,3 +316,22 @@
 "ssh.mismatchHostMsg" = "WARNING: The host key has changed. This could indicate a MITM attack.";
 "ssh.acceptKey" = "Accept";
 "ssh.rejectKey" = "Reject";
+
+/* ═══════════════════════════════════════
+   AI Chat
+   ═══════════════════════════════════════ */
+
+"ai.title" = "AI Assistant";
+"ai.inputPlaceholder" = "Ask anything…";
+"ai.generate" = "Generate";
+"ai.explain" = "Explain";
+"ai.fixError" = "Fix Error";
+"ai.noApiKey" = "No API key configured";
+"ai.streaming" = "Streaming…";
+
+/* ═══════════════════════════════════════
+   Git Branch Graph
+   ═══════════════════════════════════════ */
+
+"git.branchGraph" = "Branch Graph";
+"git.noGraph" = "No graph data";
