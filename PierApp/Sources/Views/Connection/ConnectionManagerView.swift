@@ -22,6 +22,12 @@ struct ConnectionManagerView: View {
                 }
                 .buttonStyle(.borderless)
                 .help(LS("conn.addServer"))
+
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
             }
             .padding()
 
@@ -39,7 +45,7 @@ struct ConnectionManagerView: View {
                 tunnelStatus
             }
         }
-        .frame(width: 380, height: 480)
+        .frame(width: 440, height: 540)
         .sheet(isPresented: $showingEditor) {
             if let profile = editingProfile {
                 ProfileEditorView(
@@ -194,7 +200,7 @@ struct ProfileEditorView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text(profile.name.isEmpty ? "conn.addServer" : "conn.editServer")
+                Text(profile.name.isEmpty ? LS("conn.addServer") : LS("conn.editServer"))
                     .font(.headline)
                 Spacer()
             }
@@ -224,11 +230,11 @@ struct ProfileEditorView: View {
                 .pickerStyle(.segmented)
 
                 if profile.authType == .password {
-                    SecureField("conn.password", text: $password)
+                    SecureField(LS("conn.password"), text: $password)
                         .textFieldStyle(.roundedBorder)
                 } else {
                     HStack {
-                        TextField("conn.keyFile", text: Binding(
+                        TextField(LS("conn.keyFile"), text: Binding(
                             get: { profile.keyFilePath ?? "" },
                             set: { profile.keyFilePath = $0.isEmpty ? nil : $0 }
                         ))
@@ -264,6 +270,6 @@ struct ProfileEditorView: View {
             }
             .padding()
         }
-        .frame(width: 360, height: 400)
+        .frame(width: 420, height: 480)
     }
 }

@@ -22,15 +22,14 @@ struct MainView: View {
     @State private var showLeftPanel = true
     @State private var showRightPanel = true
     @State private var leftPanelWidth: CGFloat = 250
-    @State private var rightPanelWidth: CGFloat = 300
+    @State private var rightPanelWidth: CGFloat = 380
     @State private var showNewTabChooser = false
-    @State private var showConnectionManager = false
 
     var body: some View {
         HSplitView {
-            // ── Left Panel: Local File Browser ──
+            // ── Left Panel: Files + Servers ──
             if showLeftPanel {
-                LocalFileView(viewModel: fileViewModel)
+                LeftPanelView(fileViewModel: fileViewModel, serviceManager: serviceManager, terminalViewModel: terminalViewModel)
                     .frame(minWidth: 180, idealWidth: leftPanelWidth, maxWidth: 400)
             }
 
@@ -45,7 +44,7 @@ struct MainView: View {
             // ── Right Panel: Multi-function Area ──
             if showRightPanel {
                 RightPanelView(serviceManager: activeServiceManager)
-                    .frame(minWidth: 200, idealWidth: rightPanelWidth, maxWidth: 500)
+                    .frame(minWidth: 250, idealWidth: rightPanelWidth, maxWidth: 600)
                     .id(terminalViewModel.selectedTabId)
             }
         }
@@ -63,11 +62,6 @@ struct MainView: View {
                 }
                 .help(LS("toolbar.newTerminalTab"))
 
-                Button(action: { showConnectionManager = true }) {
-                    Image(systemName: "server.rack")
-                }
-                .help(LS("toolbar.sshConnectionManager"))
-
                 Button(action: { withAnimation { showRightPanel.toggle() } }) {
                     Image(systemName: "sidebar.right")
                 }
@@ -77,10 +71,6 @@ struct MainView: View {
         .frame(minWidth: 900, minHeight: 500)
         .sheet(isPresented: $showNewTabChooser) {
             NewTabChooserView(terminalViewModel: terminalViewModel)
-                .environmentObject(serviceManager)
-        }
-        .sheet(isPresented: $showConnectionManager) {
-            ConnectionManagerView()
                 .environmentObject(serviceManager)
         }
         .onReceive(NotificationCenter.default.publisher(for: .showNewTabChooser)) { _ in
@@ -213,12 +203,17 @@ struct NewTabChooserView: View {
     }
 
     private func openSSHTab(_ profile: ConnectionProfile) {
-        // Build SSH command with correct auth parameters
-        var sshCommand = "ssh \(profile.username)@\(profile.host) -p \(profile.port)"
-        sshCommand += " -o StrictHostKeyChecking=no"
+        // Build SSH arguments for direct PTY creation
+        var args: [String] = []
+        args.append("\(profile.username)@\(profile.host)")
+        args.append("-p")
+        args.append("\(profile.port)")
+        args.append("-o")
+        args.append("StrictHostKeyChecking=no")
 
         if profile.authType == .keyFile, let keyPath = profile.keyFilePath {
-            sshCommand += " -i \(keyPath)"
+            args.append("-i")
+            args.append(keyPath)
         }
 
         // Load password ONCE from Keychain (single access, no repeated prompts)
@@ -228,15 +223,17 @@ struct NewTabChooserView: View {
 
         let title = profile.name.isEmpty ? profile.host : profile.name
         // Creates a per-tab RemoteServiceManager and connects it with pre-loaded password
-        terminalViewModel.addNewTab(title: title, shell: "/bin/zsh", isSSH: true, profile: profile, preloadedPassword: password)
-        // Send the SSH command to the new terminal after a short delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.terminalViewModel.sendInput(sshCommand + "\n")
-        }
+        terminalViewModel.addNewTab(
+            title: title,
+            isSSH: true,
+            profile: profile,
+            preloadedPassword: password,
+            sshProgram: "/usr/bin/ssh",
+            sshArgs: args
+        )
 
         // For password auth, auto-type the stored password when the prompt appears
         if let password = password, !password.isEmpty {
-            // Wait for the password prompt to appear, then type it
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 self.terminalViewModel.sendInput(password + "\n")
             }
@@ -303,7 +300,7 @@ struct TerminalTabBar: View {
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 1) {
+                HStack(spacing: 2) {
                     ForEach(viewModel.tabs) { tab in
                         TerminalTabItem(
                             tab: tab,
@@ -313,6 +310,7 @@ struct TerminalTabBar: View {
                         )
                     }
                 }
+                .padding(.horizontal, 6)
             }
 
             Spacer()
@@ -321,12 +319,24 @@ struct TerminalTabBar: View {
                 NotificationCenter.default.post(name: .showNewTabChooser, object: nil)
             }) {
                 Image(systemName: "plus")
-                    .font(.caption)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
-            .padding(.horizontal, 8)
+            .padding(.trailing, 8)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(.vertical, 2)
+        .background(
+            Color(nsColor: .controlBackgroundColor).opacity(0.6)
+        )
+        .overlay(alignment: .bottom) {
+            // Subtle bottom border
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.5))
+                .frame(height: 0.5)
+        }
     }
 }
 
@@ -335,29 +345,52 @@ struct TerminalTabItem: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Image(systemName: tab.isSSH ? "network" : "terminal")
-                .font(.caption2)
-                .foregroundColor(tab.isSSH ? .green : .secondary)
+                .font(.system(size: 10))
+                .foregroundColor(tab.isSSH ? .green : (isSelected ? .accentColor : .secondary))
 
             Text(tab.title)
-                .font(.caption)
+                .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                .foregroundColor(isSelected ? .primary : .secondary)
                 .lineLimit(1)
 
             Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8))
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.6))
             }
             .buttonStyle(.borderless)
-            .opacity(isSelected ? 1 : 0)
+            .opacity(isSelected || isHovered ? 1 : 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(isSelected ? Color(nsColor: .selectedContentBackgroundColor) : Color.clear)
-        .cornerRadius(4)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected
+                    ? Color.accentColor.opacity(0.12)
+                    : (isHovered ? Color(nsColor: .controlBackgroundColor).opacity(0.8) : Color.clear)
+                )
+        )
+        .overlay(alignment: .bottom) {
+            // Active indicator stripe
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.accentColor)
+                    .frame(height: 2)
+                    .padding(.horizontal, 8)
+            }
+        }
+        .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
@@ -367,23 +400,28 @@ struct StatusBarView: View {
     @ObservedObject var viewModel: TerminalViewModel
 
     var body: some View {
-        HStack {
+        HStack(spacing: 6) {
             if let session = viewModel.currentSession {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 6))
-                    .foregroundColor(.green)
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 5, height: 5)
                 Text(session.shellPath)
-                    .font(.caption2)
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)
             }
 
             Spacer()
 
             Text(String(format: LS("terminal.sessionCount"), viewModel.tabs.count))
-                .font(.caption2)
-                .foregroundColor(.secondary)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary.opacity(0.7))
         }
         .padding(.horizontal, 12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.3))
+                .frame(height: 0.5)
+        }
     }
 }

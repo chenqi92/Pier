@@ -215,16 +215,19 @@ class TerminalNSView: NSView {
     @objc private func handleTerminalInput(_ notification: Notification) {
         guard let handle = terminalHandle else { return }
         var text: String?
+        var deliveryFlag: UnsafeMutablePointer<Bool>?
         if let info = notification.object as? [String: Any] {
             // From TerminalViewModel.sendInput: ["sessionId": UUID, "text": String]
             if let sessionId = info["sessionId"] as? UUID {
                 guard sessionId == currentSessionId else { return }
             }
             text = info["text"] as? String
+            deliveryFlag = info["deliveryFlag"] as? UnsafeMutablePointer<Bool>
         }
         guard let inputText = text, !inputText.isEmpty else { return }
         let bytes = Array(inputText.utf8)
         pier_terminal_write(handle, bytes, UInt(bytes.count))
+        deliveryFlag?.pointee = true
     }
 
     @objc private func handleTabClosed(_ notification: Notification) {
@@ -377,7 +380,11 @@ class TerminalNSView: NSView {
 
     private func startTerminalForPendingSession() {
         guard let session = pendingSession else { return }
-        startTerminal(shell: session.shellPath)
+        if let sshProgram = session.sshProgram, let sshArgs = session.sshArgs {
+            startTerminalWithCommand(program: sshProgram, args: sshArgs)
+        } else {
+            startTerminal(shell: session.shellPath)
+        }
         pendingSession = nil
     }
 
@@ -419,6 +426,39 @@ class TerminalNSView: NSView {
 
         if terminalHandle != nil {
             // Initialize screen buffer to match PTY size
+            screenBuffer = Array(repeating: Array(repeating: Character(" "), count: cols), count: rows)
+            startReadLoop()
+        }
+    }
+
+    /// Start terminal with a specific command and arguments (e.g. direct SSH).
+    func startTerminalWithCommand(program: String, args: [String]) {
+        let visibleSize = enclosingScrollView?.contentView.bounds.size ?? bounds.size
+        let cols = max(Int(80), Int(visibleSize.width / cellWidth))
+        let rows = max(Int(24), Int(visibleSize.height / cellHeight))
+
+        ptyCols = cols
+        ptyRows = rows
+
+        // Convert args to C strings
+        let cArgs = args.map { strdup($0)! }
+        defer { cArgs.forEach { free($0) } }
+
+        var argPtrs = cArgs.map { UnsafePointer($0) as UnsafePointer<CChar>? }
+
+        terminalHandle = program.withCString { programPtr in
+            argPtrs.withUnsafeMutableBufferPointer { buffer in
+                pier_terminal_create_with_args(
+                    UInt16(cols),
+                    UInt16(rows),
+                    programPtr,
+                    buffer.baseAddress!,
+                    UInt32(args.count)
+                )
+            }
+        }
+
+        if terminalHandle != nil {
             screenBuffer = Array(repeating: Array(repeating: Character(" "), count: cols), count: rows)
             startReadLoop()
         }

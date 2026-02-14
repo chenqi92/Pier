@@ -190,18 +190,11 @@ struct RightPanelView: View {
 
         return VStack(spacing: 2) {
             ForEach(modes, id: \.self) { mode in
-                Button(action: { selectedMode = mode }) {
-                    Image(systemName: mode.iconName)
-                        .font(.system(size: 14))
-                        .frame(width: 32, height: 28)
-                        .foregroundColor(selectedMode == mode ? .accentColor : .secondary)
-                        .background(selectedMode == mode
-                            ? Color.accentColor.opacity(0.15)
-                            : Color.clear)
-                        .cornerRadius(6)
-                }
-                .buttonStyle(.borderless)
-                .help(mode.title)
+                SidebarModeButton(
+                    mode: mode,
+                    isSelected: selectedMode == mode,
+                    action: { selectedMode = mode }
+                )
 
                 // Show separator after the last local-context tab
                 // when remote tabs are also present
@@ -437,6 +430,50 @@ enum RightPanelMode: String, CaseIterable {
         switch self {
         case .markdown, .git: return .local
         case .monitor, .sftp, .docker, .database, .redis, .logViewer: return .remote
+        }
+    }
+}
+
+// MARK: - Sidebar Mode Button
+
+struct SidebarModeButton: View {
+    let mode: RightPanelMode
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 0) {
+                // Left accent indicator
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(isSelected ? Color.accentColor : Color.clear)
+                    .frame(width: 2, height: 16)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: mode.iconName)
+                    .font(.system(size: 13))
+                    .frame(width: 28, height: 26)
+                    .foregroundColor(isSelected ? .accentColor : (isHovered ? .primary : .secondary))
+
+                Spacer(minLength: 0)
+            }
+            .frame(width: 34, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected
+                        ? Color.accentColor.opacity(0.12)
+                        : (isHovered ? Color(nsColor: .controlBackgroundColor).opacity(0.8) : Color.clear)
+                    )
+            )
+        }
+        .buttonStyle(.borderless)
+        .help(mode.title)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
         }
     }
 }

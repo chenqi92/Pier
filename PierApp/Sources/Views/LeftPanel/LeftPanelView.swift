@@ -1,0 +1,383 @@
+import SwiftUI
+
+/// Left panel container with Files / Servers tab switcher.
+struct LeftPanelView: View {
+    @ObservedObject var fileViewModel: FileViewModel
+    @ObservedObject var serviceManager: RemoteServiceManager
+    @ObservedObject var terminalViewModel: TerminalViewModel
+
+    enum Tab: String, CaseIterable {
+        case files, servers
+        var label: String {
+            switch self {
+            case .files:   return LS("leftPanel.files")
+            case .servers: return LS("leftPanel.servers")
+            }
+        }
+        var icon: String {
+            switch self {
+            case .files:   return "folder"
+            case .servers: return "server.rack"
+            }
+        }
+    }
+
+    @State private var selectedTab: Tab = .files
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Tab switcher
+            tabBar
+
+            Divider()
+
+            // Content
+            switch selectedTab {
+            case .files:
+                LocalFileView(viewModel: fileViewModel)
+            case .servers:
+                ServerListPanelView(serviceManager: serviceManager, terminalViewModel: terminalViewModel)
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+    }
+
+    // MARK: - Tab Bar
+
+    private var tabBar: some View {
+        HStack(spacing: 2) {
+            ForEach(Tab.allCases, id: \.self) { tab in
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { selectedTab = tab } }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 10))
+                        Text(tab.label)
+                            .font(.system(size: 11, weight: selectedTab == tab ? .semibold : .regular))
+                    }
+                    .foregroundColor(selectedTab == tab ? .accentColor : .secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(selectedTab == tab
+                                ? Color.accentColor.opacity(0.12)
+                                : Color.clear)
+                    )
+                }
+                .buttonStyle(.borderless)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+    }
+}
+
+// MARK: - Server List Panel (inline, not a sheet)
+
+struct ServerListPanelView: View {
+    @ObservedObject var serviceManager: RemoteServiceManager
+    @ObservedObject var terminalViewModel: TerminalViewModel
+
+    @State private var showingEditor = false
+    @State private var editingProfile: ConnectionProfile?
+    @State private var passwordField = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if serviceManager.savedProfiles.isEmpty {
+                emptyState
+            } else {
+                serverList
+            }
+
+            // Active tunnels
+            if serviceManager.isConnected && !serviceManager.activeTunnels.isEmpty {
+                Divider()
+                tunnelStatus
+            }
+
+            Divider()
+
+            // Bottom toolbar
+            bottomBar
+        }
+        .sheet(isPresented: $showingEditor) {
+            if let profile = editingProfile {
+                ProfileEditorView(
+                    profile: profile,
+                    password: passwordField,
+                    onSave: { updated, password in
+                        serviceManager.saveProfile(updated)
+                        if !password.isEmpty {
+                            serviceManager.savePassword(password, for: updated)
+                        }
+                        showingEditor = false
+                    },
+                    onCancel: { showingEditor = false }
+                )
+            }
+        }
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary.opacity(0.5))
+            Text(LS("conn.noServers"))
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            Text(LS("conn.addServerHint"))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Server List
+
+    private var serverList: some View {
+        ScrollView {
+            LazyVStack(spacing: 1) {
+                ForEach(serviceManager.savedProfiles) { profile in
+                    ServerRowView(
+                        profile: profile,
+                        isConnected: isProfileConnected(profile),
+                        isConnecting: serviceManager.isConnecting,
+                        anyConnected: serviceManager.isConnected,
+                        onConnect: { connectProfile(profile) },
+                        onDisconnect: { serviceManager.disconnect() },
+                        onEdit: { editProfile(profile) },
+                        onDelete: { serviceManager.deleteProfile(profile) }
+                    )
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: - Tunnel Status
+
+    private var tunnelStatus: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: "network")
+                    .font(.system(size: 9))
+                    .foregroundColor(.green)
+                Text(LS("tunnel.active"))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+
+            ForEach(serviceManager.activeTunnels) { tunnel in
+                HStack(spacing: 4) {
+                    Text(tunnel.serviceName)
+                        .font(.system(size: 9, weight: .medium))
+                    Spacer()
+                    Text("127.0.0.1:\(tunnel.localPort) → :\(tunnel.remotePort)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 10)
+            }
+        }
+        .padding(.bottom, 6)
+    }
+
+    // MARK: - Bottom Bar
+
+    private var bottomBar: some View {
+        HStack(spacing: 6) {
+            Button(action: addNew) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .help(LS("conn.addServer"))
+
+            Spacer()
+
+            // Connection status indicator
+            if serviceManager.isConnected {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 5, height: 5)
+                    Text(serviceManager.connectedHost)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            } else if serviceManager.isConnecting {
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .scaleEffect(0.4)
+                        .frame(width: 10, height: 10)
+                    Text(LS("ssh.connecting"))
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+    }
+
+    // MARK: - Actions
+
+    private func addNew() {
+        editingProfile = .default
+        passwordField = ""
+        showingEditor = true
+    }
+
+    private func editProfile(_ profile: ConnectionProfile) {
+        editingProfile = profile
+        passwordField = ""
+        showingEditor = true
+    }
+
+    private func connectProfile(_ profile: ConnectionProfile) {
+        // Build SSH arguments
+        var args: [String] = []
+        args.append("\(profile.username)@\(profile.host)")
+        args.append("-p")
+        args.append("\(profile.port)")
+        args.append("-o")
+        args.append("StrictHostKeyChecking=no")
+
+        if profile.authType == .keyFile, let keyPath = profile.keyFilePath {
+            args.append("-i")
+            args.append(keyPath)
+        }
+
+        // Load password from Keychain
+        let password: String? = profile.authType == .password
+            ? (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)"))
+            : nil
+
+        let title = profile.name.isEmpty ? profile.host : profile.name
+        terminalViewModel.addNewTab(
+            title: title,
+            isSSH: true,
+            profile: profile,
+            preloadedPassword: password,
+            sshProgram: "/usr/bin/ssh",
+            sshArgs: args
+        )
+
+        // For password auth, auto-type the stored password when the prompt appears
+        if let password = password, !password.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak terminalViewModel] in
+                terminalViewModel?.sendInput(password + "\n")
+            }
+        }
+    }
+
+    private func isProfileConnected(_ profile: ConnectionProfile) -> Bool {
+        serviceManager.isConnected && serviceManager.connectedHost == "\(profile.host):\(profile.port)"
+    }
+}
+
+// MARK: - Server Row
+
+struct ServerRowView: View {
+    let profile: ConnectionProfile
+    let isConnected: Bool
+    let isConnecting: Bool
+    let anyConnected: Bool
+    let onConnect: () -> Void
+    let onDisconnect: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Status dot
+            Circle()
+                .fill(isConnected ? Color.green : Color.secondary.opacity(0.25))
+                .frame(width: 6, height: 6)
+
+            // Server info
+            VStack(alignment: .leading, spacing: 1) {
+                Text(profile.name.isEmpty ? profile.host : profile.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isConnected ? .primary : .secondary)
+                    .lineLimit(1)
+                Text("\(profile.username)@\(profile.host):\(profile.port)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.7))
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // Action buttons (visible on hover or when connected)
+            if isHovered || isConnected {
+                if isConnected {
+                    Button(action: onDisconnect) {
+                        Image(systemName: "bolt.horizontal.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.red.opacity(0.8))
+                    }
+                    .buttonStyle(.borderless)
+                    .help(LS("ssh.disconnect"))
+                } else {
+                    Button(action: onConnect) {
+                        Image(systemName: "bolt.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.accentColor)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(LS("conn.connect"))
+                    .disabled(isConnecting || anyConnected)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isConnected
+                    ? Color.green.opacity(0.06)
+                    : (isHovered ? Color(nsColor: .controlBackgroundColor).opacity(0.6) : Color.clear))
+        )
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
+        }
+        .contextMenu {
+            Button(action: onConnect) {
+                Label(LS("conn.connect"), systemImage: "bolt.circle")
+            }
+            .disabled(isConnecting || anyConnected)
+
+            Button(action: onEdit) {
+                Label(LS("conn.editServer"), systemImage: "pencil")
+            }
+
+            Divider()
+
+            Button(role: .destructive, action: onDelete) {
+                Label(LS("conn.deleteServer"), systemImage: "trash")
+            }
+        }
+        .onTapGesture(count: 2) {
+            if !isConnected && !isConnecting && !anyConnected {
+                onConnect()
+            }
+        }
+    }
+}

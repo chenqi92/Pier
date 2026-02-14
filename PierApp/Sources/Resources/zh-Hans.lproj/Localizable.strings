@@ -10,6 +10,12 @@
 "toolbar.sshConnectionManager" = "SSH 连接管理";
 "toolbar.toggleRightPanel" = "切换右侧面板";
 
+/* 左侧面板标签 */
+"leftPanel.files" = "文件";
+"leftPanel.servers" = "服务器";
+"conn.addServerHint" = "点击下方 + 添加第一台服务器";
+"ssh.connecting" = "连接中...";
+
 /* 终端容器 */
 "terminal.noSessions" = "无终端会话";
 "terminal.newTerminal" = "新建终端";

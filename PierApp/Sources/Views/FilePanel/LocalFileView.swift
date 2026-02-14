@@ -34,9 +34,10 @@ struct LocalFileView: View {
         HStack {
             Image(systemName: "folder.fill")
                 .foregroundColor(.accentColor)
+                .font(.system(size: 11))
 
             Text(viewModel.currentPath.lastPathComponent)
-                .font(.caption)
+                .font(.system(size: 11))
                 .fontWeight(.medium)
                 .lineLimit(1)
 
@@ -50,18 +51,19 @@ struct LocalFileView: View {
                 Button(LS("files.chooseFolder")) { viewModel.openFolderPicker() }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .font(.caption)
+                    .font(.system(size: 11))
             }
             .menuStyle(.borderlessButton)
 
             Button(action: { viewModel.refresh() }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.caption)
+                    .font(.system(size: 11))
             }
             .buttonStyle(.borderless)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
     }
 
     // MARK: - Search
@@ -70,39 +72,32 @@ struct LocalFileView: View {
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
-                .font(.caption)
+                .font(.system(size: 10))
 
             TextField(LS("files.searchPlaceholder"), text: $searchText)
                 .textFieldStyle(.plain)
-                .font(.caption)
+                .font(.system(size: 11))
                 .onChange(of: searchText) { _, newValue in
                     viewModel.filterFiles(query: newValue)
                 }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.3))
+                .frame(height: 0.5)
+        }
     }
 
     // MARK: - File Tree
 
     private var fileTreeList: some View {
-        List(viewModel.displayedFiles, children: \.children) { item in
-            FileTreeRow(item: item)
-                .onAppear {
-                    // Lazy-load children when this directory row appears on screen
-                    viewModel.ensureChildrenLoaded(for: item)
-                }
-                .onTapGesture {
-                    viewModel.handleTap(item)
-                }
-                .contextMenu {
-                    fileContextMenu(for: item)
-                }
-                .onDrag {
-                    NSItemProvider(contentsOf: URL(fileURLWithPath: item.path))
-                        ?? NSItemProvider()
-                }
+        List {
+            ForEach(viewModel.displayedFiles) { item in
+                FileTreeNode(item: item, viewModel: viewModel)
+            }
         }
         .listStyle(.sidebar)
         .transaction { transaction in
@@ -114,7 +109,7 @@ struct LocalFileView: View {
     // MARK: - Context Menu
 
     @ViewBuilder
-    private func fileContextMenu(for item: FileItem) -> some View {
+    static func fileContextMenu(for item: FileItem, viewModel: FileViewModel) -> some View {
         Button(LS("files.openInTerminal")) {
             if item.isDirectory {
                 NotificationCenter.default.post(
@@ -159,20 +154,75 @@ struct LocalFileView: View {
     }
 }
 
+// MARK: - File Tree Node (Recursive DisclosureGroup)
+
+/// A single node in the file tree. Directories use `DisclosureGroup` for
+/// programmatic expand/collapse; files are plain rows.
+struct FileTreeNode: View {
+    @ObservedObject var item: FileItem
+    @ObservedObject var viewModel: FileViewModel
+
+    var body: some View {
+        if item.isDirectory {
+            DisclosureGroup(isExpanded: $item.isExpanded) {
+                if let children = item.children, !children.isEmpty {
+                    ForEach(children) { child in
+                        FileTreeNode(item: child, viewModel: viewModel)
+                    }
+                }
+            } label: {
+                FileTreeRow(item: item)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        // Double-click: toggle expand/collapse
+                        item.isExpanded.toggle()
+                        viewModel.ensureChildrenLoaded(for: item)
+                    }
+                    .onTapGesture(count: 1) {
+                        viewModel.handleTap(item)
+                    }
+            }
+            .onAppear {
+                viewModel.ensureChildrenLoaded(for: item)
+            }
+            .contextMenu {
+                LocalFileView.fileContextMenu(for: item, viewModel: viewModel)
+            }
+            .onDrag {
+                NSItemProvider(contentsOf: URL(fileURLWithPath: item.path))
+                    ?? NSItemProvider()
+            }
+        } else {
+            FileTreeRow(item: item)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    viewModel.handleTap(item)
+                }
+                .contextMenu {
+                    LocalFileView.fileContextMenu(for: item, viewModel: viewModel)
+                }
+                .onDrag {
+                    NSItemProvider(contentsOf: URL(fileURLWithPath: item.path))
+                        ?? NSItemProvider()
+                }
+        }
+    }
+}
+
 // MARK: - File Tree Row
 
 struct FileTreeRow: View {
     let item: FileItem
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Image(systemName: item.iconName)
                 .foregroundColor(item.iconColor)
-                .font(.caption)
-                .frame(width: 16)
+                .font(.system(size: 11))
+                .frame(width: 14)
 
             Text(item.name)
-                .font(.system(.caption, design: .default))
+                .font(.system(size: 11))
                 .lineLimit(1)
 
             Spacer()

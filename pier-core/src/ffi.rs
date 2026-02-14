@@ -54,6 +54,48 @@ pub extern "C" fn pier_terminal_create(
     }
 }
 
+/// Create a new terminal session running a specific command with arguments.
+/// `args` is a C array of `argc` string pointers. args[0] should be the program path.
+/// Returns null on failure.
+#[no_mangle]
+pub extern "C" fn pier_terminal_create_with_args(
+    cols: u16,
+    rows: u16,
+    program: *const c_char,
+    args: *const *const c_char,
+    argc: u32,
+) -> PierTerminalHandle {
+    if program.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let program_str = unsafe { CStr::from_ptr(program).to_str().unwrap_or("/bin/zsh") };
+
+    let mut arg_strings: Vec<String> = Vec::new();
+    if !args.is_null() && argc > 0 {
+        for i in 0..argc as usize {
+            unsafe {
+                let arg_ptr = *args.add(i);
+                if !arg_ptr.is_null() {
+                    if let Ok(s) = CStr::from_ptr(arg_ptr).to_str() {
+                        arg_strings.push(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let arg_refs: Vec<&str> = arg_strings.iter().map(|s| s.as_str()).collect();
+
+    match TerminalSession::new_with_command(cols, rows, program_str, &arg_refs) {
+        Ok(session) => Box::into_raw(Box::new(session)),
+        Err(e) => {
+            log::error!("Failed to create terminal with args: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Destroy a terminal session.
 #[no_mangle]
 pub extern "C" fn pier_terminal_destroy(handle: PierTerminalHandle) {

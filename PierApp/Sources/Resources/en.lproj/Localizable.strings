@@ -10,6 +10,12 @@
 "toolbar.sshConnectionManager" = "SSH connection manager";
 "toolbar.toggleRightPanel" = "Toggle right panel";
 
+/* Left Panel Tabs */
+"leftPanel.files" = "Files";
+"leftPanel.servers" = "Servers";
+"conn.addServerHint" = "Click + below to add your first server";
+"ssh.connecting" = "Connecting...";
+
 /* Terminal Container */
 "terminal.noSessions" = "No Terminal Sessions";
 "terminal.newTerminal" = "New Terminal";

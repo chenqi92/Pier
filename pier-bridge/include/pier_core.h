@@ -30,6 +30,17 @@ typedef struct SshSession *PierSshHandle;
 PierTerminalHandle pier_terminal_create(uint16_t cols, uint16_t rows, const char *shell);
 
 /**
+ * Create a new terminal session running a specific command with arguments.
+ * `args` is a C array of `argc` string pointers. args[0] should be the program path.
+ * Returns null on failure.
+ */
+PierTerminalHandle pier_terminal_create_with_args(uint16_t cols,
+                                                  uint16_t rows,
+                                                  const char *program,
+                                                  const char *const *args,
+                                                  uint32_t argc);
+
+/**
  * Destroy a terminal session.
  */
 void pier_terminal_destroy(PierTerminalHandle handle);

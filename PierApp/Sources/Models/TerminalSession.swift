@@ -35,6 +35,10 @@ class TerminalSessionInfo: Identifiable, ObservableObject {
     var remoteServiceManager: RemoteServiceManager?
     /// The connection profile used for this SSH tab (nil for local).
     var connectedProfile: ConnectionProfile?
+    /// For direct SSH PTY: the program path (e.g. "/usr/bin/ssh")
+    var sshProgram: String?
+    /// For direct SSH PTY: the arguments (e.g. ["-o", "StrictHostKeyChecking=no", "user@host", "-p", "22"])
+    var sshArgs: [String]?
 
     init(shellPath: String = "/bin/zsh", isSSH: Bool = false, title: String = "Local") {
         self.shellPath = shellPath

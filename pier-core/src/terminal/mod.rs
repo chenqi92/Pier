@@ -31,6 +31,19 @@ impl TerminalSession {
         })
     }
 
+    /// Create a new terminal session running a specific command with arguments.
+    pub fn new_with_command(cols: u16, rows: u16, program: &str, args: &[&str]) -> Result<Self, std::io::Error> {
+        let pty = PtyProcess::spawn_command(cols, rows, program, args)?;
+        let screen = vec![vec![' '; cols as usize]; rows as usize];
+        Ok(Self {
+            pty,
+            cols,
+            rows,
+            scrollback: Arc::new(Mutex::new(Vec::new())),
+            screen: Arc::new(Mutex::new(screen)),
+        })
+    }
+
     /// Resize the terminal.
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), std::io::Error> {
         self.cols = cols;

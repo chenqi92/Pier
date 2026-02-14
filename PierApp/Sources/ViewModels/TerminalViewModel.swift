@@ -52,9 +52,11 @@ class TerminalViewModel: ObservableObject {
 
     // MARK: - Tab Management
 
-    func addNewTab(title: String = "Terminal", shell: String = "/bin/zsh", isSSH: Bool = false, profile: ConnectionProfile? = nil, preloadedPassword: String? = nil) {
+    func addNewTab(title: String = "Terminal", shell: String = "/bin/zsh", isSSH: Bool = false, profile: ConnectionProfile? = nil, preloadedPassword: String? = nil, sshProgram: String? = nil, sshArgs: [String]? = nil) {
         let tab = TerminalTab(title: title, isSSH: isSSH, shellPath: shell)
         let session = TerminalSessionInfo(shellPath: shell, isSSH: isSSH, title: title)
+        session.sshProgram = sshProgram
+        session.sshArgs = sshArgs
 
         tabs.append(tab)
         sessions[tab.id] = session
@@ -106,6 +108,28 @@ class TerminalViewModel: ObservableObject {
             name: .terminalInput,
             object: ["sessionId": id, "text": text]
         )
+    }
+
+    /// Send input to a specific session, retrying until it's delivered.
+    /// Used after creating a new tab, since the PTY needs a layout pass to initialize.
+    func sendInputToSession(_ sessionId: UUID, text: String, retriesLeft: Int = 15) {
+        // Check if the session's PTY is ready by looking for a response
+        let delivered = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        delivered.pointee = false
+
+        NotificationCenter.default.post(
+            name: .terminalInput,
+            object: ["sessionId": sessionId, "text": text, "deliveryFlag": delivered]
+        )
+
+        let wasDelivered = delivered.pointee
+        delivered.deallocate()
+
+        if !wasDelivered && retriesLeft > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.sendInputToSession(sessionId, text: text, retriesLeft: retriesLeft - 1)
+            }
+        }
     }
 }
 

@@ -11,6 +11,11 @@ pub struct PtyProcess {
 impl PtyProcess {
     /// Spawn a new PTY process running the given shell.
     pub fn spawn(cols: u16, rows: u16, shell: &str) -> Result<Self, std::io::Error> {
+        Self::spawn_command(cols, rows, shell, &["-l"])
+    }
+
+    /// Spawn a new PTY process running the given command with explicit arguments.
+    pub fn spawn_command(cols: u16, rows: u16, program: &str, args: &[&str]) -> Result<Self, std::io::Error> {
         let mut master_fd: libc::c_int = 0;
 
         // Set up terminal size
@@ -34,10 +39,16 @@ impl PtyProcess {
             }
 
             if child_pid == 0 {
-                // Child process: exec the shell as a login shell
-                let shell_c = std::ffi::CString::new(shell).unwrap();
-                let login_flag = std::ffi::CString::new("-l").unwrap();
-                let args = [shell_c.as_ptr(), login_flag.as_ptr(), std::ptr::null()];
+                // Child process: exec the command with given args
+                let program_c = std::ffi::CString::new(program).unwrap();
+                let args_c: Vec<std::ffi::CString> = std::iter::once(program.to_string())
+                    .chain(args.iter().map(|s| s.to_string()))
+                    .map(|s| std::ffi::CString::new(s).unwrap())
+                    .collect();
+                let args_ptrs: Vec<*const libc::c_char> = args_c.iter()
+                    .map(|s| s.as_ptr())
+                    .chain(std::iter::once(std::ptr::null()))
+                    .collect();
 
                 // Set environment for proper terminal behavior
                 let term = std::ffi::CString::new("TERM=xterm-256color").unwrap();
@@ -49,7 +60,7 @@ impl PtyProcess {
                 let lc_all = std::ffi::CString::new("LC_ALL=en_US.UTF-8").unwrap();
                 libc::putenv(lc_all.as_ptr() as *mut _);
 
-                libc::execvp(shell_c.as_ptr(), args.as_ptr());
+                libc::execvp(program_c.as_ptr(), args_ptrs.as_ptr());
                 // If exec fails, exit
                 libc::_exit(1);
             }

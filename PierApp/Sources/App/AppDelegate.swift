@@ -8,6 +8,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Use thin overlay-style scrollbars (auto-hiding, like trackpad)
+        UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
+
         // Ensure the app appears as a regular GUI app (needed when running
         // as a bare binary outside of .app bundle, e.g. via `swift run`)
         NSApp.setActivationPolicy(.regular)
