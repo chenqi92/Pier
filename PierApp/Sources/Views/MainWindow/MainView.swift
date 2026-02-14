@@ -75,6 +75,9 @@ struct MainView: View {
             ConnectionManagerView()
                 .environmentObject(serviceManager)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showNewTabChooser)) { _ in
+            showNewTabChooser = true
+        }
     }
 
     /// Handle files dropped onto the terminal area.
@@ -233,6 +236,7 @@ struct TerminalContainerView: View {
                 emptyState
             } else {
                 TerminalView(session: viewModel.currentSession)
+                    .layoutPriority(1)
             }
 
             Divider()
@@ -283,7 +287,9 @@ struct TerminalTabBar: View {
 
             Spacer()
 
-            Button(action: { viewModel.addNewTab() }) {
+            Button(action: {
+                NotificationCenter.default.post(name: .showNewTabChooser, object: nil)
+            }) {
                 Image(systemName: "plus")
                     .font(.caption)
             }

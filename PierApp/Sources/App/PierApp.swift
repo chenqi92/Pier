@@ -84,4 +84,5 @@ struct AISettingsView: View {
 extension Notification.Name {
     static let newTerminalTab = Notification.Name("pier.newTerminalTab")
     static let newSSHConnection = Notification.Name("pier.newSSHConnection")
+    static let showNewTabChooser = Notification.Name("pier.showNewTabChooser")
 }

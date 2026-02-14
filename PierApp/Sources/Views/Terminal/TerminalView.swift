@@ -7,8 +7,8 @@ import CPierCore
 struct TerminalView: NSViewRepresentable {
     let session: TerminalSessionInfo?
 
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+    func makeNSView(context: Context) -> TerminalScrollView {
+        let scrollView = TerminalScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -18,26 +18,56 @@ struct TerminalView: NSViewRepresentable {
         let terminalView = TerminalNSView()
         scrollView.documentView = terminalView
 
-        // Ensure the terminal view becomes first responder so it receives keyboard input
-        DispatchQueue.main.async {
-            terminalView.window?.makeFirstResponder(terminalView)
-        }
-
         return scrollView
     }
 
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+    func updateNSView(_ scrollView: TerminalScrollView, context: Context) {
         guard let terminalView = scrollView.documentView as? TerminalNSView else { return }
         terminalView.updateSession(session)
 
-        // Re-activate first responder when switching tabs
+        // Ensure the terminal view becomes first responder when session updates
         DispatchQueue.main.async {
-            if terminalView.window?.firstResponder !== terminalView {
-                terminalView.window?.makeFirstResponder(terminalView)
+            if let window = terminalView.window,
+               window.firstResponder !== terminalView {
+                window.makeFirstResponder(terminalView)
             }
         }
     }
 }
+
+/// Custom NSScrollView that forwards keyboard events to the terminal document view
+/// instead of consuming them for scroll behavior.
+class TerminalScrollView: NSScrollView {
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        // Forward all keyboard events to the terminal view
+        if let terminalView = documentView as? TerminalNSView {
+            terminalView.keyDown(with: event)
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        // When we receive focus, forward it to the terminal view
+        if let terminalView = documentView as? TerminalNSView {
+            window?.makeFirstResponder(terminalView)
+            return true
+        }
+        return super.becomeFirstResponder()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // Ensure terminal view gets first responder on click
+        if let terminalView = documentView as? TerminalNSView {
+            window?.makeFirstResponder(terminalView)
+        }
+        super.mouseDown(with: event)
+    }
+}
+
 
 /// AppKit NSView for high-performance terminal rendering.
 class TerminalNSView: NSView {
