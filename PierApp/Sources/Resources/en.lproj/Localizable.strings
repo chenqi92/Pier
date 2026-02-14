@@ -173,6 +173,7 @@
 "ssh.serviceDetectionTitle" = "Service Detection";
 "ssh.serviceDetectionDesc" = "Connect to an SSH server via Connection Manager to auto-detect services like MySQL, Redis, and Docker.";
 "ssh.connectNow" = "Connect";
+"ssh.detectedSSH" = "SSH Detected";
 "ssh.detectedServicesTitle" = "Detected Services";
 "ssh.refreshServices" = "Refresh Services";
 

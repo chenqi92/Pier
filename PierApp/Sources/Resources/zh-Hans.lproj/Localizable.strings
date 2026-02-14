@@ -173,6 +173,7 @@
 "ssh.serviceDetectionTitle" = "服务检测";
 "ssh.serviceDetectionDesc" = "通过连接管理器连接 SSH 服务器，自动检测 MySQL、Redis、Docker 等服务。";
 "ssh.connectNow" = "连接";
+"ssh.detectedSSH" = "检测到 SSH 连接";
 "ssh.detectedServicesTitle" = "已检测到的服务";
 "ssh.refreshServices" = "刷新服务";
 

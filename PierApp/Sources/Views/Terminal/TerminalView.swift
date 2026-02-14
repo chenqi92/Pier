@@ -976,6 +976,7 @@ class TerminalNSView: NSView {
             // Handle special keys
             switch event.keyCode {
             case 36: // Return
+                detectSSHCommand()
                 bytes = [0x0D]
             case 51: // Backspace
                 bytes = [0x7F]
@@ -1010,6 +1011,62 @@ class TerminalNSView: NSView {
             selectionEnd = nil
             pier_terminal_write(handle, bytes, UInt(bytes.count))
         }
+    }
+
+    // MARK: - SSH Command Detection
+
+    /// Read the current screen line when Enter is pressed and detect SSH commands.
+    private func detectSSHCommand() {
+        guard cursorY >= 0, cursorY < screenBuffer.count else { return }
+        let line = String(screenBuffer[cursorY]).trimmingCharacters(in: .whitespaces)
+        // Strip shell prompt: take everything after the last $ or # or %
+        let commandPart: String
+        if let promptEnd = line.lastIndex(where: { $0 == "$" || $0 == "#" || $0 == "%" }) {
+            commandPart = String(line[line.index(after: promptEnd)...]).trimmingCharacters(in: .whitespaces)
+        } else {
+            commandPart = line
+        }
+        guard let parsed = parseSSHCommand(commandPart) else { return }
+        NotificationCenter.default.post(
+            name: .terminalSSHDetected,
+            object: ["host": parsed.host, "username": parsed.username, "port": String(parsed.port)]
+        )
+    }
+
+    /// Parse an SSH command line like `ssh [-p port] [user@]host` into components.
+    private func parseSSHCommand(_ cmd: String) -> (host: String, username: String, port: UInt16)? {
+        let tokens = cmd.split(separator: " ").map(String.init)
+        guard tokens.first == "ssh" else { return nil }
+        var username = "root"
+        var port: UInt16 = 22
+        var host: String?
+        var i = 1
+        while i < tokens.count {
+            let t = tokens[i]
+            if t == "-p", i + 1 < tokens.count {
+                port = UInt16(tokens[i + 1]) ?? 22
+                i += 2
+            } else if t.hasPrefix("-") {
+                // Skip other flags (e.g. -i, -o); if they take an argument, skip next too
+                if ["-i", "-o", "-l", "-L", "-R", "-D", "-F", "-J", "-w", "-W"].contains(t) {
+                    i += 2
+                } else {
+                    i += 1
+                }
+            } else {
+                // user@host or just host
+                if t.contains("@") {
+                    let parts = t.split(separator: "@", maxSplits: 1)
+                    username = String(parts[0])
+                    host = String(parts[1])
+                } else {
+                    host = t
+                }
+                i += 1
+            }
+        }
+        guard let h = host, !h.isEmpty else { return nil }
+        return (h, username, port)
     }
 
     // MARK: - Scroll

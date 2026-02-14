@@ -63,4 +63,5 @@ class TerminalViewModel: ObservableObject {
 
 extension Notification.Name {
     static let terminalInput = Notification.Name("pier.terminalInput")
+    static let terminalSSHDetected = Notification.Name("pier.terminalSSHDetected")
 }

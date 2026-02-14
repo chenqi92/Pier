@@ -213,6 +213,8 @@ struct NewTabChooserView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             terminalViewModel.sendInput(sshCommand + "\n")
         }
+        // Also establish the managed SSH connection for SFTP/Docker/Redis panels
+        serviceManager.connect(profile: profile)
         dismiss()
     }
 }

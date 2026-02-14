@@ -285,6 +285,7 @@ impl SshSession {
 
         let mut stdout = Vec::new();
         let mut exit_code: i32 = -1;
+        let mut got_eof = false;
 
         loop {
             // Safety: channel_read with timeout to avoid hanging
@@ -303,8 +304,16 @@ impl SshSession {
                         }
                         russh::ChannelMsg::ExitStatus { exit_status } => {
                             exit_code = exit_status as i32;
+                            // If we already got EOF, we're done
+                            if got_eof { break; }
                         }
                         russh::ChannelMsg::Eof => {
+                            got_eof = true;
+                            // If we already have an exit code, we're done
+                            if exit_code != -1 { break; }
+                            // Otherwise continue to wait for ExitStatus
+                        }
+                        russh::ChannelMsg::Close => {
                             break;
                         }
                         _ => {}
@@ -317,6 +326,11 @@ impl SshSession {
                     break;
                 }
             }
+        }
+
+        // If we got data but no explicit exit code, treat as success
+        if exit_code == -1 && !stdout.is_empty() {
+            exit_code = 0;
         }
 
         let output = String::from_utf8_lossy(&stdout).trim().to_string();

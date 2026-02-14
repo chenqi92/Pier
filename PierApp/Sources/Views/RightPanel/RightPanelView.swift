@@ -9,48 +9,56 @@ struct RightPanelView: View {
     @StateObject private var remoteFileVM = RemoteFileViewModel()
     @EnvironmentObject var serviceManager: RemoteServiceManager
 
-    var body: some View {
-        VStack(spacing: 0) {
-            // Connection status bar
-            if serviceManager.isConnected || serviceManager.isConnecting {
-                connectionStatusBar
-                Divider()
-            }
+    // Detected SSH from terminal (for inline connect prompt)
+    @State private var detectedSSHHost: String?
+    @State private var detectedSSHUser: String = "root"
+    @State private var detectedSSHPort: UInt16 = 22
+    @State private var sshPasswordInput: String = ""
 
-            // Mode switcher
-            modeSwitcher
+    var body: some View {
+        HStack(spacing: 0) {
+            // ── Vertical Tab Sidebar ──
+            modeSidebar
 
             Divider()
 
-            // Service detection prompt when not connected
-            if !serviceManager.isConnected && !serviceManager.isConnecting
-                && selectedMode == .markdown && serviceManager.detectedServices.isEmpty {
-                serviceDetectionPrompt
-                Divider()
-            }
+            // ── Content Area ──
+            VStack(spacing: 0) {
+                // Connection status bar
+                if serviceManager.isConnected || serviceManager.isConnecting {
+                    connectionStatusBar
+                    Divider()
+                }
 
-            // Detected services summary (when connected)
-            if serviceManager.isConnected && !serviceManager.detectedServices.isEmpty {
-                detectedServicesBar
-                Divider()
-            }
+                // Inline SSH connect prompt (when SSH detected from terminal but no saved profile)
+                if !serviceManager.isConnected && !serviceManager.isConnecting && detectedSSHHost != nil {
+                    sshConnectPrompt
+                    Divider()
+                }
 
-            // Content based on selected mode
-            switch selectedMode {
-            case .markdown:
-                MarkdownPreviewView(filePath: markdownPath)
-            case .sftp:
-                RemoteFileView(viewModel: remoteFileVM)
-            case .docker:
-                DockerManageView()
-            case .git:
-                GitPanelView()
-            case .database:
-                DatabaseClientView()
-            case .redis:
-                RedisClientView()
-            case .logViewer:
-                LogViewerView()
+                // Detected services summary (when connected)
+                if serviceManager.isConnected && !serviceManager.detectedServices.isEmpty {
+                    detectedServicesBar
+                    Divider()
+                }
+
+                // Content based on selected mode
+                switch selectedMode {
+                case .markdown:
+                    MarkdownPreviewView(filePath: markdownPath)
+                case .sftp:
+                    RemoteFileView(viewModel: remoteFileVM)
+                case .docker:
+                    DockerManageView()
+                case .git:
+                    GitPanelView()
+                case .database:
+                    DatabaseClientView()
+                case .redis:
+                    RedisClientView()
+                case .logViewer:
+                    LogViewerView()
+                }
             }
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
@@ -74,6 +82,44 @@ struct RightPanelView: View {
                 if selectedMode.context == .remote {
                     selectedMode = .markdown
                 }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalSSHDetected)) { notification in
+            guard !serviceManager.isConnected && !serviceManager.isConnecting,
+                  let info = notification.object as? [String: String],
+                  let host = info["host"],
+                  let username = info["username"] else { return }
+            let port = UInt16(info["port"] ?? "22") ?? 22
+
+            // Find matching saved profile by host
+            if let profile = serviceManager.savedProfiles.first(where: {
+                $0.host == host && $0.username == username && $0.port == port
+            }) ?? serviceManager.savedProfiles.first(where: { $0.host == host }) {
+                serviceManager.connect(profile: profile)
+                return
+            }
+
+            // Store detected info for potential password fallback
+            detectedSSHHost = host
+            detectedSSHUser = username
+            detectedSSHPort = port
+            sshPasswordInput = ""
+
+            // Auto-try SSH key files
+            let home = NSHomeDirectory()
+            let keyFiles = [
+                "\(home)/.ssh/id_rsa",
+                "\(home)/.ssh/id_ed25519",
+                "\(home)/.ssh/id_ecdsa"
+            ]
+            if let keyPath = keyFiles.first(where: { FileManager.default.fileExists(atPath: $0) }) {
+                serviceManager.connectWithKey(host: host, port: port, username: username, keyPath: keyPath)
+            }
+        }
+        // If key-based auth succeeded, clear the password prompt
+        .onChange(of: serviceManager.isConnected) { _, connected in
+            if connected && detectedSSHHost != nil {
+                detectedSSHHost = nil
             }
         }
     }
@@ -118,32 +164,41 @@ struct RightPanelView: View {
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
     }
 
-    // MARK: - Mode Switcher
+    // MARK: - Vertical Tab Sidebar
 
-    private var modeSwitcher: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                ForEach(serviceManager.availablePanelModes, id: \.self) { mode in
-                    Button(action: { selectedMode = mode }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: mode.iconName)
-                                .font(.caption2)
-                            Text(mode.title)
-                                .font(.caption)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
+    private var modeSidebar: some View {
+        let modes = serviceManager.availablePanelModes
+        let hasRemoteModes = modes.contains(where: { $0.context == .remote })
+
+        return VStack(spacing: 2) {
+            ForEach(modes, id: \.self) { mode in
+                Button(action: { selectedMode = mode }) {
+                    Image(systemName: mode.iconName)
+                        .font(.system(size: 14))
+                        .frame(width: 32, height: 28)
+                        .foregroundColor(selectedMode == mode ? .accentColor : .secondary)
                         .background(selectedMode == mode
-                            ? Color.accentColor.opacity(0.2)
+                            ? Color.accentColor.opacity(0.15)
                             : Color.clear)
-                        .cornerRadius(4)
-                    }
-                    .buttonStyle(.borderless)
+                        .cornerRadius(6)
+                }
+                .buttonStyle(.borderless)
+                .help(mode.title)
+
+                // Show separator after the last local-context tab
+                // when remote tabs are also present
+                if mode == .git && hasRemoteModes {
+                    Divider()
+                        .frame(width: 20)
+                        .padding(.vertical, 2)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            Spacer()
         }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 2)
+        .frame(width: 38)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
     }
 
     // MARK: - Service Detection Prompt
@@ -166,6 +221,35 @@ struct RightPanelView: View {
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Quick-connect: show saved profiles if available
+            if !serviceManager.savedProfiles.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(serviceManager.savedProfiles) { profile in
+                        Button(action: {
+                            serviceManager.connect(profile: profile)
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "bolt.circle.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                                Text(profile.name.isEmpty ? profile.host : profile.name)
+                                    .font(.system(size: 11, weight: .medium))
+                                Spacer()
+                                Text("\(profile.username)@\(profile.host)")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
             HStack {
                 Button(LS("ssh.connectNow")) {
                     NotificationCenter.default.post(name: .newSSHConnection, object: nil)
@@ -182,6 +266,74 @@ struct RightPanelView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color.orange.opacity(0.05))
+    }
+
+    // MARK: - Inline SSH Connect Prompt
+
+    private var sshConnectPrompt: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.green)
+                Text(LS("ssh.detectedSSH"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button(action: { detectedSSHHost = nil }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if let host = detectedSSHHost {
+                Text("\(detectedSSHUser)@\(host):\(detectedSSHPort)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            SecureField(LS("conn.password"), text: $sshPasswordInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+                .onSubmit { connectDetectedSSH() }
+
+            HStack {
+                Button(LS("ssh.connectNow")) {
+                    connectDetectedSSH()
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .disabled(sshPasswordInput.isEmpty)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.green.opacity(0.05))
+    }
+
+    private func connectDetectedSSH() {
+        guard let host = detectedSSHHost else { return }
+        // Connect via managed SSH
+        serviceManager.connect(host: host, port: detectedSSHPort, username: detectedSSHUser, password: sshPasswordInput)
+        // Auto-save this profile for future quick-connect
+        let profile = ConnectionProfile(
+            id: UUID(),
+            name: host,
+            host: host,
+            port: detectedSSHPort,
+            username: detectedSSHUser,
+            authType: .password,
+            keyFilePath: nil,
+            agentForwarding: false,
+            lastConnected: Date()
+        )
+        serviceManager.saveProfile(profile)
+        serviceManager.savePassword(sshPasswordInput, for: profile)
+        sshPasswordInput = ""
+        detectedSSHHost = nil
     }
 
     // MARK: - Detected Services Bar
