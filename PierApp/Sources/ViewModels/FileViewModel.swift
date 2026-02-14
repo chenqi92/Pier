@@ -100,7 +100,8 @@ class FileViewModel: ObservableObject {
         stopMonitoring()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let items = self?.buildFileTree(at: path, depth: 0, maxDepth: 6) ?? []
+            // Only load 1 level deep — children are lazy-loaded on expand
+            let items = self?.buildFileTree(at: path, depth: 0, maxDepth: 1) ?? []
 
             DispatchQueue.main.async {
                 self?.allFiles = items
@@ -111,12 +112,23 @@ class FileViewModel: ObservableObject {
         }
     }
 
+    /// Called by the view when a directory row appears on screen.
+    /// Lazily loads ONE level of children so they're ready when the user expands.
+    func ensureChildrenLoaded(for item: FileItem) {
+        guard item.isDirectory, !item.childrenLoaded else { return }
+        item.childrenLoaded = true  // Mark immediately to prevent duplicate loads
+        loadChildren(for: item)
+    }
+
     private func loadChildren(for item: FileItem) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let children = self?.buildFileTree(at: item.path, depth: 0, maxDepth: 3) ?? []
+            // Load 1 level of children
+            let children = self?.buildFileTree(at: item.path, depth: 0, maxDepth: 1) ?? []
 
             DispatchQueue.main.async {
                 item.children = children
+                // Force parent list refresh
+                self?.objectWillChange.send()
             }
         }
     }

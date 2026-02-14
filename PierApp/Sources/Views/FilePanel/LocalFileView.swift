@@ -89,6 +89,10 @@ struct LocalFileView: View {
     private var fileTreeList: some View {
         List(viewModel.displayedFiles, children: \.children) { item in
             FileTreeRow(item: item)
+                .onAppear {
+                    // Lazy-load children when this directory row appears on screen
+                    viewModel.ensureChildrenLoaded(for: item)
+                }
                 .onTapGesture {
                     viewModel.handleTap(item)
                 }

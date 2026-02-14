@@ -92,6 +92,10 @@ class TerminalNSView: NSView {
     private var cursorX: Int = 0
     private var cursorY: Int = 0
 
+    // Saved cursor position (ESC 7 / ESC 8, CSI s / CSI u)
+    private var savedCursorX: Int = 0
+    private var savedCursorY: Int = 0
+
     // Scrollback buffer (max 10,000 lines)
     private let maxScrollback = 10_000
     private var scrollbackBuffer: [[Character]] = []
@@ -350,6 +354,25 @@ class TerminalNSView: NSView {
                     ansiState = .osc
                 case 0x28, 0x29: // '(', ')' -> character set designation, skip next byte
                     ansiState = .normal // simplified: just reset
+                case 0x37: // '7' -> DECSC (Save Cursor Position)
+                    savedCursorX = cursorX
+                    savedCursorY = cursorY
+                    ansiState = .normal
+                case 0x38: // '8' -> DECRC (Restore Cursor Position)
+                    cursorX = savedCursorX
+                    cursorY = savedCursorY
+                    ansiState = .normal
+                case 0x4D: // 'M' -> Reverse Index (scroll down / cursor up)
+                    if cursorY > 0 {
+                        cursorY -= 1
+                    } else {
+                        // Scroll down: insert blank line at top
+                        screenBuffer.insert(Array(repeating: " ", count: cols), at: 0)
+                        if screenBuffer.count > visibleRows {
+                            screenBuffer.removeLast()
+                        }
+                    }
+                    ansiState = .normal
                 default:
                     // Single-character escape sequence, ignore and return to normal
                     ansiState = .normal
@@ -468,6 +491,67 @@ class TerminalNSView: NSView {
 
         case 0x68, 0x6C: // 'h'/'l' — Set/Reset Mode (e.g., ?2004h for bracketed paste)
             break // Ignore mode set/reset
+
+        case 0x73: // 's' — Save Cursor Position
+            savedCursorX = cursorX
+            savedCursorY = cursorY
+
+        case 0x75: // 'u' — Restore Cursor Position
+            cursorX = savedCursorX
+            cursorY = savedCursorY
+
+        case 0x47: // 'G' — Cursor Horizontal Absolute
+            let col = max(1, p1) - 1
+            cursorX = min(cols - 1, col)
+
+        case 0x64: // 'd' — Cursor Vertical Absolute
+            let row = max(1, p1) - 1
+            cursorY = min(visibleRows - 1, row)
+
+        case 0x4C: // 'L' — Insert Lines
+            let n = max(1, p1)
+            for _ in 0..<n {
+                if cursorY < screenBuffer.count {
+                    screenBuffer.insert(Array(repeating: " ", count: cols), at: cursorY)
+                    if screenBuffer.count > visibleRows {
+                        screenBuffer.removeLast()
+                    }
+                }
+            }
+
+        case 0x4D: // 'M' (CSI) — Delete Lines
+            let n = max(1, p1)
+            for _ in 0..<n {
+                if cursorY < screenBuffer.count {
+                    screenBuffer.remove(at: cursorY)
+                    screenBuffer.append(Array(repeating: " ", count: cols))
+                }
+            }
+
+        case 0x50: // 'P' — Delete Characters
+            let n = max(1, p1)
+            if cursorY < screenBuffer.count {
+                for _ in 0..<n {
+                    if cursorX < screenBuffer[cursorY].count {
+                        screenBuffer[cursorY].remove(at: cursorX)
+                        screenBuffer[cursorY].append(" ")
+                    }
+                }
+            }
+
+        case 0x40: // '@' — Insert Characters
+            let n = max(1, p1)
+            if cursorY < screenBuffer.count {
+                for _ in 0..<n {
+                    screenBuffer[cursorY].insert(" ", at: min(cursorX, screenBuffer[cursorY].count))
+                    if screenBuffer[cursorY].count > cols {
+                        screenBuffer[cursorY].removeLast()
+                    }
+                }
+            }
+
+        case 0x72: // 'r' — Set Scrolling Region (DECSTBM)
+            break // Consume but don't implement scroll regions yet
 
         default:
             break // Ignore unknown CSI sequences

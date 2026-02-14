@@ -9,6 +9,7 @@ class FileItem: Identifiable, ObservableObject {
     let size: UInt64
     let modifiedDate: Date?
     @Published var children: [FileItem]?
+    var childrenLoaded = false
 
     var isDir: Bool { isDirectory }
 
