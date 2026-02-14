@@ -46,6 +46,8 @@ struct RightPanelView: View {
                 switch selectedMode {
                 case .markdown:
                     MarkdownPreviewView(filePath: markdownPath)
+                case .monitor:
+                    ServerMonitorView(serviceManager: serviceManager)
                 case .sftp:
                     RemoteFileView(viewModel: remoteFileVM)
                 case .docker:
@@ -73,10 +75,10 @@ struct RightPanelView: View {
         }
         .onChange(of: serviceManager.isConnected) { _, connected in
             if connected {
-                // Auto-switch to SFTP and load remote files
+                // Auto-switch to monitor dashboard and load remote files
                 remoteFileVM.serviceManager = serviceManager
                 remoteFileVM.onConnectionChanged(connected: true)
-                selectedMode = .sftp
+                selectedMode = .monitor
             } else {
                 remoteFileVM.onConnectionChanged(connected: false)
                 if selectedMode.context == .remote {
@@ -95,17 +97,21 @@ struct RightPanelView: View {
             if let profile = serviceManager.savedProfiles.first(where: {
                 $0.host == host && $0.username == username && $0.port == port
             }) ?? serviceManager.savedProfiles.first(where: { $0.host == host }) {
-                serviceManager.connect(profile: profile)
-                // Auto-type password into terminal if password auth
-                if profile.authType == .password {
-                    if let password = try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)"),
-                       !password.isEmpty {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            NotificationCenter.default.post(
-                                name: .terminalInput,
-                                object: ["text": password + "\n"]
-                            )
-                        }
+                // Load password ONCE from Keychain
+                let password: String? = profile.authType == .password
+                    ? (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)"))
+                    : nil
+
+                // Connect right panel with pre-loaded password (no extra Keychain access)
+                serviceManager.connect(profile: profile, preloadedPassword: password)
+
+                // Auto-type password into terminal
+                if let password = password, !password.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        NotificationCenter.default.post(
+                            name: .terminalInput,
+                            object: ["text": password + "\n"]
+                        )
                     }
                 }
                 return
@@ -402,6 +408,7 @@ struct RightPanelView: View {
 
 enum RightPanelMode: String, CaseIterable {
     case markdown = "Markdown"
+    case monitor = "Monitor"
     case sftp = "SFTP"
     case docker = "Docker"
     case git = "Git"
@@ -414,6 +421,7 @@ enum RightPanelMode: String, CaseIterable {
     var iconName: String {
         switch self {
         case .markdown:  return "doc.text"
+        case .monitor:   return "gauge.with.dots.needle.33percent"
         case .sftp:      return "externaldrive.connected.to.line.below"
         case .docker:    return "shippingbox.fill"
         case .git:       return "arrow.triangle.branch"
@@ -428,7 +436,7 @@ enum RightPanelMode: String, CaseIterable {
     var context: Context {
         switch self {
         case .markdown, .git: return .local
-        case .sftp, .docker, .database, .redis, .logViewer: return .remote
+        case .monitor, .sftp, .docker, .database, .redis, .logViewer: return .remote
         }
     }
 }

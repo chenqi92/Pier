@@ -7,6 +7,11 @@ class KeychainService {
     static let shared = KeychainService()
     private let serviceName = "com.kkape.pier"
 
+    /// In-memory cache to avoid repeated Keychain prompts.
+    /// Key: Keychain account key, Value: (cachedValue, timestamp)
+    private var cache: [String: (value: String?, timestamp: Date)] = [:]
+    private let cacheTTL: TimeInterval = 600 // 10 minutes
+
     // MARK: - Save
 
     func save(key: String, value: String) throws {
@@ -29,11 +34,20 @@ class KeychainService {
         guard status == errSecSuccess else {
             throw KeychainError.saveFailed(status)
         }
+
+        // Update cache
+        cache[key] = (value: value, timestamp: Date())
     }
 
     // MARK: - Load
 
     func load(key: String) throws -> String? {
+        // Check in-memory cache first
+        if let cached = cache[key],
+           Date().timeIntervalSince(cached.timestamp) < cacheTTL {
+            return cached.value
+        }
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
@@ -51,8 +65,12 @@ class KeychainService {
                   let value = String(data: data, encoding: .utf8) else {
                 throw KeychainError.decodingFailed
             }
+            // Cache the loaded value
+            cache[key] = (value: value, timestamp: Date())
             return value
         case errSecItemNotFound:
+            // Cache the "not found" result too
+            cache[key] = (value: nil, timestamp: Date())
             return nil
         default:
             throw KeychainError.loadFailed(status)
@@ -62,6 +80,9 @@ class KeychainService {
     // MARK: - Delete
 
     func delete(key: String) throws {
+        // Invalidate cache
+        cache.removeValue(forKey: key)
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,

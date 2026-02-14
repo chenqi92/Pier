@@ -221,22 +221,24 @@ struct NewTabChooserView: View {
             sshCommand += " -i \(keyPath)"
         }
 
+        // Load password ONCE from Keychain (single access, no repeated prompts)
+        let password: String? = profile.authType == .password
+            ? (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)"))
+            : nil
+
         let title = profile.name.isEmpty ? profile.host : profile.name
-        // Creates a per-tab RemoteServiceManager and connects it
-        terminalViewModel.addNewTab(title: title, shell: "/bin/zsh", isSSH: true, profile: profile)
+        // Creates a per-tab RemoteServiceManager and connects it with pre-loaded password
+        terminalViewModel.addNewTab(title: title, shell: "/bin/zsh", isSSH: true, profile: profile, preloadedPassword: password)
         // Send the SSH command to the new terminal after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.terminalViewModel.sendInput(sshCommand + "\n")
         }
 
         // For password auth, auto-type the stored password when the prompt appears
-        if profile.authType == .password {
-            if let password = try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)"),
-               !password.isEmpty {
-                // Wait for the password prompt to appear, then type it
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    self.terminalViewModel.sendInput(password + "\n")
-                }
+        if let password = password, !password.isEmpty {
+            // Wait for the password prompt to appear, then type it
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.terminalViewModel.sendInput(password + "\n")
             }
         }
 

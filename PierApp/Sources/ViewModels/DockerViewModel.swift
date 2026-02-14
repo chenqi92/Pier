@@ -143,19 +143,19 @@ class DockerViewModel: ObservableObject {
     private func loadContainers() async {
         guard let output = await runDockerCommand([
             "ps", "-a", "--format",
-            "{{.ID}}\\t{{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.State}}\\t{{.Ports}}"
+            "{{.ID}}|||{{.Names}}|||{{.Image}}|||{{.Status}}|||{{.State}}|||{{.Ports}}"
         ]) else { return }
 
         containers = output.split(separator: "\n").compactMap { line in
-            let parts = line.split(separator: "\t", maxSplits: 5, omittingEmptySubsequences: false)
+            let parts = String(line).components(separatedBy: "|||")
             guard parts.count >= 5 else { return nil }
             return DockerContainer(
-                id: String(parts[0]),
-                name: String(parts[1]),
-                image: String(parts[2]),
-                status: String(parts[3]),
-                isRunning: parts[4] == "running",
-                ports: parts.count > 5 ? String(parts[5]) : "",
+                id: parts[0].trimmingCharacters(in: .whitespaces),
+                name: parts[1].trimmingCharacters(in: .whitespaces),
+                image: parts[2].trimmingCharacters(in: .whitespaces),
+                status: parts[3].trimmingCharacters(in: .whitespaces),
+                isRunning: parts[4].trimmingCharacters(in: .whitespaces) == "running",
+                ports: parts.count > 5 ? parts[5].trimmingCharacters(in: .whitespaces) : "",
                 created: nil
             )
         }
@@ -206,17 +206,17 @@ class DockerViewModel: ObservableObject {
     private func loadImages() async {
         guard let output = await runDockerCommand([
             "images", "--format",
-            "{{.ID}}\\t{{.Repository}}\\t{{.Tag}}\\t{{.Size}}"
+            "{{.ID}}|||{{.Repository}}|||{{.Tag}}|||{{.Size}}"
         ]) else { return }
 
         images = output.split(separator: "\n").compactMap { line in
-            let parts = line.split(separator: "\t", maxSplits: 3)
+            let parts = String(line).components(separatedBy: "|||")
             guard parts.count >= 4 else { return nil }
             return DockerImage(
-                id: String(parts[0]),
-                repository: String(parts[1]),
-                tag: String(parts[2]),
-                size: parseDockerSize(String(parts[3])),
+                id: parts[0].trimmingCharacters(in: .whitespaces),
+                repository: parts[1].trimmingCharacters(in: .whitespaces),
+                tag: parts[2].trimmingCharacters(in: .whitespaces),
+                size: parseDockerSize(parts[3].trimmingCharacters(in: .whitespaces)),
                 created: nil
             )
         }
@@ -236,22 +236,114 @@ class DockerViewModel: ObservableObject {
         }
     }
 
+    /// Force remove an image (even if referenced by containers).
+    func forceRemoveImage(_ id: String) {
+        Task {
+            _ = await runDockerCommand(["rmi", "-f", id])
+            await loadImages()
+        }
+    }
+
+    /// Inspect a Docker image.
+    func inspectImage(_ id: String) async -> String? {
+        await runDockerCommand(["inspect", id])
+    }
+
+    /// Tag an image with a new name.
+    func tagImage(_ id: String, newTag: String) {
+        Task {
+            _ = await runDockerCommand(["tag", id, newTag])
+            await loadImages()
+        }
+    }
+
+    /// Pull an image from registry.
+    func pullImage(_ name: String) {
+        Task {
+            isLoading = true
+            _ = await runDockerCommand(["pull", name])
+            await loadImages()
+            isLoading = false
+        }
+    }
+
+    /// Show image layer history.
+    func imageHistory(_ id: String) async -> String? {
+        await runDockerCommand(["history", "--no-trunc", id])
+    }
+
+    /// Prune all unused (dangling) images.
+    func pruneImages() {
+        Task {
+            isLoading = true
+            _ = await runDockerCommand(["image", "prune", "-f"])
+            await loadImages()
+            isLoading = false
+        }
+    }
+
     // MARK: - Volumes
 
     private func loadVolumes() async {
         guard let output = await runDockerCommand([
             "volume", "ls", "--format",
-            "{{.Name}}\\t{{.Driver}}\\t{{.Mountpoint}}"
+            "{{.Name}}|||{{.Driver}}|||{{.Mountpoint}}"
         ]) else { return }
 
         volumes = output.split(separator: "\n").compactMap { line in
-            let parts = line.split(separator: "\t", maxSplits: 2)
+            let parts = String(line).components(separatedBy: "|||")
             guard parts.count >= 2 else { return nil }
             return DockerVolume(
-                name: String(parts[0]),
-                driver: String(parts[1]),
-                mountpoint: parts.count > 2 ? String(parts[2]) : ""
+                name: parts[0].trimmingCharacters(in: .whitespaces),
+                driver: parts[1].trimmingCharacters(in: .whitespaces),
+                mountpoint: parts.count > 2 ? parts[2].trimmingCharacters(in: .whitespaces) : ""
             )
+        }
+    }
+
+    /// Inspect a Docker volume.
+    func inspectVolume(_ name: String) async -> String? {
+        await runDockerCommand(["volume", "inspect", name])
+    }
+
+    /// List files in a volume's mountpoint directory.
+    @Published var volumeFiles: [String] = []
+    @Published var volumeBrowsePath: String = ""
+    @Published var isVolumeFilesLoading = false
+
+    func browseVolume(_ mountpoint: String) {
+        Task {
+            isVolumeFilesLoading = true
+            volumeBrowsePath = mountpoint
+            guard let sm = serviceManager, sm.isConnected else {
+                isVolumeFilesLoading = false
+                return
+            }
+            let (exitCode, stdout) = await sm.exec("ls -lAh '\(mountpoint.replacingOccurrences(of: "'", with: "'\\''"))' 2>/dev/null")
+            if exitCode == 0 {
+                volumeFiles = stdout.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+            } else {
+                volumeFiles = ["(Cannot access mountpoint)"]
+            }
+            isVolumeFilesLoading = false
+        }
+    }
+
+    /// Remove a Docker volume.
+    func removeVolume(_ name: String) {
+        Task {
+            _ = await runDockerCommand(["volume", "rm", name])
+            await loadVolumes()
+        }
+    }
+
+    /// Prune all unused volumes.
+    func pruneVolumes() {
+        Task {
+            isLoading = true
+            _ = await runDockerCommand(["volume", "prune", "-f"])
+            await loadVolumes()
+            isLoading = false
         }
     }
 
@@ -261,7 +353,17 @@ class DockerViewModel: ObservableObject {
         // Route through SSH when connected to remote server
         if let sm = serviceManager, sm.isConnected {
             isRemoteMode = true
-            let command = "docker " + args.joined(separator: " ")
+            // Shell-quote each argument for safe remote execution
+            let quotedArgs = args.map { arg -> String in
+                // If the arg contains special shell chars, wrap in single quotes
+                if arg.contains(" ") || arg.contains("{") || arg.contains("}") ||
+                   arg.contains("\\") || arg.contains("'") || arg.contains("$") ||
+                   arg.contains("|") || arg.contains(">") || arg.contains("<") {
+                    return "'" + arg.replacingOccurrences(of: "'", with: "'\\''") + "'"
+                }
+                return arg
+            }
+            let command = "docker " + quotedArgs.joined(separator: " ")
             let (exitCode, stdout) = await sm.exec(command)
             return exitCode == 0 ? stdout : nil
         }
@@ -309,20 +411,20 @@ extension DockerViewModel {
     }
 
     func loadComposeStatus() async {
-        guard let output = await runComposeCommand(["ps", "--format", "{{.Service}}\\t{{.Status}}\\t{{.State}}\\t{{.Image}}\\t{{.Ports}}"]) else {
+        guard let output = await runComposeCommand(["ps", "--format", "{{.Service}}|||{{.Status}}|||{{.State}}|||{{.Image}}|||{{.Ports}}"]) else {
             composeServices = []
             return
         }
 
         composeServices = output.split(separator: "\n").compactMap { line in
-            let parts = line.split(separator: "\t", maxSplits: 4, omittingEmptySubsequences: false)
+            let parts = String(line).components(separatedBy: "|||")
             guard parts.count >= 3 else { return nil }
             return ComposeService(
-                name: String(parts[0]),
-                status: String(parts[1]),
-                isRunning: parts[2] == "running",
-                image: parts.count > 3 ? String(parts[3]) : "",
-                ports: parts.count > 4 ? String(parts[4]) : ""
+                name: parts[0].trimmingCharacters(in: .whitespaces),
+                status: parts[1].trimmingCharacters(in: .whitespaces),
+                isRunning: parts[2].trimmingCharacters(in: .whitespaces) == "running",
+                image: parts.count > 3 ? parts[3].trimmingCharacters(in: .whitespaces) : "",
+                ports: parts.count > 4 ? parts[4].trimmingCharacters(in: .whitespaces) : ""
             )
         }
     }

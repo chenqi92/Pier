@@ -31,7 +31,7 @@ class TerminalViewModel: ObservableObject {
 
     // MARK: - Tab Management
 
-    func addNewTab(title: String = "Terminal", shell: String = "/bin/zsh", isSSH: Bool = false, profile: ConnectionProfile? = nil) {
+    func addNewTab(title: String = "Terminal", shell: String = "/bin/zsh", isSSH: Bool = false, profile: ConnectionProfile? = nil, preloadedPassword: String? = nil) {
         let tab = TerminalTab(title: title, isSSH: isSSH, shellPath: shell)
         let session = TerminalSessionInfo(shellPath: shell, isSSH: isSSH, title: title)
 
@@ -41,7 +41,7 @@ class TerminalViewModel: ObservableObject {
                 let sm = RemoteServiceManager()
                 session.remoteServiceManager = sm
                 session.connectedProfile = profile
-                sm.connect(profile: profile)
+                sm.connect(profile: profile, preloadedPassword: preloadedPassword)
             }
         }
 

@@ -173,72 +173,313 @@ struct DockerManageView: View {
 
     // MARK: - Images
 
+    @State private var pullImageName = ""
+    @State private var showImageInspect = false
+    @State private var imageInspectContent = ""
+    @State private var tagInput = ""
+    @State private var tagTargetId = ""
+    @State private var showTagSheet = false
+
     private var imageListView: some View {
-        List {
-            ForEach(viewModel.images) { image in
-                HStack(spacing: 8) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .foregroundColor(.purple)
-                        .font(.caption)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(image.repository)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .lineLimit(1)
-                        HStack(spacing: 4) {
-                            Text(image.tag)
-                                .font(.system(size: 9))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Color.blue.opacity(0.15))
-                                .cornerRadius(3)
-                            Text(image.formattedSize)
-                                .font(.system(size: 9))
-                                .foregroundColor(.secondary)
-                        }
+        VStack(spacing: 0) {
+            // Pull & Prune toolbar
+            HStack(spacing: 6) {
+                TextField("docker.pullPlaceholder", text: $pullImageName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 10))
+                    .onSubmit {
+                        guard !pullImageName.isEmpty else { return }
+                        viewModel.pullImage(pullImageName)
+                        pullImageName = ""
                     }
-
-                    Spacer()
+                Button(action: {
+                    guard !pullImageName.isEmpty else { return }
+                    viewModel.pullImage(pullImageName)
+                    pullImageName = ""
+                }) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 12))
                 }
-                .padding(.vertical, 2)
-                .contextMenu {
-                    Button(LS("docker.runContainer")) { viewModel.runImage(image.id) }
-                    Divider()
-                    Button(LS("docker.remove"), role: .destructive) { viewModel.removeImage(image.id) }
+                .buttonStyle(.borderless)
+                .disabled(pullImageName.isEmpty)
+                .help("Pull image")
+
+                Divider().frame(height: 14)
+
+                Button(action: { viewModel.pruneImages() }) {
+                    Image(systemName: "trash.circle")
+                        .font(.system(size: 12))
+                        .foregroundColor(.orange)
+                }
+                .buttonStyle(.borderless)
+                .help("Prune dangling images")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+
+            List {
+                ForEach(viewModel.images) { image in
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .foregroundColor(.purple)
+                            .font(.caption)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(image.repository)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .lineLimit(1)
+                            HStack(spacing: 4) {
+                                Text(image.tag)
+                                    .font(.system(size: 9))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.blue.opacity(0.15))
+                                    .cornerRadius(3)
+                                Text(image.formattedSize)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        // Inline action buttons
+                        Button(action: { viewModel.runImage(image.id) }) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 9))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Run container")
+
+                        Button(action: { viewModel.removeImage(image.id) }) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 9))
+                                .foregroundColor(.red.opacity(0.7))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove image")
+                    }
+                    .padding(.vertical, 2)
+                    .contextMenu {
+                        Button("Run Container") { viewModel.runImage(image.id) }
+                        Divider()
+                        Button("Inspect") {
+                            Task {
+                                if let json = await viewModel.inspectImage(image.id) {
+                                    imageInspectContent = json
+                                    showImageInspect = true
+                                }
+                            }
+                        }
+                        Button("History") {
+                            Task {
+                                if let history = await viewModel.imageHistory(image.id) {
+                                    imageInspectContent = history
+                                    showImageInspect = true
+                                }
+                            }
+                        }
+                        Button("Tag...") {
+                            tagTargetId = image.id
+                            tagInput = image.repository == "<none>" ? "" : "\(image.repository):\(image.tag)"
+                            showTagSheet = true
+                        }
+                        Divider()
+                        Button("Remove") { viewModel.removeImage(image.id) }
+                        Button("Force Remove", role: .destructive) { viewModel.forceRemoveImage(image.id) }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .overlay {
+                if viewModel.images.isEmpty && !viewModel.isLoading {
+                    Text("No images")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
         }
-        .listStyle(.plain)
+        .sheet(isPresented: $showImageInspect) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Image Details")
+                        .font(.headline)
+                    Spacer()
+                    Button("Close") { showImageInspect = false }
+                        .buttonStyle(.borderless)
+                }
+                .padding()
+                Divider()
+                ScrollView {
+                    Text(imageInspectContent)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(width: 500, height: 400)
+        }
+        .sheet(isPresented: $showTagSheet) {
+            VStack(spacing: 12) {
+                Text("Tag Image")
+                    .font(.headline)
+                TextField("repository:tag", text: $tagInput)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Button("Cancel") { showTagSheet = false }
+                    Spacer()
+                    Button("Apply") {
+                        if !tagInput.isEmpty {
+                            viewModel.tagImage(tagTargetId, newTag: tagInput)
+                        }
+                        showTagSheet = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding()
+            .frame(width: 300)
+        }
     }
 
     // MARK: - Volumes
 
+    @State private var showVolumeInspect = false
+    @State private var volumeInspectContent = ""
+
     private var volumeListView: some View {
-        List {
-            ForEach(viewModel.volumes) { volume in
-                HStack(spacing: 8) {
-                    Image(systemName: "externaldrive.fill")
-                        .foregroundColor(.orange)
+        VStack(spacing: 0) {
+            // Prune toolbar
+            HStack {
+                Button(action: { viewModel.pruneVolumes() }) {
+                    Label("Prune Unused", systemImage: "trash.circle")
                         .font(.caption)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(volume.name)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .lineLimit(1)
-                        Text(volume.driver)
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
+                        .foregroundColor(.orange)
                 }
-                .padding(.vertical, 2)
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+
+            List {
+                ForEach(viewModel.volumes) { volume in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "externaldrive.fill")
+                                .foregroundColor(.orange)
+                                .font(.caption)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(volume.name)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .lineLimit(1)
+                                Text(volume.driver)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+
+                            // Browse volume files
+                            Button(action: {
+                                if viewModel.volumeBrowsePath == volume.mountpoint {
+                                    // Toggle off
+                                    viewModel.volumeBrowsePath = ""
+                                    viewModel.volumeFiles = []
+                                } else {
+                                    viewModel.browseVolume(volume.mountpoint)
+                                }
+                            }) {
+                                Image(systemName: "folder.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.blue)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Browse files")
+                        }
+
+                        // File listing panel (collapsible)
+                        if viewModel.volumeBrowsePath == volume.mountpoint && !viewModel.volumeFiles.isEmpty {
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack {
+                                    Text(volume.mountpoint)
+                                        .font(.system(size: 8, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                                Divider()
+                                ForEach(viewModel.volumeFiles, id: \.self) { fileLine in
+                                    Text(fileLine)
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            .padding(6)
+                            .background(Color.black.opacity(0.15))
+                            .cornerRadius(4)
+                        }
+
+                        if viewModel.isVolumeFilesLoading && viewModel.volumeBrowsePath == volume.mountpoint {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    .contextMenu {
+                        Button("Inspect") {
+                            Task {
+                                if let json = await viewModel.inspectVolume(volume.name) {
+                                    volumeInspectContent = json
+                                    showVolumeInspect = true
+                                }
+                            }
+                        }
+                        Button("Browse Files") {
+                            viewModel.browseVolume(volume.mountpoint)
+                        }
+                        Divider()
+                        Button("Remove", role: .destructive) {
+                            viewModel.removeVolume(volume.name)
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .overlay {
+                if viewModel.volumes.isEmpty && !viewModel.isLoading {
+                    Text("No volumes")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
-        .listStyle(.plain)
+        .sheet(isPresented: $showVolumeInspect) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Volume Details")
+                        .font(.headline)
+                    Spacer()
+                    Button("Close") { showVolumeInspect = false }
+                        .buttonStyle(.borderless)
+                }
+                .padding()
+                Divider()
+                ScrollView {
+                    Text(volumeInspectContent)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(width: 500, height: 400)
+        }
     }
-
-    // MARK: - Unavailable
 
     private var dockerUnavailableView: some View {
         VStack(spacing: 16) {

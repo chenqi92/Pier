@@ -79,13 +79,16 @@ class RemoteServiceManager: ObservableObject {
     // MARK: - Connection
 
     /// Connect using a saved profile.
-    func connect(profile: ConnectionProfile) {
+    /// - Parameters:
+    ///   - profile: The connection profile.
+    ///   - preloadedPassword: Optional pre-loaded password to avoid extra Keychain access.
+    func connect(profile: ConnectionProfile, preloadedPassword: String? = nil) {
         currentProfileId = profile.id
         if profile.authType == .keyFile, let keyPath = profile.keyFilePath {
             connectWithKey(host: profile.host, port: profile.port, username: profile.username, keyPath: keyPath)
         } else {
-            // Password is stored in Keychain, keyed by profile ID
-            let password = (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)")) ?? ""
+            // Use pre-loaded password if provided, otherwise load from Keychain
+            let password = preloadedPassword ?? (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)")) ?? ""
             connect(host: profile.host, port: profile.port, username: profile.username, password: password)
         }
     }
@@ -335,7 +338,8 @@ class RemoteServiceManager: ObservableObject {
         var modes: [RightPanelMode] = [.markdown, .git]  // Always available (local)
 
         if isConnected {
-            modes.append(.sftp)  // SFTP always available when connected
+            modes.append(.monitor)  // Server monitor always available when connected
+            modes.append(.sftp)     // SFTP always available when connected
             modes.append(.logViewer)  // Log viewer always available when connected
 
             for service in detectedServices {
