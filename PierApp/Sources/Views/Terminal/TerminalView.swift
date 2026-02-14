@@ -18,6 +18,14 @@ struct TerminalView: NSViewRepresentable {
         let terminalView = TerminalNSView()
         scrollView.documentView = terminalView
 
+        // Set initial frame so document view matches visible area
+        DispatchQueue.main.async {
+            let visibleSize = scrollView.contentView.bounds.size
+            if visibleSize.width > 1 && visibleSize.height > 1 {
+                terminalView.frame = CGRect(origin: .zero, size: visibleSize)
+            }
+        }
+
         return scrollView
     }
 
@@ -137,11 +145,12 @@ class TerminalNSView: NSView {
         // Clean up previous terminal
         stopTerminal()
 
-        // Only start terminal if we already have a window (proper bounds)
-        if window != nil && bounds.width > 1 && bounds.height > 1 {
+        // Try to start if we have real dimensions from the scroll view
+        let visibleSize = enclosingScrollView?.contentView.bounds.size ?? .zero
+        if window != nil && visibleSize.width > 1 && visibleSize.height > 1 {
             startTerminalForPendingSession()
         }
-        // Otherwise, viewDidMoveToWindow will start it
+        // Otherwise, layout() will start it once dimensions are available
     }
 
     /// Stored session waiting for view to be attached to window
@@ -157,9 +166,17 @@ class TerminalNSView: NSView {
             self.window?.makeFirstResponder(self)
         }
 
-        // Start terminal if we have a pending session and no running terminal
-        if terminalHandle == nil {
-            startTerminalForPendingSession()
+        // Don't start terminal here — layout() will handle it once real dimensions are available
+    }
+
+    override func layout() {
+        super.layout()
+        // Start terminal once we have real dimensions from the scroll view
+        if terminalHandle == nil, pendingSession != nil {
+            let visibleSize = enclosingScrollView?.contentView.bounds.size ?? .zero
+            if visibleSize.width > 1 && visibleSize.height > 1 {
+                startTerminalForPendingSession()
+            }
         }
     }
 
@@ -225,8 +242,18 @@ class TerminalNSView: NSView {
 
     // MARK: - Terminal Output Processing
 
+    /// The visible area size from the enclosing scroll view, NOT from self.bounds
+    /// (self.bounds is the document view size, which may be larger than the visible area).
+    private var visibleSize: CGSize {
+        enclosingScrollView?.contentView.bounds.size ?? bounds.size
+    }
+
     private var visibleRows: Int {
-        max(1, Int(enclosingScrollView?.contentView.bounds.height ?? bounds.height) / Int(cellHeight))
+        max(1, Int(visibleSize.height / cellHeight))
+    }
+
+    private var visibleCols: Int {
+        max(1, Int(visibleSize.width / cellWidth))
     }
 
     /// State for the ANSI escape sequence parser
@@ -242,7 +269,7 @@ class TerminalNSView: NSView {
     private var csiParams: String = ""
 
     private func processTerminalOutput(_ bytes: [UInt8]) {
-        let cols = max(1, Int(bounds.width / cellWidth))
+        let cols = visibleCols
 
         for byte in bytes {
             let char = Character(UnicodeScalar(byte))
@@ -349,7 +376,7 @@ class TerminalNSView: NSView {
     }
 
     private func handleCSI(finalByte: UInt8, params: String) {
-        let cols = max(1, Int(bounds.width / cellWidth))
+        let cols = visibleCols
         let parts = params.split(separator: ";").map { Int($0) ?? 0 }
         let p1 = parts.first ?? 0
         let p2 = parts.count > 1 ? parts[1] : 0
