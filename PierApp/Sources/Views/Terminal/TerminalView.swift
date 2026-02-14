@@ -115,6 +115,7 @@ class TerminalNSView: NSView {
     // Terminal → SFTP directory sync (trailing-edge: check after output stops)
     private var lastDetectedCwd: String?
     private var pendingCwdCheck = false
+    private var sshExitDetected = false  // Prevent repeated SSH exit notifications
 
     // Screen buffer (visible area)
     private var screenBuffer: [[Character]] = []
@@ -452,6 +453,36 @@ class TerminalNSView: NSView {
             // Trailing-edge: output just stopped → prompt is fully rendered
             pendingCwdCheck = false
             detectPromptCwd()
+            detectSSHExit()
+        }
+    }
+
+    /// Detect when an SSH session has ended (user typed 'exit' or connection closed).
+    /// Scans the last few lines of the screen buffer for disconnect patterns.
+    private func detectSSHExit() {
+        guard let sessionId = currentSessionId, !sshExitDetected else { return }
+
+        // Scan the last few lines above the cursor for SSH disconnect patterns
+        let linesToScan = min(5, screenBuffer.count)
+        let startRow = max(0, cursorY - linesToScan)
+        let endRow = cursorY
+
+        for row in startRow..<endRow {
+            guard row >= 0 && row < screenBuffer.count else { continue }
+            let line = String(screenBuffer[row]).trimmingCharacters(in: .whitespaces)
+
+            // Match patterns like:
+            //   "Connection to 192.168.0.3 closed."
+            //   "Connection to host.example.com closed."
+            //   "logout"  (followed by "Connection to ... closed" on next line)
+            if line.hasPrefix("Connection to ") && line.hasSuffix("closed.") {
+                sshExitDetected = true
+                NotificationCenter.default.post(
+                    name: .terminalSSHExited,
+                    object: sessionId
+                )
+                return
+            }
         }
     }
 
@@ -1207,6 +1238,7 @@ class TerminalNSView: NSView {
             commandPart = line
         }
         guard let parsed = parseSSHCommand(commandPart) else { return }
+        sshExitDetected = false  // Reset for new SSH session
         NotificationCenter.default.post(
             name: .terminalSSHDetected,
             object: ["host": parsed.host, "username": parsed.username, "port": String(parsed.port)]

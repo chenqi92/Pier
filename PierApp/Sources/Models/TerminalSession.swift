@@ -31,7 +31,7 @@ class TerminalSessionInfo: Identifiable, ObservableObject {
     var shellPath: String
     var isSSH: Bool
     @Published var title: String
-    /// Per-tab SSH service manager (nil for local terminals).
+    /// Per-tab SSH service manager (nil initially, always set by ViewModel).
     var remoteServiceManager: RemoteServiceManager?
     /// The connection profile used for this SSH tab (nil for local).
     var connectedProfile: ConnectionProfile?

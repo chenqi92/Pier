@@ -14,9 +14,9 @@ struct MainView: View {
     @EnvironmentObject var serviceManager: RemoteServiceManager
 
     /// The service manager for the currently selected terminal tab.
-    /// Falls back to the global service manager for local tabs.
+    /// Each tab has its own manager; falls back to an empty one (never the global shared one).
     private var activeServiceManager: RemoteServiceManager {
-        terminalViewModel.activeServiceManager ?? serviceManager
+        terminalViewModel.activeServiceManager ?? RemoteServiceManager()
     }
 
     @State private var showLeftPanel = true

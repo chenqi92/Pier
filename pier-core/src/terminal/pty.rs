@@ -34,13 +34,20 @@ impl PtyProcess {
             }
 
             if child_pid == 0 {
-                // Child process: exec the shell
+                // Child process: exec the shell as a login shell
                 let shell_c = std::ffi::CString::new(shell).unwrap();
-                let args = [shell_c.as_ptr(), std::ptr::null()];
+                let login_flag = std::ffi::CString::new("-l").unwrap();
+                let args = [shell_c.as_ptr(), login_flag.as_ptr(), std::ptr::null()];
 
                 // Set environment for proper terminal behavior
                 let term = std::ffi::CString::new("TERM=xterm-256color").unwrap();
                 libc::putenv(term.as_ptr() as *mut _);
+
+                // Set locale for proper UTF-8 handling (prevents <0080> artifacts)
+                let lang = std::ffi::CString::new("LANG=en_US.UTF-8").unwrap();
+                libc::putenv(lang.as_ptr() as *mut _);
+                let lc_all = std::ffi::CString::new("LC_ALL=en_US.UTF-8").unwrap();
+                libc::putenv(lc_all.as_ptr() as *mut _);
 
                 libc::execvp(shell_c.as_ptr(), args.as_ptr());
                 // If exec fails, exit

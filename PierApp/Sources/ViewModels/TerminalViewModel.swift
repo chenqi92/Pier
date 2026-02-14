@@ -15,6 +15,26 @@ class TerminalViewModel: ObservableObject {
             .sink { [weak self] _ in self?.addNewTab() }
             .store(in: &cancellables)
 
+        // Listen for SSH session exit (e.g., user typed 'exit' on remote)
+        NotificationCenter.default.publisher(for: .terminalSSHExited)
+            .sink { [weak self] notification in
+                guard let self = self,
+                      let sessionId = notification.object as? UUID,
+                      let session = self.sessions[sessionId] else { return }
+                // Disconnect the per-tab service manager on main actor
+                Task { @MainActor in
+                    session.remoteServiceManager?.disconnect()
+                }
+                session.connectedProfile = nil
+                session.isSSH = false
+                // Update the tab's isSSH flag
+                if let idx = self.tabs.firstIndex(where: { $0.id == sessionId }) {
+                    self.tabs[idx].isSSH = false
+                }
+                self.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
         // Start with one default tab
         addNewTab()
     }
@@ -24,7 +44,8 @@ class TerminalViewModel: ObservableObject {
         return sessions[id]
     }
 
-    /// The active tab's per-tab RemoteServiceManager (nil for local tabs).
+    /// The active tab's per-tab RemoteServiceManager.
+    /// Each tab always has its own instance (disconnected for local tabs).
     var activeServiceManager: RemoteServiceManager? {
         currentSession?.remoteServiceManager
     }
@@ -35,19 +56,21 @@ class TerminalViewModel: ObservableObject {
         let tab = TerminalTab(title: title, isSSH: isSSH, shellPath: shell)
         let session = TerminalSessionInfo(shellPath: shell, isSSH: isSSH, title: title)
 
-        // If SSH profile provided, create a per-tab service manager
-        if let profile = profile {
-            Task { @MainActor in
-                let sm = RemoteServiceManager()
-                session.remoteServiceManager = sm
+        tabs.append(tab)
+        sessions[tab.id] = session
+        selectedTabId = tab.id
+
+        // Every tab gets its own RemoteServiceManager (must be created on MainActor)
+        Task { @MainActor in
+            let sm = RemoteServiceManager()
+            session.remoteServiceManager = sm
+
+            // If SSH profile provided, connect the per-tab service manager
+            if let profile = profile {
                 session.connectedProfile = profile
                 sm.connect(profile: profile, preloadedPassword: preloadedPassword)
             }
         }
-
-        tabs.append(tab)
-        sessions[tab.id] = session
-        selectedTabId = tab.id
     }
 
     func selectTab(_ id: UUID) {
@@ -60,12 +83,11 @@ class TerminalViewModel: ObservableObject {
         // Notify TerminalNSView to destroy the cached PTY
         NotificationCenter.default.post(name: .terminalTabClosed, object: id)
 
-        // Disconnect per-tab SSH if any
-        if let session = sessions[id], let sm = session.remoteServiceManager {
+        // Disconnect per-tab SSH service manager
+        if let session = sessions[id] {
             Task { @MainActor in
-                sm.disconnect()
+                session.remoteServiceManager?.disconnect()
             }
-            session.remoteServiceManager = nil
         }
 
         tabs.removeAll { $0.id == id }
@@ -90,5 +112,6 @@ class TerminalViewModel: ObservableObject {
 extension Notification.Name {
     static let terminalInput = Notification.Name("pier.terminalInput")
     static let terminalSSHDetected = Notification.Name("pier.terminalSSHDetected")
+    static let terminalSSHExited = Notification.Name("pier.terminalSSHExited")
     static let terminalTabClosed = Notification.Name("pier.terminalTabClosed")
 }
