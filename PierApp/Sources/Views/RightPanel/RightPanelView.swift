@@ -281,7 +281,7 @@ struct RemoteFileView: View {
                     Text(LS("sftp.notConnected"))
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Button("sftp.connectToServer") {
+                    Button(LS("sftp.connectToServer")) {
                         viewModel.showConnectionSheet = true
                     }
                     .buttonStyle(.borderedProminent)

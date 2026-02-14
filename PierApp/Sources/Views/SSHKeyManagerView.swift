@@ -189,7 +189,7 @@ struct SSHKeyManagerView: View {
                 .font(.headline)
 
             Form {
-                Picker("ssh.keyType", selection: $newKeyType) {
+                Picker(LS("ssh.keyType"), selection: $newKeyType) {
                     Text("Ed25519").tag("ed25519")
                     Text("RSA 4096").tag("rsa")
                     Text("ECDSA").tag("ecdsa")
@@ -215,7 +215,7 @@ struct SSHKeyManagerView: View {
                 Button("cancel") { isGeneratingKey = false }
                     .keyboardShortcut(.escape)
                 Spacer()
-                Button("ssh.generate") { generateKey() }
+                Button(LS("ssh.generate")) { generateKey() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return)
             }

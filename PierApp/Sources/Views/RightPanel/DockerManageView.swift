@@ -131,21 +131,21 @@ struct DockerManageView: View {
                 }
                 .padding(.vertical, 2)
                 .contextMenu {
-                    Button("docker.start") { viewModel.startContainer(container.id) }
+                    Button(LS("docker.start")) { viewModel.startContainer(container.id) }
                     Divider()
-                    Button("docker.stop") { viewModel.stopContainer(container.id) }
+                    Button(LS("docker.stop")) { viewModel.stopContainer(container.id) }
                     Divider()
-                    Button("docker.restart") { viewModel.restartContainer(container.id) }
+                    Button(LS("docker.restart")) { viewModel.restartContainer(container.id) }
                     Divider()
-                    Button("docker.viewLogs") { viewModel.viewContainerLogs(container.id) }
-                    Button("docker.execShell") {
+                    Button(LS("docker.viewLogs")) { viewModel.viewContainerLogs(container.id) }
+                    Button(LS("docker.execShell")) {
                         NotificationCenter.default.post(
                             name: .dockerExecShell,
                             object: container.id
                         )
                     }
                     Divider()
-                    Button("docker.remove", role: .destructive) {
+                    Button(LS("docker.remove"), role: .destructive) {
                         viewModel.removeContainer(container.id)
                     }
                 }
@@ -193,9 +193,9 @@ struct DockerManageView: View {
                 }
                 .padding(.vertical, 2)
                 .contextMenu {
-                    Button("docker.runContainer") { viewModel.runImage(image.id) }
+                    Button(LS("docker.runContainer")) { viewModel.runImage(image.id) }
                     Divider()
-                    Button("docker.remove", role: .destructive) { viewModel.removeImage(image.id) }
+                    Button(LS("docker.remove"), role: .destructive) { viewModel.removeImage(image.id) }
                 }
             }
         }
@@ -242,7 +242,7 @@ struct DockerManageView: View {
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-            Button("docker.retry") { viewModel.checkDockerAvailability() }
+            Button(LS("docker.retry")) { viewModel.checkDockerAvailability() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
@@ -321,8 +321,8 @@ struct DockerManageView: View {
                     }
                     .padding(.vertical, 2)
                     .contextMenu {
-                        Button("docker.composeRestart") { viewModel.composeRestart(service: service.name) }
-                        Button("docker.viewLogs") { viewModel.composeLogs(service: service.name) }
+                        Button(LS("docker.composeRestart")) { viewModel.composeRestart(service: service.name) }
+                        Button(LS("docker.viewLogs")) { viewModel.composeLogs(service: service.name) }
                     }
                 }
             }

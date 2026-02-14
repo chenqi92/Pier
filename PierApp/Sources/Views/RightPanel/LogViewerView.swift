@@ -294,7 +294,7 @@ struct LogViewerView: View {
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 8) {
-                Button("log.openFileButton") { viewModel.openLogFile() }
+                Button(LS("log.openFileButton")) { viewModel.openLogFile() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }

@@ -58,7 +58,7 @@ struct SettingsView: View {
 
             GroupBox("theme.appearance") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Picker("theme.mode", selection: $themeManager.appearanceMode) {
+                    Picker(LS("theme.mode"), selection: $themeManager.appearanceMode) {
                         ForEach(AppearanceMode.allCases) { mode in
                             Text(mode.displayName).tag(mode)
                         }

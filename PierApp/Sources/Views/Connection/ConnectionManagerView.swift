@@ -68,7 +68,7 @@ struct ConnectionManagerView: View {
             Text(LS("conn.noServers"))
                 .font(.callout)
                 .foregroundColor(.secondary)
-            Button("conn.addServer") { addNew() }
+            Button(LS("conn.addServer")) { addNew() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
@@ -117,9 +117,9 @@ struct ConnectionManagerView: View {
                 }
                 .padding(.vertical, 4)
                 .contextMenu {
-                    Button("conn.editServer") { editProfile(profile) }
+                    Button(LS("conn.editServer")) { editProfile(profile) }
                     Divider()
-                    Button("conn.deleteServer", role: .destructive) {
+                    Button(LS("conn.deleteServer"), role: .destructive) {
                         serviceManager.deleteProfile(profile)
                     }
                 }
@@ -216,7 +216,7 @@ struct ProfileEditorView: View {
                 TextField(LS("conn.username"), text: $profile.username)
                     .textFieldStyle(.roundedBorder)
 
-                Picker("conn.authType", selection: $profile.authType) {
+                Picker(LS("conn.authType"), selection: $profile.authType) {
                     ForEach(ConnectionProfile.AuthType.allCases, id: \.self) { type in
                         Text(type.displayName).tag(type)
                     }
@@ -234,7 +234,7 @@ struct ProfileEditorView: View {
                         ))
                         .textFieldStyle(.roundedBorder)
 
-                        Button("conn.browse") {
+                        Button(LS("conn.browse")) {
                             let panel = NSOpenPanel()
                             panel.canChooseFiles = true
                             panel.canChooseDirectories = false
@@ -255,10 +255,10 @@ struct ProfileEditorView: View {
 
             // Buttons
             HStack {
-                Button("conn.cancel") { onCancel() }
+                Button(LS("conn.cancel")) { onCancel() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("conn.save") { onSave(profile, password) }
+                Button(LS("conn.save")) { onSave(profile, password) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(profile.host.isEmpty || profile.username.isEmpty)
             }

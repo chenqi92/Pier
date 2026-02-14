@@ -40,7 +40,7 @@ struct RedisClientView: View {
                     .frame(width: 80)
             }
 
-            Button("redis.connect") { viewModel.connect() }
+            Button(LS("redis.connect")) { viewModel.connect() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(viewModel.isLoading)
@@ -81,7 +81,7 @@ struct RedisClientView: View {
 
                 // Key count badge
                 HStack {
-                    Text(LS("redis.keyCount \(viewModel.keys.count)"))
+                    Text(String(format: LS("redis.keyCount %lld"), viewModel.keys.count))
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                     Spacer()
@@ -122,12 +122,12 @@ struct RedisClientView: View {
                         .padding(.vertical, 1)
                         .tag(keyInfo.key)
                         .contextMenu {
-                            Button("redis.copyKey") {
+                            Button(LS("redis.copyKey")) {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(keyInfo.key, forType: .string)
                             }
                             Divider()
-                            Button("redis.deleteKey", role: .destructive) {
+                            Button(LS("redis.deleteKey"), role: .destructive) {
                                 viewModel.deleteKey(keyInfo.key)
                             }
                         }

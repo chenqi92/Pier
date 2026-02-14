@@ -43,11 +43,11 @@ struct LocalFileView: View {
             Spacer()
 
             Menu {
-                Button("files.home") { viewModel.navigateTo(FileManager.default.homeDirectoryForCurrentUser.path) }
-                Button("files.desktop") { viewModel.navigateTo(NSHomeDirectory() + "/Desktop") }
-                Button("files.projects") { viewModel.navigateTo(NSHomeDirectory() + "/Projects") }
+                Button(LS("files.home")) { viewModel.navigateTo(FileManager.default.homeDirectoryForCurrentUser.path) }
+                Button(LS("files.desktop")) { viewModel.navigateTo(NSHomeDirectory() + "/Desktop") }
+                Button(LS("files.projects")) { viewModel.navigateTo(NSHomeDirectory() + "/Projects") }
                 Divider()
-                Button("files.chooseFolder") { viewModel.openFolderPicker() }
+                Button(LS("files.chooseFolder")) { viewModel.openFolderPicker() }
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.caption)
@@ -111,7 +111,7 @@ struct LocalFileView: View {
 
     @ViewBuilder
     private func fileContextMenu(for item: FileItem) -> some View {
-        Button("files.openInTerminal") {
+        Button(LS("files.openInTerminal")) {
             if item.isDirectory {
                 NotificationCenter.default.post(
                     name: .openPathInTerminal,
@@ -120,18 +120,18 @@ struct LocalFileView: View {
             }
         }
 
-        Button("files.revealInFinder") {
+        Button(LS("files.revealInFinder")) {
             NSWorkspace.shared.selectFile(item.path, inFileViewerRootedAtPath: "")
         }
 
         Divider()
 
-        Button("files.copyPath") {
+        Button(LS("files.copyPath")) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.path, forType: .string)
         }
 
-        Button("files.copyName") {
+        Button(LS("files.copyName")) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.name, forType: .string)
         }
@@ -139,7 +139,7 @@ struct LocalFileView: View {
         Divider()
 
         if !item.isDirectory && item.name.hasSuffix(".md") {
-            Button("files.previewMarkdown") {
+            Button(LS("files.previewMarkdown")) {
                 NotificationCenter.default.post(
                     name: .previewMarkdown,
                     object: item.path
@@ -149,7 +149,7 @@ struct LocalFileView: View {
 
         Divider()
 
-        Button("files.delete", role: .destructive) {
+        Button(LS("files.delete"), role: .destructive) {
             viewModel.deleteFile(item)
         }
     }

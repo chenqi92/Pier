@@ -141,21 +141,21 @@ struct MergeConflictView: View {
 
                 Spacer()
 
-                Button("git.acceptOurs") {
+                Button(LS("git.acceptOurs")) {
                     gitViewModel.resolveConflict(file: file, hunkIndex: index, resolution: .ours)
                 }
                 .font(.system(size: 8))
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
 
-                Button("git.acceptTheirs") {
+                Button(LS("git.acceptTheirs")) {
                     gitViewModel.resolveConflict(file: file, hunkIndex: index, resolution: .theirs)
                 }
                 .font(.system(size: 8))
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
 
-                Button("git.acceptBoth") {
+                Button(LS("git.acceptBoth")) {
                     gitViewModel.resolveConflict(file: file, hunkIndex: index, resolution: .both)
                 }
                 .font(.system(size: 8))

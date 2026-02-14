@@ -256,7 +256,7 @@ struct TerminalContainerView: View {
             Text(LS("terminal.noSessions"))
                 .font(.title3)
                 .foregroundColor(.secondary)
-            Button("terminal.newTerminal") {
+            Button(LS("terminal.newTerminal")) {
                 viewModel.addNewTab()
             }
             .buttonStyle(.borderedProminent)
@@ -350,7 +350,7 @@ struct StatusBarView: View {
 
             Spacer()
 
-            Text(LS("terminal.sessionCount \(viewModel.tabs.count)"))
+            Text(String(format: LS("terminal.sessionCount"), viewModel.tabs.count))
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }

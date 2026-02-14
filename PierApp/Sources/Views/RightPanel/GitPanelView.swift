@@ -58,7 +58,7 @@ struct GitPanelView: View {
             VStack(spacing: 0) {
                 HStack {
                     Spacer()
-                    Button("diff.close") { showingDiff = false }
+                    Button(LS("diff.close")) { showingDiff = false }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .padding(8)
@@ -71,7 +71,7 @@ struct GitPanelView: View {
             VStack(spacing: 0) {
                 HStack {
                     Spacer()
-                    Button("diff.close") { showingBlame = false }
+                    Button(LS("diff.close")) { showingBlame = false }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .padding(8)
@@ -235,14 +235,14 @@ struct GitPanelView: View {
         }
         .padding(.vertical, 1)
         .contextMenu {
-            Button("git.showDiff") { viewModel.showDiff(file.path) }
-            Button("git.blame") { viewModel.blameFile(file.path) }
+            Button(LS("git.showDiff")) { viewModel.showDiff(file.path) }
+            Button(LS("git.blame")) { viewModel.blameFile(file.path) }
             Divider()
             if staged {
-                Button("git.unstage") { viewModel.unstageFile(file.path) }
+                Button(LS("git.unstage")) { viewModel.unstageFile(file.path) }
             } else {
-                Button("git.stage") { viewModel.stageFile(file.path) }
-                Button("git.discardChanges", role: .destructive) { viewModel.discardChanges(file.path) }
+                Button(LS("git.stage")) { viewModel.stageFile(file.path) }
+                Button(LS("git.discardChanges"), role: .destructive) { viewModel.discardChanges(file.path) }
             }
         }
     }
@@ -258,13 +258,13 @@ struct GitPanelView: View {
                 .cornerRadius(4)
 
             HStack {
-                Button("git.stageAll") { viewModel.stageAll() }
+                Button(LS("git.stageAll")) { viewModel.stageAll() }
                     .buttonStyle(.borderless)
                     .font(.caption)
 
                 Spacer()
 
-                Button("git.commit") { viewModel.commit() }
+                Button(LS("git.commit")) { viewModel.commit() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled(viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty)
@@ -298,12 +298,12 @@ struct GitPanelView: View {
             }
             .padding(.vertical, 2)
             .contextMenu {
-                Button("git.copyHash") {
+                Button(LS("git.copyHash")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(commit.hash, forType: .string)
                 }
-                Button("git.checkout") { viewModel.checkout(commit.hash) }
-                Button("git.cherryPick") { viewModel.cherryPick(commit.hash) }
+                Button(LS("git.checkout")) { viewModel.checkout(commit.hash) }
+                Button(LS("git.cherryPick")) { viewModel.cherryPick(commit.hash) }
             }
         }
         .listStyle(.plain)
@@ -315,7 +315,7 @@ struct GitPanelView: View {
         VStack(spacing: 0) {
             HStack {
                 Spacer()
-                Button("git.stashChanges") { viewModel.stashChanges() }
+                Button(LS("git.stashChanges")) { viewModel.stashChanges() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
@@ -338,10 +338,10 @@ struct GitPanelView: View {
                     Spacer()
                 }
                 .contextMenu {
-                    Button("git.apply") { viewModel.applyStash(stash.index) }
-                    Button("git.pop") { viewModel.popStash(stash.index) }
+                    Button(LS("git.apply")) { viewModel.applyStash(stash.index) }
+                    Button(LS("git.pop")) { viewModel.popStash(stash.index) }
                     Divider()
-                    Button("git.drop", role: .destructive) { viewModel.dropStash(stash.index) }
+                    Button(LS("git.drop"), role: .destructive) { viewModel.dropStash(stash.index) }
                 }
             }
             .listStyle(.plain)
@@ -358,7 +358,7 @@ struct GitPanelView: View {
             Text(LS("git.notARepo"))
                 .font(.title3)
                 .foregroundColor(.secondary)
-            Button("git.initRepo") { viewModel.initRepo() }
+            Button(LS("git.initRepo")) { viewModel.initRepo() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }

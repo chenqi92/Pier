@@ -158,10 +158,10 @@ struct DatabaseClientView: View {
 
                 HStack {
                     Spacer()
-                    Button("db.test") { viewModel.testConnection() }
+                    Button(LS("db.test")) { viewModel.testConnection() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                    Button("db.connect") { viewModel.connect() }
+                    Button(LS("db.connect")) { viewModel.connect() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .disabled(viewModel.formHost.isEmpty || viewModel.formUsername.isEmpty)
@@ -211,12 +211,12 @@ struct DatabaseClientView: View {
                         viewModel.queryText = "DESCRIBE `\(table)`;"
                         viewModel.executeQuery()
                     }
-                    Button("db.showCreateTable") {
+                    Button(LS("db.showCreateTable")) {
                         viewModel.queryText = "SHOW CREATE TABLE `\(table)`;"
                         viewModel.executeQuery()
                     }
                     Divider()
-                    Button("db.dropTable", role: .destructive) {
+                    Button(LS("db.dropTable"), role: .destructive) {
                         viewModel.queryText = "DROP TABLE `\(table)`;"
                     }
                 }

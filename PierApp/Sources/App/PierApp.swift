@@ -19,12 +19,12 @@ struct PierApp: App {
         .commands {
             // Custom menu items
             CommandGroup(after: .newItem) {
-                Button("settings.newTerminalTab") {
+                Button(LS("settings.newTerminalTab")) {
                     NotificationCenter.default.post(name: .newTerminalTab, object: nil)
                 }
                 .keyboardShortcut("t", modifiers: .command)
 
-                Button("settings.newSSHConnection") {
+                Button(LS("settings.newSSHConnection")) {
                     NotificationCenter.default.post(name: .newSSHConnection, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
