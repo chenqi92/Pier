@@ -24,22 +24,12 @@ struct TerminalView: NSViewRepresentable {
     func updateNSView(_ scrollView: TerminalScrollView, context: Context) {
         guard let terminalView = scrollView.documentView as? TerminalNSView else { return }
         terminalView.updateSession(session)
-
-        // Ensure the terminal view becomes first responder when session updates
-        DispatchQueue.main.async {
-            if let window = terminalView.window,
-               window.firstResponder !== terminalView {
-                window.makeFirstResponder(terminalView)
-            }
-        }
     }
 }
 
 /// Custom NSScrollView that forwards keyboard events to the terminal document view
 /// instead of consuming them for scroll behavior.
 class TerminalScrollView: NSScrollView {
-
-    override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
         // Forward all keyboard events to the terminal view
@@ -48,15 +38,6 @@ class TerminalScrollView: NSScrollView {
         } else {
             super.keyDown(with: event)
         }
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        // When we receive focus, forward it to the terminal view
-        if let terminalView = documentView as? TerminalNSView {
-            window?.makeFirstResponder(terminalView)
-            return true
-        }
-        return super.becomeFirstResponder()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -151,12 +132,41 @@ class TerminalNSView: NSView {
         // Only restart if session changes
         if currentSessionId == session.id { return }
         currentSessionId = session.id
+        pendingSession = session
 
         // Clean up previous terminal
         stopTerminal()
 
-        // Start new terminal for this session
+        // Only start terminal if we already have a window (proper bounds)
+        if window != nil && bounds.width > 1 && bounds.height > 1 {
+            startTerminalForPendingSession()
+        }
+        // Otherwise, viewDidMoveToWindow will start it
+    }
+
+    /// Stored session waiting for view to be attached to window
+    private var pendingSession: TerminalSessionInfo?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+
+        // Make ourselves first responder now that we have a window
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.window?.makeFirstResponder(self)
+        }
+
+        // Start terminal if we have a pending session and no running terminal
+        if terminalHandle == nil {
+            startTerminalForPendingSession()
+        }
+    }
+
+    private func startTerminalForPendingSession() {
+        guard let session = pendingSession else { return }
         startTerminal(shell: session.shellPath)
+        pendingSession = nil
     }
 
     private func stopTerminal() {
@@ -173,17 +183,24 @@ class TerminalNSView: NSView {
     }
 
     func startTerminal(shell: String = "/bin/zsh") {
-        let cols = max(UInt16(1), UInt16(bounds.width / cellWidth))
-        let rows = max(UInt16(1), UInt16(bounds.height / cellHeight))
+        // Use the scroll view's visible area for size, not document view bounds
+        let visibleSize = enclosingScrollView?.contentView.bounds.size ?? bounds.size
+        let cols = max(UInt16(80), UInt16(visibleSize.width / cellWidth))
+        let rows = max(UInt16(24), UInt16(visibleSize.height / cellHeight))
 
         terminalHandle = shell.withCString { shellPtr in
             pier_terminal_create(cols, rows, shellPtr)
         }
 
         if terminalHandle != nil {
+            // Initialize screen buffer to match PTY size
+            let colsInt = Int(cols)
+            let rowsInt = Int(rows)
+            screenBuffer = Array(repeating: Array(repeating: Character(" "), count: colsInt), count: rowsInt)
             startReadLoop()
         }
     }
+
 
     private func startReadLoop() {
         readTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { [weak self] _ in
