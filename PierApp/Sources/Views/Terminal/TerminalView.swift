@@ -40,50 +40,48 @@ struct TerminalView: NSViewRepresentable {
 /// Also observes viewport size changes to trigger PTY resize when panels are dragged.
 class TerminalScrollView: NSScrollView {
 
-    private var boundsObserver: NSObjectProtocol?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setupBoundsObservation()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setupBoundsObservation()
-    }
-
-    private func setupBoundsObservation() {
-        // Observe clip view bounds changes so we can resize the PTY
-        // when the user drags panel dividers
-        contentView.postsBoundsChangedNotifications = true
-        boundsObserver = NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: contentView,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleViewportResize()
-        }
-    }
-
-    deinit {
-        if let observer = boundsObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-    }
+    /// Last known viewport size to avoid redundant resizes (scrolling etc.)
+    private var lastViewportSize: NSSize = .zero
+    /// Re-entrance guard: prevent handleViewportResize → setFrameSize → resizeSubviews → handleViewportResize loop
+    private var isHandlingResize = false
+    /// Throttle timer for resize events during continuous drag
+    private var resizeThrottleTimer: Timer?
 
     /// When the scroll view itself is resized (HSplitView divider dragged),
     /// update the document view to match the new visible area.
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
-        handleViewportResize()
+        scheduleViewportResize()
     }
 
-    private func handleViewportResize() {
+    /// Throttle resize to coalesce rapid events during drag.
+    /// Without this, each pixel of divider drag sends SIGWINCH → shell redraws.
+    private func scheduleViewportResize() {
+        // Skip if we're already inside a resize handler (prevents recursion)
+        guard !isHandlingResize else { return }
+
+        let visibleSize = contentView.bounds.size
+        // Skip if size hasn't actually changed (e.g., scroll-only bounds change)
+        guard visibleSize.width > 1 && visibleSize.height > 1 else { return }
+        guard abs(visibleSize.width - lastViewportSize.width) > 0.5 ||
+              abs(visibleSize.height - lastViewportSize.height) > 0.5 else { return }
+
+        resizeThrottleTimer?.invalidate()
+        resizeThrottleTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+            self?.performViewportResize()
+        }
+    }
+
+    private func performViewportResize() {
+        guard !isHandlingResize else { return }
         guard let terminalView = documentView as? TerminalNSView else { return }
         let visibleSize = contentView.bounds.size
-        if visibleSize.width > 1 && visibleSize.height > 1 {
-            terminalView.handleViewportSizeChanged(visibleSize)
-        }
+        guard visibleSize.width > 1 && visibleSize.height > 1 else { return }
+
+        lastViewportSize = visibleSize
+        isHandlingResize = true
+        terminalView.handleViewportSizeChanged(visibleSize)
+        isHandlingResize = false
     }
 
     override func keyDown(with event: NSEvent) {
@@ -1467,10 +1465,10 @@ class TerminalNSView: NSView {
         pier_terminal_resize(handle, UInt16(newCols), UInt16(newRows))
         resizeScreenBuffer()
 
-        // Update document frame to fill visible area
+        // Update document frame to fill visible area (use super to avoid re-triggering our setFrameSize override)
         let totalLines = scrollbackBuffer.count + screenBuffer.count
         let requiredHeight = max(visibleSize.height, CGFloat(totalLines) * cellHeight)
-        setFrameSize(NSSize(width: visibleSize.width, height: requiredHeight))
+        super.setFrameSize(NSSize(width: visibleSize.width, height: requiredHeight))
         needsDisplay = true
     }
 
