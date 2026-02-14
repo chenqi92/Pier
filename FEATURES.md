@@ -116,11 +116,11 @@ Pier 是一个面向服务器运维场景的 macOS 终端工具。核心价值�
 ### 🗄️ 数据库客户端（远程上下文）
 - [x] 通过 SSH 隧道连接远程 MySQL（`127.0.0.1:转发端口`）
 - [x] Redis 客户端（`redis-cli` 交互 / 键值浏览 / TTL 管理）
-- [ ] PostgreSQL 客户端
-- [ ] SQLite 本地客户端（本地上下文）
-- [ ] SQL 语法高亮
+- [x] PostgreSQL 客户端
+- [x] SQLite 本地客户端（本地上下文）
+- [x] SQL 语法高亮
 - [x] 查询历史记录
-- [ ] 表结构可视化（ER 图）
+- [x] 表结构可视化（ER 图）
 - [x] 数据导出（CSV / JSON）
 
 ### 🖥 终端渲染（高优先级）
@@ -132,17 +132,17 @@ Pier 是一个面向服务器运维场景的 macOS 终端工具。核心价值�
 - [x] URL 自动检测与点击
 
 ### 🔗 SSH 增强
-- [ ] SSH Agent Forwarding
+- [x] SSH Agent Forwarding
 - [x] SSH Known Hosts 验证
 - [x] SSH 连接管理器 UI（保存的服务器列表）
 - [x] SSH 隧道 / 端口转发管理 UI
-- [ ] SSH 密钥管理界面
+- [x] SSH 密钥管理界面
 
 ### 📦 Docker 增强（远程上下文）
 - [x] 通过 SSH exec 执行远程 docker 命令
 - [x] Docker Compose 支持
-- [ ] 容器资源监控（CPU / 内存）
-- [ ] 容器网络管理
+- [x] 容器资源监控（CPU / 内存）
+- [x] 容器网络管理
 - [x] 容器实时日志（通过 SSH 的 `docker logs -f`）
 
 ### 📋 日志增强（远程上下文）
@@ -175,7 +175,7 @@ Pier 是一个面向服务器运维场景的 macOS 终端工具。核心价值�
 - [x] Diff 可视化（inline / side-by-side）
 - [x] 分支图可视化
 - [x] Blame 视图
-- [ ] Merge 冲突解决器
+- [x] Merge 冲突解决器
 
 ### 🚀 发布准备
 - [ ] 代码签名 & 公证

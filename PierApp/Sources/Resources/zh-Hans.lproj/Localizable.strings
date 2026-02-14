@@ -335,3 +335,73 @@
 
 "git.branchGraph" = "分支图";
 "git.noGraph" = "无图数据";
+
+// MARK: - Batch 6: PostgreSQL
+
+"pg.connectFailed" = "连接 PostgreSQL 失败";
+"pg.connected" = "已连接";
+"pg.connect" = "连接";
+"pg.columns" = "列";
+"pg.query" = "SQL 查询";
+"pg.execute" = "执行";
+"pg.noResults" = "执行查询以查看结果";
+"pg.notConnected" = "未连接到 PostgreSQL";
+
+// MARK: - SQLite
+
+"sqlite.openFailed" = "打开数据库文件失败";
+"sqlite.selectFile" = "选择 SQLite 数据库文件";
+"sqlite.open" = "打开数据库";
+"sqlite.columns" = "列";
+"sqlite.query" = "SQL 查询";
+"sqlite.execute" = "执行";
+"sqlite.noResults" = "执行查询以查看结果";
+"sqlite.notConnected" = "未打开数据库";
+
+// MARK: - ER Diagram
+
+"er.title" = "ER 图";
+"er.noTables" = "没有可显示的表";
+
+// MARK: - SSH Key Management
+
+"ssh.keyManager" = "SSH 密钥";
+"ssh.generateKey" = "生成";
+"ssh.keyInfo" = "密钥信息";
+"ssh.keyName" = "名称";
+"ssh.keyType" = "类型";
+"ssh.keyPath" = "路径";
+"ssh.fingerprint" = "指纹";
+"ssh.publicKey" = "公钥";
+"ssh.copyPublicKey" = "复制";
+"ssh.deleteKey" = "删除密钥";
+"ssh.selectKey" = "选择密钥查看详情";
+"ssh.generateNewKey" = "生成新 SSH 密钥";
+"ssh.comment" = "备注";
+"ssh.usePassphrase" = "使用密码短语";
+"ssh.passphrase" = "密码短语";
+"ssh.generate" = "生成";
+"ssh.agentForwarding" = "代理转发";
+
+// MARK: - Docker Stats & Networks
+
+"docker.stats" = "资源使用";
+"docker.cpu" = "CPU";
+"docker.memory" = "内存";
+"docker.networkIO" = "网络 I/O";
+"docker.blockIO" = "磁盘 I/O";
+"docker.networks" = "网络";
+"docker.createNetwork" = "创建网络";
+"docker.removeNetwork" = "移除";
+
+// MARK: - Git Merge Conflicts
+
+"git.mergeConflicts" = "合并冲突";
+"git.noConflicts" = "无合并冲突";
+"git.selectConflictFile" = "选择文件进行解决";
+"git.acceptAllOurs" = "全部接受 Ours";
+"git.acceptAllTheirs" = "全部接受 Theirs";
+"git.markResolved" = "标记为已解决";
+"git.acceptOurs" = "Ours";
+"git.acceptTheirs" = "Theirs";
+"git.acceptBoth" = "两者都要";

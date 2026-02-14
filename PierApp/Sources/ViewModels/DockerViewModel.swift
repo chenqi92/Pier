@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 
 enum DockerTab {
-    case containers, images, volumes, compose
+    case containers, images, volumes, compose, networks
 }
 
 // MARK: - Data Models
@@ -36,6 +36,35 @@ struct DockerVolume: Identifiable {
     let mountpoint: String
 }
 
+struct ContainerStats: Identifiable {
+    let containerId: String
+    let name: String
+    let cpuPercent: String      // e.g. "12.34%"
+    let memoryUsage: String     // e.g. "256MiB / 1GiB"
+    let memoryPercent: String   // e.g. "25.00%"
+    let networkIO: String       // e.g. "1.5kB / 3.2kB"
+    let blockIO: String         // e.g. "0B / 0B"
+
+    var id: String { containerId }
+
+    /// CPU percentage as a double (0.0 - 100.0).
+    var cpuValue: Double {
+        Double(cpuPercent.replacingOccurrences(of: "%", with: "")) ?? 0
+    }
+
+    /// Memory percentage as a double (0.0 - 100.0).
+    var memoryValue: Double {
+        Double(memoryPercent.replacingOccurrences(of: "%", with: "")) ?? 0
+    }
+}
+
+struct DockerNetwork: Identifiable {
+    let id: String
+    let name: String
+    let driver: String
+    let scope: String
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -54,7 +83,14 @@ class DockerViewModel: ObservableObject {
     @Published var composeFilePath: String?
     @Published var isComposeAvailable = false
 
+    // Resource monitoring
+    @Published var containerStats: [String: ContainerStats] = [:]  // keyed by container ID
+
+    // Networks
+    @Published var networks: [DockerNetwork] = []
+
     private var timer: AnyCancellable?
+    private var statsTimer: AnyCancellable?
 
     /// Optional reference to RemoteServiceManager for SSH exec.
     weak var serviceManager: RemoteServiceManager?
@@ -332,6 +368,85 @@ extension DockerViewModel {
     private func runComposeCommand(_ args: [String]) async -> String? {
         let fullArgs = ["compose"] + args
         return await runDockerCommand(fullArgs)
+    }
+
+    // MARK: - Resource Monitoring
+
+    func startStatsPolling() {
+        statsTimer?.cancel()
+        statsTimer = Timer.publish(every: 5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in self?.loadStats() }
+        loadStats()
+    }
+
+    func stopStatsPolling() {
+        statsTimer?.cancel()
+        statsTimer = nil
+    }
+
+    func loadStats() {
+        Task {
+            guard let output = await runDockerCommand([
+                "stats", "--no-stream", "--format",
+                "{{.ID}}|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}"
+            ]) else { return }
+
+            var newStats: [String: ContainerStats] = [:]
+            for line in output.split(separator: "\n") {
+                let parts = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+                guard parts.count >= 7 else { continue }
+                let id = parts[0].trimmingCharacters(in: .whitespaces)
+                newStats[id] = ContainerStats(
+                    containerId: id,
+                    name: parts[1].trimmingCharacters(in: .whitespaces),
+                    cpuPercent: parts[2].trimmingCharacters(in: .whitespaces),
+                    memoryUsage: parts[3].trimmingCharacters(in: .whitespaces),
+                    memoryPercent: parts[4].trimmingCharacters(in: .whitespaces),
+                    networkIO: parts[5].trimmingCharacters(in: .whitespaces),
+                    blockIO: parts[6].trimmingCharacters(in: .whitespaces)
+                )
+            }
+            containerStats = newStats
+        }
+    }
+
+    // MARK: - Network Management
+
+    func loadNetworks() async {
+        guard let output = await runDockerCommand([
+            "network", "ls", "--format",
+            "{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}"
+        ]) else { return }
+
+        networks = output.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 4 else { return nil }
+            return DockerNetwork(
+                id: parts[0].trimmingCharacters(in: .whitespaces),
+                name: parts[1].trimmingCharacters(in: .whitespaces),
+                driver: parts[2].trimmingCharacters(in: .whitespaces),
+                scope: parts[3].trimmingCharacters(in: .whitespaces)
+            )
+        }
+    }
+
+    func inspectNetwork(_ networkId: String) async -> String? {
+        await runDockerCommand(["network", "inspect", networkId])
+    }
+
+    func createNetwork(name: String, driver: String = "bridge") {
+        Task {
+            _ = await runDockerCommand(["network", "create", "--driver", driver, name])
+            await loadNetworks()
+        }
+    }
+
+    func removeNetwork(_ networkId: String) {
+        Task {
+            _ = await runDockerCommand(["network", "rm", networkId])
+            await loadNetworks()
+        }
     }
 }
 

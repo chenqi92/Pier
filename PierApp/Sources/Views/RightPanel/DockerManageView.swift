@@ -38,6 +38,8 @@ struct DockerManageView: View {
                     volumeListView
                 case .compose:
                     composeListView
+                case .networks:
+                    networkListView
                 }
             }
         }
@@ -332,6 +334,57 @@ struct DockerManageView: View {
                         .foregroundColor(.secondary)
                 }
             }
+        }
+    }
+
+    // MARK: - Networks
+
+    private var networkListView: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: {
+                    viewModel.createNetwork(name: "pier-network-\(Int.random(in: 1000...9999))")
+                }) {
+                    Label("docker.createNetwork", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+
+            List(viewModel.networks) { network in
+                HStack {
+                    Image(systemName: "network")
+                        .font(.system(size: 9))
+                        .foregroundColor(.blue)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(network.name)
+                            .font(.system(size: 10))
+                        Text("\(network.driver) · \(network.scope)")
+                            .font(.system(size: 8))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+
+                    // Don't allow removal of default networks
+                    if !["bridge", "host", "none"].contains(network.name) {
+                        Button(role: .destructive, action: {
+                            viewModel.removeNetwork(network.id)
+                        }) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 9))
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+            .listStyle(.plain)
+        }
+        .onAppear {
+            Task { await viewModel.loadNetworks() }
         }
     }
 }

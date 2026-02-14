@@ -431,6 +431,143 @@ class GitViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Merge Conflict Resolution
+
+    @Published var conflictFiles: [ConflictFile] = []
+    @Published var selectedConflictFile: UUID?
+
+    /// Detect files with merge conflicts.
+    func detectConflicts() {
+        Task {
+            guard let output = await runGit(["diff", "--name-only", "--diff-filter=U"]) else {
+                conflictFiles = []
+                return
+            }
+
+            var files: [ConflictFile] = []
+            for fileName in output.split(separator: "\n").map(String.init) {
+                let filePath = (repoPath as NSString).appendingPathComponent(fileName)
+                guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else { continue }
+
+                let hunks = parseConflictMarkers(content)
+                if !hunks.isEmpty {
+                    files.append(ConflictFile(name: fileName, path: filePath, conflicts: hunks))
+                }
+            }
+
+            conflictFiles = files
+        }
+    }
+
+    /// Parse conflict markers from file content.
+    private func parseConflictMarkers(_ content: String) -> [ConflictHunk] {
+        var hunks: [ConflictHunk] = []
+        let lines = content.components(separatedBy: "\n")
+        var i = 0
+
+        while i < lines.count {
+            if lines[i].hasPrefix("<<<<<<<") {
+                var oursLines: [String] = []
+                var theirsLines: [String] = []
+                i += 1
+
+                // Collect ours
+                while i < lines.count && !lines[i].hasPrefix("=======") {
+                    oursLines.append(lines[i])
+                    i += 1
+                }
+                i += 1 // skip =======
+
+                // Collect theirs
+                while i < lines.count && !lines[i].hasPrefix(">>>>>>>") {
+                    theirsLines.append(lines[i])
+                    i += 1
+                }
+
+                hunks.append(ConflictHunk(oursLines: oursLines, theirsLines: theirsLines))
+            }
+            i += 1
+        }
+
+        return hunks
+    }
+
+    /// Resolve a specific conflict hunk.
+    func resolveConflict(file: ConflictFile, hunkIndex: Int, resolution: ConflictResolution) {
+        guard var updatedFile = conflictFiles.first(where: { $0.id == file.id }) else { return }
+        updatedFile.conflicts[hunkIndex].resolution = resolution
+
+        if let idx = conflictFiles.firstIndex(where: { $0.id == file.id }) {
+            conflictFiles[idx] = updatedFile
+        }
+    }
+
+    /// Accept all ours for a file.
+    func acceptAllOurs(_ file: ConflictFile) {
+        for i in 0..<file.conflicts.count {
+            resolveConflict(file: file, hunkIndex: i, resolution: .ours)
+        }
+        writeResolvedFile(file, defaultResolution: .ours)
+    }
+
+    /// Accept all theirs for a file.
+    func acceptAllTheirs(_ file: ConflictFile) {
+        for i in 0..<file.conflicts.count {
+            resolveConflict(file: file, hunkIndex: i, resolution: .theirs)
+        }
+        writeResolvedFile(file, defaultResolution: .theirs)
+    }
+
+    /// Mark a file as resolved.
+    func markResolved(_ file: ConflictFile) {
+        writeResolvedFile(file, defaultResolution: .ours)
+        Task {
+            _ = await runGit(["add", file.path])
+            detectConflicts()
+        }
+    }
+
+    /// Write the resolved file content.
+    private func writeResolvedFile(_ file: ConflictFile, defaultResolution: ConflictResolution) {
+        guard let content = try? String(contentsOfFile: file.path, encoding: .utf8) else { return }
+        let lines = content.components(separatedBy: "\n")
+        var result: [String] = []
+        var i = 0
+        var hunkIndex = 0
+
+        while i < lines.count {
+            if lines[i].hasPrefix("<<<<<<<") {
+                var oursLines: [String] = []
+                var theirsLines: [String] = []
+                i += 1
+
+                while i < lines.count && !lines[i].hasPrefix("=======") {
+                    oursLines.append(lines[i]); i += 1
+                }
+                i += 1
+                while i < lines.count && !lines[i].hasPrefix(">>>>>>>") {
+                    theirsLines.append(lines[i]); i += 1
+                }
+
+                let resolution = (hunkIndex < file.conflicts.count
+                    ? file.conflicts[hunkIndex].resolution : nil) ?? defaultResolution
+
+                switch resolution {
+                case .ours:  result.append(contentsOf: oursLines)
+                case .theirs: result.append(contentsOf: theirsLines)
+                case .both:  result.append(contentsOf: oursLines); result.append(contentsOf: theirsLines)
+                }
+
+                hunkIndex += 1
+            } else {
+                result.append(lines[i])
+            }
+            i += 1
+        }
+
+        try? result.joined(separator: "\n").write(toFile: file.path, atomically: true, encoding: .utf8)
+    }
+
     // MARK: - Git Command Runner
 
     private func runGit(_ args: [String]) async -> String? {

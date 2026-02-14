@@ -9,6 +9,7 @@ struct ConnectionProfile: Codable, Identifiable, Hashable {
     var username: String
     var authType: AuthType
     var keyFilePath: String?
+    var agentForwarding: Bool = false
     var lastConnected: Date?
 
     enum AuthType: String, Codable, CaseIterable {
@@ -32,10 +33,12 @@ struct ConnectionProfile: Codable, Identifiable, Hashable {
             username: "root",
             authType: .password,
             keyFilePath: nil,
+            agentForwarding: false,
             lastConnected: nil
         )
     }
 }
+
 
 // MARK: - Persistence
 

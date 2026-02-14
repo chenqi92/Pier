@@ -335,3 +335,73 @@
 
 "git.branchGraph" = "Branch Graph";
 "git.noGraph" = "No graph data";
+
+// MARK: - Batch 6: PostgreSQL
+
+"pg.connectFailed" = "Failed to connect to PostgreSQL";
+"pg.connected" = "Connected";
+"pg.connect" = "Connect";
+"pg.columns" = "Columns";
+"pg.query" = "SQL Query";
+"pg.execute" = "Run";
+"pg.noResults" = "Run a query to see results";
+"pg.notConnected" = "Not connected to PostgreSQL";
+
+// MARK: - SQLite
+
+"sqlite.openFailed" = "Failed to open database file";
+"sqlite.selectFile" = "Select a SQLite database file";
+"sqlite.open" = "Open Database";
+"sqlite.columns" = "Columns";
+"sqlite.query" = "SQL Query";
+"sqlite.execute" = "Run";
+"sqlite.noResults" = "Run a query to see results";
+"sqlite.notConnected" = "No database open";
+
+// MARK: - ER Diagram
+
+"er.title" = "ER Diagram";
+"er.noTables" = "No tables to display";
+
+// MARK: - SSH Key Management
+
+"ssh.keyManager" = "SSH Keys";
+"ssh.generateKey" = "Generate";
+"ssh.keyInfo" = "Key Info";
+"ssh.keyName" = "Name";
+"ssh.keyType" = "Type";
+"ssh.keyPath" = "Path";
+"ssh.fingerprint" = "Fingerprint";
+"ssh.publicKey" = "Public Key";
+"ssh.copyPublicKey" = "Copy";
+"ssh.deleteKey" = "Delete Key";
+"ssh.selectKey" = "Select a key to view details";
+"ssh.generateNewKey" = "Generate New SSH Key";
+"ssh.comment" = "Comment";
+"ssh.usePassphrase" = "Use Passphrase";
+"ssh.passphrase" = "Passphrase";
+"ssh.generate" = "Generate";
+"ssh.agentForwarding" = "Agent Forwarding";
+
+// MARK: - Docker Stats & Networks
+
+"docker.stats" = "Resource Usage";
+"docker.cpu" = "CPU";
+"docker.memory" = "Memory";
+"docker.networkIO" = "Net I/O";
+"docker.blockIO" = "Block I/O";
+"docker.networks" = "Networks";
+"docker.createNetwork" = "Create Network";
+"docker.removeNetwork" = "Remove";
+
+// MARK: - Git Merge Conflicts
+
+"git.mergeConflicts" = "Merge Conflicts";
+"git.noConflicts" = "No merge conflicts";
+"git.selectConflictFile" = "Select a file to resolve";
+"git.acceptAllOurs" = "Accept All Ours";
+"git.acceptAllTheirs" = "Accept All Theirs";
+"git.markResolved" = "Mark Resolved";
+"git.acceptOurs" = "Ours";
+"git.acceptTheirs" = "Theirs";
+"git.acceptBoth" = "Both";
