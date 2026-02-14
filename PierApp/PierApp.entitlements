@@ -2,19 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- App Sandbox -->
     <key>com.apple.security.app-sandbox</key>
-    <false/>
-    <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
-    <key>com.apple.security.files.downloads.read-write</key>
-    <true/>
+
+    <!-- Network: outgoing connections (SSH, HTTP APIs) -->
     <key>com.apple.security.network.client</key>
     <true/>
-    <key>com.apple.security.network.server</key>
+
+    <!-- File access: user-selected files via Open/Save panels -->
+    <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
-    <key>com.apple.security.process.exec</key>
-    <true/>
-    <key>com.apple.security.inherit</key>
+
+    <!-- Hardened Runtime: disable library validation for Rust FFI (CPierCore) -->
+    <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>
 </plist>

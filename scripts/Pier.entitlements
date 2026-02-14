@@ -10,19 +10,11 @@
     <key>com.apple.security.network.client</key>
     <true/>
 
-    <!-- File access: user-selected files -->
+    <!-- File access: user-selected files via Open/Save panels -->
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
 
-    <!-- File access: downloads folder (for exports) -->
-    <key>com.apple.security.files.downloads.read-write</key>
-    <true/>
-
-    <!-- Process: allow spawning child processes (terminal, git, docker, etc.) -->
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
-
-    <!-- Hardened Runtime: disable library validation for Rust FFI -->
+    <!-- Hardened Runtime: disable library validation for Rust FFI (CPierCore) -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>

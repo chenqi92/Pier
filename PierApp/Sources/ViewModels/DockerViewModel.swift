@@ -78,6 +78,19 @@ class DockerViewModel: ObservableObject {
     @Published var containerLogs: String = ""
     @Published var isRemoteMode = false
 
+    // Operation feedback
+    @Published var operationMessage: String = ""
+    @Published var operationIsError = false
+    @Published var showOperationFeedback = false
+
+    // Container logs sheet
+    @Published var showContainerLogs = false
+    @Published var logsContainerName = ""
+
+    // Container inspect
+    @Published var showContainerInspect = false
+    @Published var containerInspectContent = ""
+
     // Docker Compose
     @Published var composeServices: [ComposeService] = []
     @Published var composeFilePath: String?
@@ -163,40 +176,50 @@ class DockerViewModel: ObservableObject {
 
     func startContainer(_ id: String) {
         Task {
-            _ = await runDockerCommand(["start", id])
+            await runWithFeedback(["start", id], success: "Container started")
             await loadContainers()
         }
     }
 
     func stopContainer(_ id: String) {
         Task {
-            _ = await runDockerCommand(["stop", id])
+            await runWithFeedback(["stop", id], success: "Container stopped")
             await loadContainers()
         }
     }
 
     func restartContainer(_ id: String) {
         Task {
-            _ = await runDockerCommand(["restart", id])
+            await runWithFeedback(["restart", id], success: "Container restarted")
             await loadContainers()
         }
     }
 
     func removeContainer(_ id: String) {
         Task {
-            _ = await runDockerCommand(["rm", "-f", id])
+            await runWithFeedback(["rm", "-f", id], success: "Container removed")
             await loadContainers()
         }
     }
 
     func viewContainerLogs(_ id: String) {
         Task {
+            let name = containers.first(where: { $0.id == id })?.name ?? id
             if let logs = await runDockerCommand(["logs", "--tail", "500", id]) {
                 containerLogs = logs
-                NotificationCenter.default.post(
-                    name: .dockerContainerLogs,
-                    object: ["id": id, "logs": logs]
-                )
+                logsContainerName = name
+                showContainerLogs = true
+            } else {
+                showFeedback("Failed to load logs for \(name)", isError: true)
+            }
+        }
+    }
+
+    func inspectContainer(_ id: String) {
+        Task {
+            if let json = await runDockerCommand(["inspect", id]) {
+                containerInspectContent = json
+                showContainerInspect = true
             }
         }
     }
@@ -224,8 +247,63 @@ class DockerViewModel: ObservableObject {
 
     func runImage(_ id: String) {
         Task {
-            _ = await runDockerCommand(["run", "-d", id])
+            await runWithFeedback(["run", "-d", id], success: "Container created")
             await loadContainers()
+        }
+    }
+
+    /// Run an image with full configuration.
+    func runImageWithConfig(
+        image: String,
+        containerName: String,
+        ports: [(host: String, container: String)],
+        envVars: [(key: String, value: String)],
+        volumes: [(host: String, container: String)],
+        restartPolicy: String,
+        detached: Bool = true,
+        command: String = ""
+    ) {
+        Task {
+            isLoading = true
+            var args = ["run"]
+            if detached { args.append("-d") }
+
+            // Container name
+            if !containerName.isEmpty {
+                args.append(contentsOf: ["--name", containerName])
+            }
+
+            // Port mappings
+            for port in ports where !port.host.isEmpty && !port.container.isEmpty {
+                args.append(contentsOf: ["-p", "\(port.host):\(port.container)"])
+            }
+
+            // Environment variables
+            for env in envVars where !env.key.isEmpty {
+                args.append(contentsOf: ["-e", "\(env.key)=\(env.value)"])
+            }
+
+            // Volume mounts
+            for vol in volumes where !vol.host.isEmpty && !vol.container.isEmpty {
+                args.append(contentsOf: ["-v", "\(vol.host):\(vol.container)"])
+            }
+
+            // Restart policy
+            if !restartPolicy.isEmpty && restartPolicy != "no" {
+                args.append(contentsOf: ["--restart", restartPolicy])
+            }
+
+            // Image
+            args.append(image)
+
+            // Optional command
+            if !command.isEmpty {
+                args.append(contentsOf: command.split(separator: " ").map(String.init))
+            }
+
+            await runWithFeedback(args, success: "Container '\(containerName.isEmpty ? image : containerName)' created")
+            await loadContainers()
+            isLoading = false
         }
     }
 
@@ -348,6 +426,50 @@ class DockerViewModel: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// Show a feedback banner.
+    private func showFeedback(_ message: String, isError: Bool) {
+        operationMessage = message
+        operationIsError = isError
+        showOperationFeedback = true
+        // Auto-dismiss after 3 seconds
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            showOperationFeedback = false
+        }
+    }
+
+    /// Run a Docker command and show success/error feedback.
+    private func runWithFeedback(_ args: [String], success: String) async {
+        if let sm = serviceManager, sm.isConnected {
+            isRemoteMode = true
+            let quotedArgs = args.map { arg -> String in
+                if arg.contains(" ") || arg.contains("{") || arg.contains("}") ||
+                   arg.contains("\\") || arg.contains("'") || arg.contains("$") ||
+                   arg.contains("|") || arg.contains(">") || arg.contains("<") {
+                    return "'" + arg.replacingOccurrences(of: "'", with: "'\\''") + "'"
+                }
+                return arg
+            }
+            let command = "docker " + quotedArgs.joined(separator: " ")
+            let (exitCode, stdout) = await sm.exec(command)
+            if exitCode == 0 {
+                showFeedback(success, isError: false)
+            } else {
+                let errMsg = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                showFeedback(errMsg.isEmpty ? "Operation failed (exit \(exitCode))" : errMsg, isError: true)
+            }
+            return
+        }
+        // Local
+        isRemoteMode = false
+        let result = await CommandRunner.shared.run("docker", arguments: args)
+        if result.succeeded {
+            showFeedback(success, isError: false)
+        } else {
+            showFeedback((result.output ?? "Operation failed").trimmingCharacters(in: .whitespacesAndNewlines), isError: true)
+        }
+    }
 
     private func runDockerCommand(_ args: [String]) async -> String? {
         // Route through SSH when connected to remote server

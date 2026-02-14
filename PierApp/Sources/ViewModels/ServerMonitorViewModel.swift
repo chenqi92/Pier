@@ -138,8 +138,11 @@ class ServerMonitorViewModel: ObservableObject {
         // Combined command for efficiency: CPU, memory, load, network in one SSH exec
         let cmd = """
         cat /proc/stat | head -1; \
-        free -m | grep -E 'Mem:|Swap:'; \
+        echo '---MEM---'; \
+        free -m | awk '/Mem:/{print "MEM "$2" "$3" "$4" "$6" "$7} /Swap:/{print "SWAP "$2" "$3}'; \
+        echo '---LOAD---'; \
         cat /proc/loadavg; \
+        echo '---NET---'; \
         cat /proc/net/dev | tail -n +3
         """
         let (ec, out) = await sm.exec(cmd)
@@ -161,14 +164,24 @@ class ServerMonitorViewModel: ObservableObject {
                     let total = parts.reduce(0, +)
                     cpuUsage = total > 0 ? ((total - idle) / total) * 100 : 0
                 }
-            } else if line.contains("Mem:") {
-                let parts = line.split(separator: " ").compactMap { Double($0) }
-                if parts.count >= 2 { memTotal = parts[0]; memUsed = parts[1] }
-            } else if line.contains("Swap:") {
-                let parts = line.split(separator: " ").compactMap { Double($0) }
-                if parts.count >= 2 { swapTotal = parts[0]; swapUsed = parts[1] }
-            } else if line.first?.isNumber == true && line.contains(".") {
-                // /proc/loadavg
+            } else if line.hasPrefix("MEM ") {
+                // Parsed from awk: MEM total used free buff/cache available
+                let parts = line.split(separator: " ")
+                if parts.count >= 3 {
+                    memTotal = Double(parts[1]) ?? 0
+                    memUsed = Double(parts[2]) ?? 0
+                }
+            } else if line.hasPrefix("SWAP ") {
+                let parts = line.split(separator: " ")
+                if parts.count >= 3 {
+                    swapTotal = Double(parts[1]) ?? 0
+                    swapUsed = Double(parts[2]) ?? 0
+                }
+            } else if line.hasPrefix("---") {
+                // Section separator, skip
+                continue
+            } else if line.first?.isNumber == true && line.contains(" ") && loadAvg1 == 0 {
+                // /proc/loadavg: "0.52 0.41 0.38 2/456 12345"
                 let parts = line.split(separator: " ")
                 if parts.count >= 3 {
                     loadAvg1 = Double(parts[0]) ?? 0
@@ -179,9 +192,9 @@ class ServerMonitorViewModel: ObservableObject {
                     let procParts = parts[3].split(separator: "/")
                     if procParts.count >= 2 { processCount = Int(procParts[1]) ?? 0 }
                 }
-            } else if line.contains(":") && !line.hasPrefix("cpu") {
+            } else if line.contains(":") && !line.hasPrefix("cpu") && !line.hasPrefix("MEM") && !line.hasPrefix("SWAP") && !line.hasPrefix("---") {
                 // Network interface line from /proc/net/dev
-                let colonIdx = line.firstIndex(of: ":")!
+                guard let colonIdx = line.firstIndex(of: ":") else { continue }
                 let data = line[line.index(after: colonIdx)...]
                 let parts = data.split(separator: " ").compactMap { UInt64($0) }
                 if parts.count >= 9 {
@@ -250,18 +263,23 @@ class ServerMonitorViewModel: ObservableObject {
 
     private func loadTopProcesses() async {
         guard let sm = serviceManager, sm.isConnected else { return }
-        let (ec, out) = await sm.exec("ps aux --sort=-%cpu 2>/dev/null | head -11 | tail -10")
+        // Use grep -v to exclude the ps command itself from results
+        let (ec, out) = await sm.exec("ps aux --sort=-%cpu 2>/dev/null | grep -v 'ps aux --sort' | head -11 | tail -10")
         guard ec == 0 else { return }
 
         topProcesses = out.split(separator: "\n").prefix(10).compactMap { line in
             let parts = line.split(separator: " ", maxSplits: 10, omittingEmptySubsequences: true)
             guard parts.count >= 11 else { return nil }
+            // parts[10] onwards is the full command (already maxSplits:10, so parts[10] contains everything remaining)
+            let cmd = String(parts[10])
+            // Skip header line if it slips through
+            guard parts[1] != "PID" else { return nil }
             return ServerProcessInfo(
                 user: String(parts[0]),
                 pid: String(parts[1]),
                 cpu: Double(parts[2]) ?? 0,
                 memory: Double(parts[3]) ?? 0,
-                command: String(parts[10])
+                command: cmd
             )
         }
     }

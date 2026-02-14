@@ -12,6 +12,30 @@ struct DockerManageView: View {
 
             Divider()
 
+            // Operation feedback banner
+            if viewModel.showOperationFeedback {
+                HStack(spacing: 6) {
+                    Image(systemName: viewModel.operationIsError ? "xmark.circle.fill" : "checkmark.circle.fill")
+                        .foregroundColor(viewModel.operationIsError ? .red : .green)
+                        .font(.caption)
+                    Text(viewModel.operationMessage)
+                        .font(.system(size: 10))
+                        .lineLimit(2)
+                    Spacer()
+                    Button(action: { viewModel.showOperationFeedback = false }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(viewModel.operationIsError ? Color.red.opacity(0.1) : Color.green.opacity(0.1))
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.3), value: viewModel.showOperationFeedback)
+            }
+
             if !viewModel.isDockerAvailable {
                 dockerUnavailableView
             } else {
@@ -53,6 +77,66 @@ struct DockerManageView: View {
                 }
             }
         }
+        // Container logs sheet
+        .sheet(isPresented: $viewModel.showContainerLogs) {
+            containerLogsSheet
+        }
+        // Container inspect sheet
+        .sheet(isPresented: $viewModel.showContainerInspect) {
+            containerInspectSheet
+        }
+    }
+
+    // MARK: - Container Logs Sheet
+
+    private var containerLogsSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "doc.text")
+                    .foregroundColor(.blue)
+                Text("Logs: \(viewModel.logsContainerName)")
+                    .font(.headline)
+                Spacer()
+                Button("Close") { viewModel.showContainerLogs = false }
+                    .buttonStyle(.borderless)
+            }
+            .padding()
+            Divider()
+            ScrollView {
+                Text(viewModel.containerLogs)
+                    .font(.system(size: 10, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(width: 600, height: 450)
+    }
+
+    // MARK: - Container Inspect Sheet
+
+    private var containerInspectSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.blue)
+                Text("Container Details")
+                    .font(.headline)
+                Spacer()
+                Button("Close") { viewModel.showContainerInspect = false }
+                    .buttonStyle(.borderless)
+            }
+            .padding()
+            Divider()
+            ScrollView {
+                Text(viewModel.containerInspectContent)
+                    .font(.system(size: 10, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(width: 600, height: 450)
     }
 
     // MARK: - Toolbar
@@ -148,6 +232,7 @@ struct DockerManageView: View {
                     Button(LS("docker.restart")) { viewModel.restartContainer(container.id) }
                     Divider()
                     Button(LS("docker.viewLogs")) { viewModel.viewContainerLogs(container.id) }
+                    Button("Inspect") { viewModel.inspectContainer(container.id) }
                     Button(LS("docker.execShell")) {
                         NotificationCenter.default.post(
                             name: .dockerExecShell,
@@ -179,6 +264,27 @@ struct DockerManageView: View {
     @State private var tagInput = ""
     @State private var tagTargetId = ""
     @State private var showTagSheet = false
+
+    // Run container configuration
+    @State private var showRunDialog = false
+    @State private var runImageName = ""       // image name:tag
+    @State private var runContainerName = ""
+    @State private var runPorts: [(host: String, container: String)] = [("", "")]
+    @State private var runEnvVars: [(key: String, value: String)] = [("", "")]
+    @State private var runVolumes: [(host: String, container: String)] = [("", "")]
+    @State private var runRestartPolicy = "no"
+    @State private var runCommand = ""
+
+    private func openRunDialog(imageRef: String) {
+        runImageName = imageRef
+        runContainerName = ""
+        runPorts = [("", "")]
+        runEnvVars = [("", "")]
+        runVolumes = [("", "")]
+        runRestartPolicy = "no"
+        runCommand = ""
+        showRunDialog = true
+    }
 
     private var imageListView: some View {
         VStack(spacing: 0) {
@@ -245,12 +351,16 @@ struct DockerManageView: View {
                         Spacer()
 
                         // Inline action buttons
-                        Button(action: { viewModel.runImage(image.id) }) {
+                        Button(action: {
+                            let ref = image.repository == "<none>" ? image.id : "\(image.repository):\(image.tag)"
+                            openRunDialog(imageRef: ref)
+                        }) {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 9))
+                                .foregroundColor(.green)
                         }
                         .buttonStyle(.borderless)
-                        .help("Run container")
+                        .help("Run container...")
 
                         Button(action: { viewModel.removeImage(image.id) }) {
                             Image(systemName: "trash")
@@ -262,7 +372,10 @@ struct DockerManageView: View {
                     }
                     .padding(.vertical, 2)
                     .contextMenu {
-                        Button("Run Container") { viewModel.runImage(image.id) }
+                        Button("Run Container...") {
+                            let ref = image.repository == "<none>" ? image.id : "\(image.repository):\(image.tag)"
+                            openRunDialog(imageRef: ref)
+                        }
                         Divider()
                         Button("Inspect") {
                             Task {
@@ -341,6 +454,215 @@ struct DockerManageView: View {
             }
             .padding()
             .frame(width: 300)
+        }
+        // Run container dialog
+        .sheet(isPresented: $showRunDialog) {
+            runContainerDialog
+        }
+    }
+
+    // MARK: - Run Container Dialog
+
+    private var runContainerDialog: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "play.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Run Container")
+                        .font(.headline)
+                    Text(runImageName)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+            .padding()
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    // Container name
+                    dialogSection(title: "Container Name", icon: "tag") {
+                        TextField("e.g. my-app", text: $runContainerName)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11))
+                    }
+
+                    // Port mappings
+                    dialogSection(title: "Port Mappings", icon: "network") {
+                        ForEach(runPorts.indices, id: \.self) { i in
+                            HStack(spacing: 4) {
+                                TextField("Host", text: Binding(
+                                    get: { runPorts[i].host },
+                                    set: { runPorts[i].host = $0 }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 10))
+                                .frame(width: 70)
+                                Text(":")
+                                    .foregroundColor(.secondary)
+                                TextField("Container", text: Binding(
+                                    get: { runPorts[i].container },
+                                    set: { runPorts[i].container = $0 }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 10))
+                                .frame(width: 70)
+                                if runPorts.count > 1 {
+                                    Button(action: { runPorts.remove(at: i) }) {
+                                        Image(systemName: "minus.circle.fill")
+                                            .foregroundColor(.red)
+                                            .font(.system(size: 11))
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                        Button(action: { runPorts.append(("", "")) }) {
+                            Label("Add Port", systemImage: "plus.circle")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
+                    // Environment variables
+                    dialogSection(title: "Environment Variables", icon: "list.bullet.rectangle") {
+                        ForEach(runEnvVars.indices, id: \.self) { i in
+                            HStack(spacing: 4) {
+                                TextField("KEY", text: Binding(
+                                    get: { runEnvVars[i].key },
+                                    set: { runEnvVars[i].key = $0 }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 10))
+                                Text("=")
+                                    .foregroundColor(.secondary)
+                                TextField("value", text: Binding(
+                                    get: { runEnvVars[i].value },
+                                    set: { runEnvVars[i].value = $0 }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 10))
+                                if runEnvVars.count > 1 {
+                                    Button(action: { runEnvVars.remove(at: i) }) {
+                                        Image(systemName: "minus.circle.fill")
+                                            .foregroundColor(.red)
+                                            .font(.system(size: 11))
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                        Button(action: { runEnvVars.append(("", "")) }) {
+                            Label("Add Variable", systemImage: "plus.circle")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
+                    // Volume mounts
+                    dialogSection(title: "Volume Mounts", icon: "externaldrive") {
+                        ForEach(runVolumes.indices, id: \.self) { i in
+                            HStack(spacing: 4) {
+                                TextField("Host path", text: Binding(
+                                    get: { runVolumes[i].host },
+                                    set: { runVolumes[i].host = $0 }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 10))
+                                Text("→")
+                                    .foregroundColor(.secondary)
+                                TextField("Container path", text: Binding(
+                                    get: { runVolumes[i].container },
+                                    set: { runVolumes[i].container = $0 }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 10))
+                                if runVolumes.count > 1 {
+                                    Button(action: { runVolumes.remove(at: i) }) {
+                                        Image(systemName: "minus.circle.fill")
+                                            .foregroundColor(.red)
+                                            .font(.system(size: 11))
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                        Button(action: { runVolumes.append(("", "")) }) {
+                            Label("Add Volume", systemImage: "plus.circle")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
+                    // Restart policy
+                    dialogSection(title: "Restart Policy", icon: "arrow.counterclockwise") {
+                        Picker("", selection: $runRestartPolicy) {
+                            Text("No").tag("no")
+                            Text("Always").tag("always")
+                            Text("On Failure").tag("on-failure")
+                            Text("Unless Stopped").tag("unless-stopped")
+                        }
+                        .pickerStyle(.segmented)
+                        .font(.system(size: 10))
+                    }
+
+                    // Command override
+                    dialogSection(title: "Command (optional)", icon: "terminal") {
+                        TextField("e.g. /bin/sh", text: $runCommand)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                }
+                .padding()
+            }
+
+            Divider()
+
+            // Footer buttons
+            HStack {
+                Button("Cancel") {
+                    showRunDialog = false
+                }
+
+                Spacer()
+
+                Button(action: {
+                    viewModel.runImageWithConfig(
+                        image: runImageName,
+                        containerName: runContainerName,
+                        ports: runPorts.filter { !$0.host.isEmpty || !$0.container.isEmpty },
+                        envVars: runEnvVars.filter { !$0.key.isEmpty },
+                        volumes: runVolumes.filter { !$0.host.isEmpty || !$0.container.isEmpty },
+                        restartPolicy: runRestartPolicy,
+                        command: runCommand
+                    )
+                    showRunDialog = false
+                }) {
+                    Label("Create & Run", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
+            .padding()
+        }
+        .frame(width: 450, height: 550)
+    }
+
+    private func dialogSection<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                    .foregroundColor(.blue)
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            content()
         }
     }
 
