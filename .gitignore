@@ -1,5 +1,8 @@
 # Pier Terminal macOS App
 
+## Agent workflows (local only)
+.agent/
+
 ## Build artifacts
 .build/
 pier-core/target/
