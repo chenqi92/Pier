@@ -74,7 +74,7 @@ struct LeftPanelView: View {
     }
 }
 
-// MARK: - Server List Panel (inline, not a sheet)
+// MARK: - Server List Panel
 
 struct ServerListPanelView: View {
     @ObservedObject var serviceManager: RemoteServiceManager
@@ -88,25 +88,33 @@ struct ServerListPanelView: View {
     @State private var newGroupName = ""
     @State private var renamingGroup: ServerGroup?
     @State private var renameGroupName = ""
+    @State private var searchText = ""
+
+    /// Drag state: the profile being dragged
+    @State private var draggingProfileId: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
-            if serviceManager.savedProfiles.isEmpty && serviceManager.savedGroups.isEmpty {
+            // ── Top header (like file browser) ──
+            headerBar
+
+            Divider()
+
+            // ── Search bar ──
+            searchBar
+
+            // ── Server tree ──
+            if filteredProfiles.isEmpty && serviceManager.savedGroups.isEmpty {
                 emptyState
             } else {
                 serverTree
             }
 
-            // Active tunnels
+            // ── Active tunnels ──
             if serviceManager.isConnected && !serviceManager.activeTunnels.isEmpty {
                 Divider()
                 tunnelStatus
             }
-
-            Divider()
-
-            // Bottom toolbar
-            bottomBar
         }
         .sheet(isPresented: $showingEditor) {
             ProfileEditorView(
@@ -128,7 +136,9 @@ struct ServerListPanelView: View {
             Button(LS("conn.cancel"), role: .cancel) { newGroupName = "" }
             Button(LS("conn.save")) {
                 if !newGroupName.isEmpty {
-                    serviceManager.saveGroup(ServerGroup(name: newGroupName))
+                    let group = ServerGroup(name: newGroupName)
+                    serviceManager.saveGroup(group)
+                    expandedGroups.insert(group.id)
                     newGroupName = ""
                 }
             }
@@ -148,8 +158,91 @@ struct ServerListPanelView: View {
             }
         }
         .onAppear {
-            // Expand all groups by default
             expandedGroups = Set(serviceManager.savedGroups.map(\.id))
+        }
+    }
+
+    // MARK: - Computed
+
+    /// Profiles filtered by search text
+    private var filteredProfiles: [ConnectionProfile] {
+        if searchText.isEmpty {
+            return serviceManager.savedProfiles
+        }
+        let query = searchText.lowercased()
+        return serviceManager.savedProfiles.filter {
+            $0.name.lowercased().contains(query) ||
+            $0.host.lowercased().contains(query) ||
+            $0.username.lowercased().contains(query)
+        }
+    }
+
+    // MARK: - Header Bar (like file browser)
+
+    private var headerBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "server.rack")
+                .foregroundColor(.accentColor)
+                .font(.system(size: 11))
+
+            Text(LS("leftPanel.servers"))
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+
+            Spacer()
+
+            // Add group button
+            Button(action: {
+                newGroupName = ""
+                showingGroupNameAlert = true
+            }) {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .help(LS("server.newGroup"))
+
+            // Add server button
+            Button(action: addNew) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .help(LS("conn.addServer"))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+    }
+
+    // MARK: - Search Bar
+
+    private var searchBar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+                .font(.system(size: 10))
+
+            TextField(LS("server.searchPlaceholder"), text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+
+            if !searchText.isEmpty {
+                Button(action: { searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 10))
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.3))
+                .frame(height: 0.5)
         }
     }
 
@@ -157,17 +250,26 @@ struct ServerListPanelView: View {
 
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "server.rack")
-                .font(.system(size: 32))
-                .foregroundColor(.secondary.opacity(0.5))
-            Text(LS("conn.noServers"))
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-            Text(LS("conn.addServerHint"))
-                .font(.system(size: 10))
-                .foregroundColor(.secondary.opacity(0.6))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
+            if searchText.isEmpty {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 32))
+                    .foregroundColor(.secondary.opacity(0.5))
+                Text(LS("conn.noServers"))
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Text(LS("conn.addServerHint"))
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 28))
+                    .foregroundColor(.secondary.opacity(0.4))
+                Text(LS("server.noResults"))
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -177,19 +279,26 @@ struct ServerListPanelView: View {
     private var serverTree: some View {
         ScrollView {
             LazyVStack(spacing: 1) {
-                // Groups with their servers
-                ForEach(serviceManager.savedGroups) { group in
-                    groupSection(group)
-                }
-
-                // Ungrouped servers
-                let ungrouped = serviceManager.savedProfiles.filter { $0.groupId == nil }
-                if !ungrouped.isEmpty {
-                    if !serviceManager.savedGroups.isEmpty {
-                        ungroupedHeader
-                    }
-                    ForEach(ungrouped) { profile in
+                // When searching, show flat results
+                if !searchText.isEmpty {
+                    ForEach(filteredProfiles) { profile in
                         serverRow(profile)
+                    }
+                } else {
+                    // Groups with their servers
+                    ForEach(serviceManager.savedGroups) { group in
+                        groupSection(group)
+                    }
+
+                    // Ungrouped servers
+                    let ungrouped = serviceManager.savedProfiles.filter { $0.groupId == nil }
+                    if !ungrouped.isEmpty {
+                        if !serviceManager.savedGroups.isEmpty {
+                            ungroupedHeader
+                        }
+                        ForEach(ungrouped) { profile in
+                            serverRow(profile)
+                        }
                     }
                 }
             }
@@ -202,7 +311,7 @@ struct ServerListPanelView: View {
         let groupProfiles = serviceManager.savedProfiles.filter { $0.groupId == group.id }
 
         return VStack(spacing: 0) {
-            // Group header
+            // Group header — also a drop target
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.15)) {
                     if isExpanded {
@@ -233,6 +342,9 @@ struct ServerListPanelView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onDrop(of: [.text], isTargeted: nil) { providers in
+                handleDrop(providers: providers, toGroupId: group.id)
+            }
             .contextMenu {
                 Button(action: {
                     renameGroupName = group.name
@@ -275,6 +387,9 @@ struct ServerListPanelView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
+        .onDrop(of: [.text], isTargeted: nil) { providers in
+            handleDrop(providers: providers, toGroupId: nil)
+        }
     }
 
     private func serverRow(_ profile: ConnectionProfile, indented: Bool = false) -> some View {
@@ -291,6 +406,10 @@ struct ServerListPanelView: View {
             onMoveToGroup: { groupId in serviceManager.moveProfile(profile, toGroup: groupId) }
         )
         .padding(.leading, indented ? 12 : 0)
+        .onDrag {
+            draggingProfileId = profile.id
+            return NSItemProvider(object: profile.id.uuidString as NSString)
+        }
     }
 
     // MARK: - Tunnel Status
@@ -323,54 +442,22 @@ struct ServerListPanelView: View {
         .padding(.bottom, 6)
     }
 
-    // MARK: - Bottom Bar
+    // MARK: - Drag & Drop
 
-    private var bottomBar: some View {
-        HStack(spacing: 6) {
-            Button(action: addNew) {
-                Image(systemName: "plus")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.borderless)
-            .help(LS("conn.addServer"))
-
-            Button(action: {
-                newGroupName = ""
-                showingGroupNameAlert = true
-            }) {
-                Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.borderless)
-            .help(LS("server.newGroup"))
-
-            Spacer()
-
-            // Connection status indicator
-            if serviceManager.isConnected {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 5, height: 5)
-                    Text(serviceManager.connectedHost)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+    private func handleDrop(providers: [NSItemProvider], toGroupId: UUID?) -> Bool {
+        guard let provider = providers.first else { return false }
+        provider.loadItem(forTypeIdentifier: "public.text", options: nil) { data, _ in
+            guard let data = data as? Data,
+                  let idString = String(data: data, encoding: .utf8),
+                  let profileId = UUID(uuidString: idString) else { return }
+            DispatchQueue.main.async {
+                if let profile = serviceManager.savedProfiles.first(where: { $0.id == profileId }) {
+                    serviceManager.moveProfile(profile, toGroup: toGroupId)
                 }
-            } else if serviceManager.isConnecting {
-                HStack(spacing: 4) {
-                    ProgressView()
-                        .scaleEffect(0.4)
-                        .frame(width: 10, height: 10)
-                    Text(LS("ssh.connecting"))
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                }
+                draggingProfileId = nil
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        return true
     }
 
     // MARK: - Actions
@@ -416,12 +503,7 @@ struct ServerListPanelView: View {
             sshArgs: args
         )
 
-        // For password auth, auto-type the stored password when the prompt appears
-        if let password = password, !password.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak terminalViewModel] in
-                terminalViewModel?.sendInput(password + "\n")
-            }
-        }
+        // Password is auto-typed by TerminalNSView when it detects the SSH prompt
     }
 
     private func isProfileConnected(_ profile: ConnectionProfile) -> Bool {

@@ -175,6 +175,9 @@
 "ssh.disconnect" = "断开连接";
 "ssh.detectingServices" = "正在检测服务...";
 "ssh.connectFailed" = "连接失败";
+"ssh.authFailed" = "认证失败";
+"ssh.authFailedMessage" = "密码被拒绝，请输入正确的密码重试。";
+"ssh.retry" = "重试";
 "ssh.servicesDetected %lld %lld" = "发现 %lld 个服务（%lld 个运行中）";
 "ssh.serviceDetectionTitle" = "服务检测";
 "ssh.serviceDetectionDesc" = "通过连接管理器连接 SSH 服务器，自动检测 MySQL、Redis、Docker 等服务。";
@@ -219,6 +222,8 @@
 "server.moveToGroup" = "移动到分组";
 "server.group" = "分组";
 "server.groupName" = "分组名称";
+"server.searchPlaceholder" = "搜索服务器...";
+"server.noResults" = "没有匹配结果";
 
 "tunnel.active" = "活动隧道";
 "tunnel.forwarding" = "转发中";

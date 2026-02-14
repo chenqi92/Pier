@@ -58,6 +58,7 @@ class TerminalViewModel: ObservableObject {
         let session = TerminalSessionInfo(shellPath: shell, isSSH: isSSH, title: title)
         session.sshProgram = sshProgram
         session.sshArgs = sshArgs
+        session.pendingSSHPassword = preloadedPassword
 
         // Create RemoteServiceManager synchronously so it's immediately
         // available for SwiftUI observation (right panel binding)
@@ -140,5 +141,6 @@ extension Notification.Name {
     static let terminalInput = Notification.Name("pier.terminalInput")
     static let terminalSSHDetected = Notification.Name("pier.terminalSSHDetected")
     static let terminalSSHExited = Notification.Name("pier.terminalSSHExited")
+    static let terminalSSHAuthFailed = Notification.Name("pier.terminalSSHAuthFailed")
     static let terminalTabClosed = Notification.Name("pier.terminalTabClosed")
 }

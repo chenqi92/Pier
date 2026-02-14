@@ -39,6 +39,8 @@ class TerminalSessionInfo: Identifiable, ObservableObject {
     var sshProgram: String?
     /// For direct SSH PTY: the arguments (e.g. ["-o", "StrictHostKeyChecking=no", "user@host", "-p", "22"])
     var sshArgs: [String]?
+    /// Password to auto-type when SSH prompts for it. Consumed once used.
+    var pendingSSHPassword: String?
 
     init(shellPath: String = "/bin/zsh", isSSH: Bool = false, title: String = "Local") {
         self.shellPath = shellPath

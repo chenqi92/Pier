@@ -24,6 +24,9 @@ struct MainView: View {
     @State private var leftPanelWidth: CGFloat = 250
     @State private var rightPanelWidth: CGFloat = 380
     @State private var showNewTabChooser = false
+    @State private var showAuthFailedDialog = false
+    @State private var retryPassword = ""
+    @State private var authFailedSessionId: UUID?
 
     var body: some View {
         HSplitView {
@@ -75,6 +78,37 @@ struct MainView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .showNewTabChooser)) { _ in
             showNewTabChooser = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalSSHAuthFailed)) { notification in
+            guard let sessionId = notification.object as? UUID else { return }
+            authFailedSessionId = sessionId
+            retryPassword = ""
+            showAuthFailedDialog = true
+        }
+        .alert(LS("ssh.authFailed"), isPresented: $showAuthFailedDialog) {
+            SecureField(LS("conn.password"), text: $retryPassword)
+            Button(LS("conn.cancel"), role: .cancel) {
+                retryPassword = ""
+                authFailedSessionId = nil
+            }
+            Button(LS("ssh.retry")) {
+                guard let sessionId = authFailedSessionId, !retryPassword.isEmpty else { return }
+                // Send the new password to the terminal
+                if let session = terminalViewModel.sessions[sessionId] {
+                    // Update Keychain with new password
+                    if let profile = session.connectedProfile {
+                        try? KeychainService.shared.save(key: "ssh_\(profile.id.uuidString)", value: retryPassword)
+                    }
+                    // Store for auto-input on next prompt
+                    session.pendingSSHPassword = retryPassword
+                }
+                // Type into terminal directly
+                terminalViewModel.sendInput(retryPassword + "\n")
+                retryPassword = ""
+                authFailedSessionId = nil
+            }
+        } message: {
+            Text(LS("ssh.authFailedMessage"))
         }
     }
 
@@ -232,12 +266,7 @@ struct NewTabChooserView: View {
             sshArgs: args
         )
 
-        // For password auth, auto-type the stored password when the prompt appears
-        if let password = password, !password.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                self.terminalViewModel.sendInput(password + "\n")
-            }
-        }
+        // Password is auto-typed by TerminalNSView when it detects the SSH prompt
 
         dismiss()
     }

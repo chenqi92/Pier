@@ -175,6 +175,9 @@
 "ssh.disconnect" = "Disconnect";
 "ssh.detectingServices" = "Detecting services...";
 "ssh.connectFailed" = "Connection failed";
+"ssh.authFailed" = "Authentication Failed";
+"ssh.authFailedMessage" = "The password was rejected. Enter the correct password to retry.";
+"ssh.retry" = "Retry";
 "ssh.servicesDetected %lld %lld" = "%lld services found (%lld running)";
 "ssh.serviceDetectionTitle" = "Service Detection";
 "ssh.serviceDetectionDesc" = "Connect to an SSH server via Connection Manager to auto-detect services like MySQL, Redis, and Docker.";
@@ -219,6 +222,8 @@
 "server.moveToGroup" = "Move to Group";
 "server.group" = "Group";
 "server.groupName" = "Group Name";
+"server.searchPlaceholder" = "Search servers...";
+"server.noResults" = "No matches found";
 
 "tunnel.active" = "Active Tunnels";
 "tunnel.forwarding" = "Forwarding";

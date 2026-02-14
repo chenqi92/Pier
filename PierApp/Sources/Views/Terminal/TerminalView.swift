@@ -37,7 +37,54 @@ struct TerminalView: NSViewRepresentable {
 
 /// Custom NSScrollView that forwards keyboard events to the terminal document view
 /// instead of consuming them for scroll behavior.
+/// Also observes viewport size changes to trigger PTY resize when panels are dragged.
 class TerminalScrollView: NSScrollView {
+
+    private var boundsObserver: NSObjectProtocol?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupBoundsObservation()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupBoundsObservation()
+    }
+
+    private func setupBoundsObservation() {
+        // Observe clip view bounds changes so we can resize the PTY
+        // when the user drags panel dividers
+        contentView.postsBoundsChangedNotifications = true
+        boundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: contentView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleViewportResize()
+        }
+    }
+
+    deinit {
+        if let observer = boundsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    /// When the scroll view itself is resized (HSplitView divider dragged),
+    /// update the document view to match the new visible area.
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        handleViewportResize()
+    }
+
+    private func handleViewportResize() {
+        guard let terminalView = documentView as? TerminalNSView else { return }
+        let visibleSize = contentView.bounds.size
+        if visibleSize.width > 1 && visibleSize.height > 1 {
+            terminalView.handleViewportSizeChanged(visibleSize)
+        }
+    }
 
     override func keyDown(with event: NSEvent) {
         // Forward all keyboard events to the terminal view
@@ -82,6 +129,14 @@ class TerminalNSView: NSView {
     private var readTimer: Timer?
     private var blinkTimer: Timer?
     private var currentSessionId: UUID?
+    /// Weak reference to current session for SSH password auto-input
+    private weak var currentSession: TerminalSessionInfo?
+    /// Accumulates recent terminal output (last ~512 chars) for SSH prompt detection
+    private var sshOutputAccumulator = ""
+    /// Whether SSH password has already been auto-typed for this session
+    private var sshPasswordAutoTyped = false
+    /// Whether SSH auth failure has been reported for this session
+    private var sshAuthFailureReported = false
 
     // MARK: - PTY Cache (persists across tab switches)
 
@@ -298,6 +353,10 @@ class TerminalNSView: NSView {
         stopTimers()
 
         currentSessionId = session.id
+        currentSession = session
+        sshOutputAccumulator = ""
+        sshPasswordAutoTyped = false
+        sshAuthFailureReported = false
 
         // ── Try to restore from cache ──
         if let cached = TerminalNSView.ptyCache.removeValue(forKey: session.id) {
@@ -489,11 +548,60 @@ class TerminalNSView: NSView {
             needsDisplay = true
             // Mark that we need to check CWD once output settles
             pendingCwdCheck = true
+
+            // SSH prompt detection: accumulate output and check for password prompt / auth failure
+            if let session = currentSession, session.isSSH {
+                if let chunk = String(bytes: data, encoding: .utf8) {
+                    sshOutputAccumulator += chunk
+                    // Keep buffer manageable (last 1024 chars)
+                    if sshOutputAccumulator.count > 1024 {
+                        sshOutputAccumulator = String(sshOutputAccumulator.suffix(512))
+                    }
+                    checkSSHPrompts()
+                }
+            }
         } else if pendingCwdCheck {
             // Trailing-edge: output just stopped → prompt is fully rendered
             pendingCwdCheck = false
             detectPromptCwd()
             detectSSHExit()
+        }
+    }
+
+    /// Check accumulated SSH output for password prompts and auth failures.
+    private func checkSSHPrompts() {
+        guard let handle = terminalHandle else { return }
+        let lower = sshOutputAccumulator.lowercased()
+
+        // 1. Password prompt detection — auto-type immediately
+        if !sshPasswordAutoTyped {
+            // SSH password prompts end with "password:" or "password: " (with optional leading text)
+            if lower.hasSuffix("password: ") || lower.hasSuffix("password:") {
+                if let password = currentSession?.pendingSSHPassword, !password.isEmpty {
+                    // Auto-type the password
+                    let input = password + "\n"
+                    let bytes = Array(input.utf8)
+                    pier_terminal_write(handle, bytes, UInt(bytes.count))
+                    sshPasswordAutoTyped = true
+                    // Consume the password from session
+                    currentSession?.pendingSSHPassword = nil
+                    // Clear accumulator to avoid re-triggering
+                    sshOutputAccumulator = ""
+                }
+            }
+        }
+
+        // 2. Auth failure detection — prompt user for new password
+        if !sshAuthFailureReported {
+            if lower.contains("permission denied") || lower.contains("authentication failed") {
+                sshAuthFailureReported = true
+                if let sessionId = currentSessionId {
+                    NotificationCenter.default.post(
+                        name: .terminalSSHAuthFailed,
+                        object: sessionId
+                    )
+                }
+            }
         }
     }
 
@@ -1339,25 +1447,52 @@ class TerminalNSView: NSView {
                 ptyRows = newRows
                 pier_terminal_resize(handle, UInt16(newCols), UInt16(newRows))
 
-                // Resize screen buffer to match new dimensions
-                while screenBuffer.count < ptyRows {
-                    screenBuffer.append(Array(repeating: Character(" "), count: ptyCols))
-                }
-                while screenBuffer.count > ptyRows {
-                    let overflow = screenBuffer.removeFirst()
-                    scrollbackBuffer.append(overflow)
-                }
-                for i in 0..<screenBuffer.count {
-                    if screenBuffer[i].count < ptyCols {
-                        screenBuffer[i].append(contentsOf: Array(repeating: Character(" "), count: ptyCols - screenBuffer[i].count))
-                    } else if screenBuffer[i].count > ptyCols {
-                        screenBuffer[i] = Array(screenBuffer[i].prefix(ptyCols))
-                    }
-                }
-                cursorX = min(cursorX, ptyCols - 1)
-                cursorY = min(cursorY, ptyRows - 1)
+                resizeScreenBuffer()
             }
         }
+    }
+
+    /// Called by TerminalScrollView when the viewport size changes
+    /// (e.g., HSplitView divider dragged, window resized).
+    func handleViewportSizeChanged(_ visibleSize: NSSize) {
+        guard let handle = terminalHandle else { return }
+
+        let newCols = max(1, Int(visibleSize.width / cellWidth))
+        let newRows = max(1, Int(visibleSize.height / cellHeight))
+
+        guard newCols != ptyCols || newRows != ptyRows else { return }
+
+        ptyCols = newCols
+        ptyRows = newRows
+        pier_terminal_resize(handle, UInt16(newCols), UInt16(newRows))
+        resizeScreenBuffer()
+
+        // Update document frame to fill visible area
+        let totalLines = scrollbackBuffer.count + screenBuffer.count
+        let requiredHeight = max(visibleSize.height, CGFloat(totalLines) * cellHeight)
+        setFrameSize(NSSize(width: visibleSize.width, height: requiredHeight))
+        needsDisplay = true
+    }
+
+    /// Resize the screen buffer to match current ptyCols/ptyRows.
+    private func resizeScreenBuffer() {
+        // Resize screen buffer to match new dimensions
+        while screenBuffer.count < ptyRows {
+            screenBuffer.append(Array(repeating: Character(" "), count: ptyCols))
+        }
+        while screenBuffer.count > ptyRows {
+            let overflow = screenBuffer.removeFirst()
+            scrollbackBuffer.append(overflow)
+        }
+        for i in 0..<screenBuffer.count {
+            if screenBuffer[i].count < ptyCols {
+                screenBuffer[i].append(contentsOf: Array(repeating: Character(" "), count: ptyCols - screenBuffer[i].count))
+            } else if screenBuffer[i].count > ptyCols {
+                screenBuffer[i] = Array(screenBuffer[i].prefix(ptyCols))
+            }
+        }
+        cursorX = min(cursorX, ptyCols - 1)
+        cursorY = min(cursorY, ptyRows - 1)
     }
 
     // MARK: - Cleanup
