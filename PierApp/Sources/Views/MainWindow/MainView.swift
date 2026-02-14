@@ -11,11 +11,14 @@ import SwiftUI
 struct MainView: View {
     @StateObject private var fileViewModel = FileViewModel()
     @StateObject private var terminalViewModel = TerminalViewModel()
+    @EnvironmentObject var serviceManager: RemoteServiceManager
 
     @State private var showLeftPanel = true
     @State private var showRightPanel = true
     @State private var leftPanelWidth: CGFloat = 250
     @State private var rightPanelWidth: CGFloat = 300
+    @State private var showNewTabChooser = false
+    @State private var showConnectionManager = false
 
     var body: some View {
         HSplitView {
@@ -47,12 +50,12 @@ struct MainView: View {
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: { terminalViewModel.addNewTab() }) {
+                Button(action: { showNewTabChooser = true }) {
                     Image(systemName: "plus")
                 }
                 .help(String(localized: "toolbar.newTerminalTab"))
 
-                Button(action: {}) {
+                Button(action: { showConnectionManager = true }) {
                     Image(systemName: "network")
                 }
                 .help(String(localized: "toolbar.sshConnectionManager"))
@@ -64,6 +67,14 @@ struct MainView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 500)
+        .sheet(isPresented: $showNewTabChooser) {
+            NewTabChooserView(terminalViewModel: terminalViewModel)
+                .environmentObject(serviceManager)
+        }
+        .sheet(isPresented: $showConnectionManager) {
+            ConnectionManagerView()
+                .environmentObject(serviceManager)
+        }
     }
 
     /// Handle files dropped onto the terminal area.
@@ -85,6 +96,123 @@ struct MainView: View {
         return true
     }
 }
+
+// MARK: - New Tab Chooser
+
+/// Sheet shown when the user presses "+" to create a new tab.
+/// Offers a quick local terminal option and a list of saved SSH profiles.
+struct NewTabChooserView: View {
+    @ObservedObject var terminalViewModel: TerminalViewModel
+    @EnvironmentObject var serviceManager: RemoteServiceManager
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("conn.newSession")
+                    .font(.headline)
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding()
+
+            Divider()
+
+            // Quick actions
+            VStack(spacing: 8) {
+                Button(action: openLocalTerminal) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "terminal")
+                            .font(.title2)
+                            .frame(width: 32)
+                            .foregroundColor(.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("conn.localTerminal")
+                                .font(.body)
+                                .fontWeight(.medium)
+                            Text("conn.localTerminalDesc")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+
+            // Saved SSH connections
+            if !serviceManager.savedProfiles.isEmpty {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("conn.savedConnections")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+
+                    List {
+                        ForEach(serviceManager.savedProfiles) { profile in
+                            Button(action: { openSSHTab(profile) }) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "network")
+                                        .foregroundColor(.green)
+                                        .frame(width: 20)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(profile.name.isEmpty ? profile.host : profile.name)
+                                            .font(.body)
+                                            .fontWeight(.medium)
+                                        Text("\(profile.username)@\(profile.host):\(profile.port)")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .listStyle(.inset)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: 380, height: 420)
+    }
+
+    private func openLocalTerminal() {
+        terminalViewModel.addNewTab()
+        dismiss()
+    }
+
+    private func openSSHTab(_ profile: ConnectionProfile) {
+        let sshCommand = "ssh \(profile.username)@\(profile.host) -p \(profile.port)"
+        let title = profile.name.isEmpty ? profile.host : profile.name
+        terminalViewModel.addNewTab(title: title, shell: "/bin/zsh", isSSH: true)
+        // Send the SSH command to the new terminal after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            terminalViewModel.sendInput(sshCommand + "\n")
+        }
+        dismiss()
+    }
+}
+
 
 // MARK: - Terminal Container
 

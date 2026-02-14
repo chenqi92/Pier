@@ -101,6 +101,10 @@ struct LocalFileView: View {
                 }
         }
         .listStyle(.sidebar)
+        .transaction { transaction in
+            // Disable the default SwiftUI "drop-in" animation for tree expand/collapse
+            transaction.animation = nil
+        }
     }
 
     // MARK: - Context Menu

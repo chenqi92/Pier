@@ -18,12 +18,24 @@ struct TerminalView: NSViewRepresentable {
         let terminalView = TerminalNSView()
         scrollView.documentView = terminalView
 
+        // Ensure the terminal view becomes first responder so it receives keyboard input
+        DispatchQueue.main.async {
+            terminalView.window?.makeFirstResponder(terminalView)
+        }
+
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let terminalView = scrollView.documentView as? TerminalNSView else { return }
         terminalView.updateSession(session)
+
+        // Re-activate first responder when switching tabs
+        DispatchQueue.main.async {
+            if terminalView.window?.firstResponder !== terminalView {
+                terminalView.window?.makeFirstResponder(terminalView)
+            }
+        }
     }
 }
 
@@ -355,6 +367,9 @@ class TerminalNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // Ensure we're first responder on click
+        window?.makeFirstResponder(self)
+
         let point = convert(event.locationInWindow, from: nil)
 
         // ⌘+click on URL

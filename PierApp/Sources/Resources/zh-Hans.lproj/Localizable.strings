@@ -414,3 +414,10 @@
 "release.signing" = "代码签名";
 "release.notarization" = "公证";
 "release.packaging" = "DMG 打包";
+
+// MARK: - New Tab Chooser
+
+"conn.newSession" = "新建会话";
+"conn.localTerminal" = "本地终端";
+"conn.localTerminalDesc" = "打开一个新的本地 Shell 会话";
+"conn.savedConnections" = "已保存的连接";

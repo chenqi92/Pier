@@ -414,3 +414,10 @@
 "release.signing" = "Code Signing";
 "release.notarization" = "Notarization";
 "release.packaging" = "DMG Packaging";
+
+// MARK: - New Tab Chooser
+
+"conn.newSession" = "New Session";
+"conn.localTerminal" = "Local Terminal";
+"conn.localTerminalDesc" = "Open a new local shell session";
+"conn.savedConnections" = "Saved Connections";
