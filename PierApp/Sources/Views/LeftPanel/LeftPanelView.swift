@@ -81,15 +81,20 @@ struct ServerListPanelView: View {
     @ObservedObject var terminalViewModel: TerminalViewModel
 
     @State private var showingEditor = false
-    @State private var editingProfile: ConnectionProfile?
+    @State private var editingProfile: ConnectionProfile = .default
     @State private var passwordField = ""
+    @State private var expandedGroups: Set<UUID> = []
+    @State private var showingGroupNameAlert = false
+    @State private var newGroupName = ""
+    @State private var renamingGroup: ServerGroup?
+    @State private var renameGroupName = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            if serviceManager.savedProfiles.isEmpty {
+            if serviceManager.savedProfiles.isEmpty && serviceManager.savedGroups.isEmpty {
                 emptyState
             } else {
-                serverList
+                serverTree
             }
 
             // Active tunnels
@@ -104,20 +109,47 @@ struct ServerListPanelView: View {
             bottomBar
         }
         .sheet(isPresented: $showingEditor) {
-            if let profile = editingProfile {
-                ProfileEditorView(
-                    profile: profile,
-                    password: passwordField,
-                    onSave: { updated, password in
-                        serviceManager.saveProfile(updated)
-                        if !password.isEmpty {
-                            serviceManager.savePassword(password, for: updated)
-                        }
-                        showingEditor = false
-                    },
-                    onCancel: { showingEditor = false }
-                )
+            ProfileEditorView(
+                profile: editingProfile,
+                password: passwordField,
+                groups: serviceManager.savedGroups,
+                onSave: { updated, password in
+                    serviceManager.saveProfile(updated)
+                    if !password.isEmpty {
+                        serviceManager.savePassword(password, for: updated)
+                    }
+                    showingEditor = false
+                },
+                onCancel: { showingEditor = false }
+            )
+        }
+        .alert(LS("server.newGroup"), isPresented: $showingGroupNameAlert) {
+            TextField(LS("server.groupName"), text: $newGroupName)
+            Button(LS("conn.cancel"), role: .cancel) { newGroupName = "" }
+            Button(LS("conn.save")) {
+                if !newGroupName.isEmpty {
+                    serviceManager.saveGroup(ServerGroup(name: newGroupName))
+                    newGroupName = ""
+                }
             }
+        }
+        .alert(LS("server.renameGroup"), isPresented: Binding(
+            get: { renamingGroup != nil },
+            set: { if !$0 { renamingGroup = nil } }
+        )) {
+            TextField(LS("server.groupName"), text: $renameGroupName)
+            Button(LS("conn.cancel"), role: .cancel) { renamingGroup = nil }
+            Button(LS("conn.save")) {
+                if var group = renamingGroup, !renameGroupName.isEmpty {
+                    group.name = renameGroupName
+                    serviceManager.saveGroup(group)
+                    renamingGroup = nil
+                }
+            }
+        }
+        .onAppear {
+            // Expand all groups by default
+            expandedGroups = Set(serviceManager.savedGroups.map(\.id))
         }
     }
 
@@ -140,26 +172,125 @@ struct ServerListPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Server List
+    // MARK: - Server Tree
 
-    private var serverList: some View {
+    private var serverTree: some View {
         ScrollView {
             LazyVStack(spacing: 1) {
-                ForEach(serviceManager.savedProfiles) { profile in
-                    ServerRowView(
-                        profile: profile,
-                        isConnected: isProfileConnected(profile),
-                        isConnecting: serviceManager.isConnecting,
-                        anyConnected: serviceManager.isConnected,
-                        onConnect: { connectProfile(profile) },
-                        onDisconnect: { serviceManager.disconnect() },
-                        onEdit: { editProfile(profile) },
-                        onDelete: { serviceManager.deleteProfile(profile) }
-                    )
+                // Groups with their servers
+                ForEach(serviceManager.savedGroups) { group in
+                    groupSection(group)
+                }
+
+                // Ungrouped servers
+                let ungrouped = serviceManager.savedProfiles.filter { $0.groupId == nil }
+                if !ungrouped.isEmpty {
+                    if !serviceManager.savedGroups.isEmpty {
+                        ungroupedHeader
+                    }
+                    ForEach(ungrouped) { profile in
+                        serverRow(profile)
+                    }
                 }
             }
             .padding(.vertical, 4)
         }
+    }
+
+    private func groupSection(_ group: ServerGroup) -> some View {
+        let isExpanded = expandedGroups.contains(group.id)
+        let groupProfiles = serviceManager.savedProfiles.filter { $0.groupId == group.id }
+
+        return VStack(spacing: 0) {
+            // Group header
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    if isExpanded {
+                        expandedGroups.remove(group.id)
+                    } else {
+                        expandedGroups.insert(group.id)
+                    }
+                }
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 10)
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.accentColor.opacity(0.8))
+                    Text(group.name)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text("(\(groupProfiles.count))")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button(action: {
+                    renameGroupName = group.name
+                    renamingGroup = group
+                }) {
+                    Label(LS("server.renameGroup"), systemImage: "pencil")
+                }
+                Button(action: {
+                    editingProfile = .default
+                    editingProfile.groupId = group.id
+                    passwordField = ""
+                    showingEditor = true
+                }) {
+                    Label(LS("conn.addServer"), systemImage: "plus")
+                }
+                Divider()
+                Button(role: .destructive, action: { serviceManager.deleteGroup(group) }) {
+                    Label(LS("server.deleteGroup"), systemImage: "trash")
+                }
+            }
+
+            // Expanded servers
+            if isExpanded {
+                ForEach(groupProfiles) { profile in
+                    serverRow(profile, indented: true)
+                }
+            }
+        }
+    }
+
+    private var ungroupedHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "tray")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+            Text(LS("server.ungrouped"))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+    }
+
+    private func serverRow(_ profile: ConnectionProfile, indented: Bool = false) -> some View {
+        ServerRowView(
+            profile: profile,
+            isConnected: isProfileConnected(profile),
+            isConnecting: serviceManager.isConnecting,
+            anyConnected: serviceManager.isConnected,
+            groups: serviceManager.savedGroups,
+            onConnect: { connectProfile(profile) },
+            onDisconnect: { serviceManager.disconnect() },
+            onEdit: { editProfile(profile) },
+            onDelete: { serviceManager.deleteProfile(profile) },
+            onMoveToGroup: { groupId in serviceManager.moveProfile(profile, toGroup: groupId) }
+        )
+        .padding(.leading, indented ? 12 : 0)
     }
 
     // MARK: - Tunnel Status
@@ -202,6 +333,16 @@ struct ServerListPanelView: View {
             }
             .buttonStyle(.borderless)
             .help(LS("conn.addServer"))
+
+            Button(action: {
+                newGroupName = ""
+                showingGroupNameAlert = true
+            }) {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .help(LS("server.newGroup"))
 
             Spacer()
 
@@ -295,10 +436,12 @@ struct ServerRowView: View {
     let isConnected: Bool
     let isConnecting: Bool
     let anyConnected: Bool
+    let groups: [ServerGroup]
     let onConnect: () -> Void
     let onDisconnect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let onMoveToGroup: (UUID?) -> Void
 
     @State private var isHovered = false
 
@@ -366,6 +509,21 @@ struct ServerRowView: View {
 
             Button(action: onEdit) {
                 Label(LS("conn.editServer"), systemImage: "pencil")
+            }
+
+            // Move to group submenu
+            if !groups.isEmpty {
+                Menu(LS("server.moveToGroup")) {
+                    ForEach(groups) { group in
+                        Button(action: { onMoveToGroup(group.id) }) {
+                            Label(group.name, systemImage: profile.groupId == group.id ? "checkmark" : "folder")
+                        }
+                    }
+                    Divider()
+                    Button(action: { onMoveToGroup(nil) }) {
+                        Label(LS("server.ungrouped"), systemImage: profile.groupId == nil ? "checkmark" : "tray")
+                    }
+                }
             }
 
             Divider()

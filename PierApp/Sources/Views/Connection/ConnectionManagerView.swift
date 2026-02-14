@@ -5,7 +5,7 @@ struct ConnectionManagerView: View {
     @EnvironmentObject var serviceManager: RemoteServiceManager
     @Environment(\.dismiss) var dismiss
 
-    @State private var editingProfile: ConnectionProfile?
+    @State private var editingProfile: ConnectionProfile = .default
     @State private var passwordField: String = ""
     @State private var showingEditor: Bool = false
 
@@ -47,20 +47,19 @@ struct ConnectionManagerView: View {
         }
         .frame(width: 440, height: 540)
         .sheet(isPresented: $showingEditor) {
-            if let profile = editingProfile {
-                ProfileEditorView(
-                    profile: profile,
-                    password: passwordField,
-                    onSave: { updated, password in
-                        serviceManager.saveProfile(updated)
-                        if !password.isEmpty {
-                            serviceManager.savePassword(password, for: updated)
-                        }
-                        showingEditor = false
-                    },
-                    onCancel: { showingEditor = false }
-                )
-            }
+            ProfileEditorView(
+                profile: editingProfile,
+                password: passwordField,
+                groups: serviceManager.savedGroups,
+                onSave: { updated, password in
+                    serviceManager.saveProfile(updated)
+                    if !password.isEmpty {
+                        serviceManager.savePassword(password, for: updated)
+                    }
+                    showingEditor = false
+                },
+                onCancel: { showingEditor = false }
+            )
         }
     }
 
@@ -193,6 +192,7 @@ struct ConnectionManagerView: View {
 struct ProfileEditorView: View {
     @State var profile: ConnectionProfile
     @State var password: String
+    var groups: [ServerGroup]
     var onSave: (ConnectionProfile, String) -> Void
     var onCancel: () -> Void
 
@@ -254,6 +254,19 @@ struct ProfileEditorView: View {
                         .controlSize(.small)
                     }
                 }
+
+                // Group picker
+                if !groups.isEmpty {
+                    Picker(LS("server.group"), selection: Binding(
+                        get: { profile.groupId },
+                        set: { profile.groupId = $0 }
+                    )) {
+                        Text(LS("server.ungrouped")).tag(nil as UUID?)
+                        ForEach(groups) { group in
+                            Text(group.name).tag(group.id as UUID?)
+                        }
+                    }
+                }
             }
             .padding()
 
@@ -270,6 +283,6 @@ struct ProfileEditorView: View {
             }
             .padding()
         }
-        .frame(width: 420, height: 480)
+        .frame(width: 420, height: 520)
     }
 }

@@ -212,6 +212,14 @@
 "conn.save" = "保存";
 "conn.cancel" = "取消";
 
+"server.newGroup" = "新建分组";
+"server.renameGroup" = "重命名分组";
+"server.deleteGroup" = "删除分组";
+"server.ungrouped" = "未分组";
+"server.moveToGroup" = "移动到分组";
+"server.group" = "分组";
+"server.groupName" = "分组名称";
+
 "tunnel.active" = "活动隧道";
 "tunnel.forwarding" = "转发中";
 

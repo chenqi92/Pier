@@ -11,6 +11,8 @@ struct ConnectionProfile: Codable, Identifiable, Hashable {
     var keyFilePath: String?
     var agentForwarding: Bool = false
     var lastConnected: Date?
+    /// Optional group membership
+    var groupId: UUID?
 
     enum AuthType: String, Codable, CaseIterable {
         case password = "password"
@@ -34,7 +36,8 @@ struct ConnectionProfile: Codable, Identifiable, Hashable {
             authType: .password,
             keyFilePath: nil,
             agentForwarding: false,
-            lastConnected: nil
+            lastConnected: nil,
+            groupId: nil
         )
     }
 }
@@ -60,6 +63,35 @@ extension ConnectionProfile {
 
     static func saveAll(_ profiles: [ConnectionProfile]) {
         guard let data = try? JSONEncoder().encode(profiles) else { return }
+        try? data.write(to: storageURL, options: .atomic)
+    }
+}
+
+// MARK: - Server Group
+
+/// A named group for organizing servers in a tree structure.
+struct ServerGroup: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    var name: String
+    var order: Int = 0
+
+    static var storageURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("Pier", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("server_groups.json")
+    }
+
+    static func loadAll() -> [ServerGroup] {
+        guard let data = try? Data(contentsOf: storageURL),
+              let groups = try? JSONDecoder().decode([ServerGroup].self, from: data) else {
+            return []
+        }
+        return groups.sorted { $0.order < $1.order }
+    }
+
+    static func saveAll(_ groups: [ServerGroup]) {
+        guard let data = try? JSONEncoder().encode(groups) else { return }
         try? data.write(to: storageURL, options: .atomic)
     }
 }

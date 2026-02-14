@@ -212,6 +212,14 @@
 "conn.save" = "Save";
 "conn.cancel" = "Cancel";
 
+"server.newGroup" = "New Group";
+"server.renameGroup" = "Rename Group";
+"server.deleteGroup" = "Delete Group";
+"server.ungrouped" = "Ungrouped";
+"server.moveToGroup" = "Move to Group";
+"server.group" = "Group";
+"server.groupName" = "Group Name";
+
 "tunnel.active" = "Active Tunnels";
 "tunnel.forwarding" = "Forwarding";
 

@@ -62,6 +62,7 @@ class RemoteServiceManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var activeTunnels: [ServiceTunnel] = []
     @Published var savedProfiles: [ConnectionProfile] = []
+    @Published var savedGroups: [ServerGroup] = []
 
     // MARK: - Private
 
@@ -74,6 +75,7 @@ class RemoteServiceManager: ObservableObject {
 
     init() {
         savedProfiles = ConnectionProfile.loadAll()
+        savedGroups = ServerGroup.loadAll()
     }
 
     // MARK: - Connection
@@ -290,6 +292,36 @@ class RemoteServiceManager: ObservableObject {
 
     func savePassword(_ password: String, for profile: ConnectionProfile) {
         try? KeychainService.shared.save(key: "ssh_\(profile.id.uuidString)", value: password)
+    }
+
+    // MARK: - Group Management
+
+    func saveGroup(_ group: ServerGroup) {
+        if let idx = savedGroups.firstIndex(where: { $0.id == group.id }) {
+            savedGroups[idx] = group
+        } else {
+            var g = group
+            g.order = savedGroups.count
+            savedGroups.append(g)
+        }
+        ServerGroup.saveAll(savedGroups)
+    }
+
+    func deleteGroup(_ group: ServerGroup) {
+        // Move all servers in this group to ungrouped
+        for i in savedProfiles.indices where savedProfiles[i].groupId == group.id {
+            savedProfiles[i].groupId = nil
+        }
+        ConnectionProfile.saveAll(savedProfiles)
+        savedGroups.removeAll { $0.id == group.id }
+        ServerGroup.saveAll(savedGroups)
+    }
+
+    func moveProfile(_ profile: ConnectionProfile, toGroup groupId: UUID?) {
+        if let idx = savedProfiles.firstIndex(where: { $0.id == profile.id }) {
+            savedProfiles[idx].groupId = groupId
+            ConnectionProfile.saveAll(savedProfiles)
+        }
     }
 
     // MARK: - Remote Execution

@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 
 /// ViewModel for terminal session management (multi-tab).
+@MainActor
 class TerminalViewModel: ObservableObject {
     @Published var tabs: [TerminalTab] = []
     @Published var selectedTabId: UUID?
@@ -58,18 +59,19 @@ class TerminalViewModel: ObservableObject {
         session.sshProgram = sshProgram
         session.sshArgs = sshArgs
 
+        // Create RemoteServiceManager synchronously so it's immediately
+        // available for SwiftUI observation (right panel binding)
+        let sm = RemoteServiceManager()
+        session.remoteServiceManager = sm
+
         tabs.append(tab)
         sessions[tab.id] = session
         selectedTabId = tab.id
 
-        // Every tab gets its own RemoteServiceManager (must be created on MainActor)
-        Task { @MainActor in
-            let sm = RemoteServiceManager()
-            session.remoteServiceManager = sm
-
-            // If SSH profile provided, connect the per-tab service manager
-            if let profile = profile {
-                session.connectedProfile = profile
+        // If SSH profile provided, connect the per-tab service manager (async)
+        if let profile = profile {
+            session.connectedProfile = profile
+            Task { @MainActor in
                 sm.connect(profile: profile, preloadedPassword: preloadedPassword)
             }
         }
@@ -103,10 +105,11 @@ class TerminalViewModel: ObservableObject {
     // MARK: - Terminal Input
 
     func sendInput(_ text: String) {
-        guard let id = selectedTabId else { return }
+        guard let tabId = selectedTabId,
+              let session = sessions[tabId] else { return }
         NotificationCenter.default.post(
             name: .terminalInput,
-            object: ["sessionId": id, "text": text]
+            object: ["sessionId": session.id, "text": text]
         )
     }
 
