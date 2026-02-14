@@ -157,9 +157,36 @@ struct TerminalTheme: Identifiable, Equatable {
         ]
     )
 
+    static let defaultLight = TerminalTheme(
+        id: "default_light",
+        name: "Default Light",
+        background: NSColor(red: 1.00, green: 1.00, blue: 1.00, alpha: 1.0),
+        foreground: NSColor(red: 0.15, green: 0.15, blue: 0.17, alpha: 1.0),
+        cursor: NSColor(red: 0.0, green: 0.5, blue: 1.0, alpha: 1.0),
+        selection: NSColor(red: 0.7, green: 0.85, blue: 1.0, alpha: 0.4),
+        ansiColors: [
+            NSColor(red: 0.15, green: 0.15, blue: 0.17, alpha: 1.0),  // 0  Black
+            NSColor(red: 0.80, green: 0.15, blue: 0.15, alpha: 1.0),  // 1  Red
+            NSColor(red: 0.15, green: 0.60, blue: 0.15, alpha: 1.0),  // 2  Green
+            NSColor(red: 0.65, green: 0.55, blue: 0.10, alpha: 1.0),  // 3  Yellow
+            NSColor(red: 0.15, green: 0.35, blue: 0.80, alpha: 1.0),  // 4  Blue
+            NSColor(red: 0.60, green: 0.20, blue: 0.70, alpha: 1.0),  // 5  Magenta
+            NSColor(red: 0.10, green: 0.55, blue: 0.60, alpha: 1.0),  // 6  Cyan
+            NSColor(red: 0.80, green: 0.80, blue: 0.80, alpha: 1.0),  // 7  White
+            NSColor(red: 0.45, green: 0.45, blue: 0.50, alpha: 1.0),  // 8  Bright Black
+            NSColor(red: 0.90, green: 0.25, blue: 0.25, alpha: 1.0),  // 9  Bright Red
+            NSColor(red: 0.20, green: 0.70, blue: 0.20, alpha: 1.0),  // 10 Bright Green
+            NSColor(red: 0.75, green: 0.65, blue: 0.15, alpha: 1.0),  // 11 Bright Yellow
+            NSColor(red: 0.25, green: 0.50, blue: 0.95, alpha: 1.0),  // 12 Bright Blue
+            NSColor(red: 0.70, green: 0.30, blue: 0.85, alpha: 1.0),  // 13 Bright Magenta
+            NSColor(red: 0.15, green: 0.65, blue: 0.70, alpha: 1.0),  // 14 Bright Cyan
+            NSColor(red: 0.95, green: 0.95, blue: 0.95, alpha: 1.0),  // 15 Bright White
+        ]
+    )
+
     /// All available themes.
     static let allThemes: [TerminalTheme] = [
-        .defaultDark, .solarizedDark, .dracula, .monokai, .nord
+        .defaultDark, .defaultLight, .solarizedDark, .dracula, .monokai, .nord
     ]
 
     /// Look up a theme by ID.

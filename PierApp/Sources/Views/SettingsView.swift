@@ -117,7 +117,7 @@ struct SettingsView: View {
 
                     // Preview
                     Text(LS("settings.fontPreview"))
-                        .font(.system(size: CGFloat(themeManager.fontSize), design: .monospaced))
+                        .font(Font.custom(themeManager.fontFamily, size: CGFloat(themeManager.fontSize)))
                         .padding(8)
                         .background(Color(nsColor: .textBackgroundColor))
                         .cornerRadius(4)

@@ -68,18 +68,34 @@ class AppThemeManager: ObservableObject {
     }
 
     /// Apply the stored appearance mode to NSApp.
+    /// Also auto-switches terminal theme between default_dark and default_light.
     func applyAppearance() {
         switch appearanceMode {
         case .system:
             NSApp.appearance = nil
+            // Auto-detect current effective appearance
+            let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            autoSwitchTerminalTheme(isDark: isDark)
         case .light:
             NSApp.appearance = NSAppearance(named: .aqua)
+            autoSwitchTerminalTheme(isDark: false)
         case .dark:
             NSApp.appearance = NSAppearance(named: .darkAqua)
+            autoSwitchTerminalTheme(isDark: true)
         }
     }
 
-    /// Apply the stored language preference via UserDefaults.
+    /// Auto-switch terminal theme only when user is using one of the default themes.
+    private func autoSwitchTerminalTheme(isDark: Bool) {
+        if isDark && terminalThemeId == "default_light" {
+            terminalThemeId = "default_dark"
+        } else if !isDark && terminalThemeId == "default_dark" {
+            terminalThemeId = "default_light"
+        }
+    }
+
+    /// Apply the stored language preference.
+    /// Invalidates the cached localization bundle so LS() picks up the new locale.
     func applyLanguage() {
         switch languageMode {
         case .system:
@@ -90,6 +106,7 @@ class AppThemeManager: ObservableObject {
             UserDefaults.standard.set(["en"], forKey: "AppleLanguages")
         }
         UserDefaults.standard.synchronize()
+        invalidateLocalizedBundle()
     }
 
     /// Switch terminal theme by ID.

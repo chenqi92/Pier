@@ -111,14 +111,14 @@ class TerminalNSView: NSView {
     override var isFlipped: Bool { true }
 
     // Terminal display configuration
-    private var fontSize: CGFloat = 13
-    private var fontFamily = "SF Mono"
+    private var fontSize: CGFloat = AppThemeManager.shared.fontSize
+    private var fontFamily = AppThemeManager.shared.fontFamily
     private var cellWidth: CGFloat = 8
     private var cellHeight: CGFloat = 16
     private var cursorVisible = true
 
     // Theme (replaces hardcoded colors)
-    var theme: TerminalTheme = .defaultDark {
+    var theme: TerminalTheme = AppThemeManager.shared.currentTerminalTheme {
         didSet { applyTheme(); rebuildCachedAttrs() }
     }
 
@@ -263,6 +263,45 @@ class TerminalNSView: NSView {
             name: .terminalInput,
             object: nil
         )
+
+        // Listen for font/theme setting changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSettingsChanged(_:)),
+            name: UserDefaults.didChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleSettingsChanged(_ notification: Notification) {
+        let mgr = AppThemeManager.shared
+        let newFamily = mgr.fontFamily
+        let newSize = mgr.fontSize
+        let newTheme = mgr.currentTerminalTheme
+        var changed = false
+
+        if fontFamily != newFamily || fontSize != newSize {
+            fontFamily = newFamily
+            fontSize = newSize
+            // Recalculate cell dimensions
+            let font = NSFont(name: fontFamily, size: fontSize)
+                ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            let attrStr = NSAttributedString(string: "M", attributes: [.font: font])
+            let size = attrStr.size()
+            cellWidth = ceil(size.width)
+            cellHeight = ceil(size.height * 1.2)
+            rebuildCachedAttrs()
+            changed = true
+        }
+
+        if theme.id != newTheme.id {
+            theme = newTheme
+            changed = true
+        }
+
+        if changed {
+            needsDisplay = true
+        }
     }
 
     @objc private func handleTerminalInput(_ notification: Notification) {
