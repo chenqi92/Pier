@@ -103,6 +103,20 @@ class TerminalScrollView: NSScrollView {
 }
 
 
+// MARK: - Per-Cell Attribute (ANSI SGR state)
+
+/// Represents the visual attributes of a single terminal cell.
+struct CellAttr: Equatable {
+    var fg: UInt8 = 0      // 0=default, 1-8=standard(30-37), 9-16=bright(90-97), 17+=256-color
+    var bg: UInt8 = 0      // same encoding
+    var bold: Bool = false
+    var italic: Bool = false
+    var underline: Bool = false
+    var inverse: Bool = false
+    var dim: Bool = false
+    static let `default` = CellAttr()
+}
+
 /// AppKit NSView for high-performance terminal rendering.
 class TerminalNSView: NSView {
     var session: TerminalSessionInfo?
@@ -135,6 +149,10 @@ class TerminalNSView: NSView {
     private var sshPasswordAutoTyped = false
     /// Whether SSH auth failure has been reported for this session
     private var sshAuthFailureReported = false
+    /// Whether a password prompt was seen (user may be typing password manually)
+    private var sshPasswordPromptSeen = false
+    /// Whether SSH auth success has been notified for this session
+    private var sshAuthSuccessNotified = false
 
     // MARK: - PTY Cache (persists across tab switches)
 
@@ -142,22 +160,28 @@ class TerminalNSView: NSView {
     struct PTYCacheEntry {
         let handle: OpaquePointer
         var screenBuffer: [[Character]]
+        var screenAttrs: [[CellAttr]]
         var scrollbackBuffer: [[Character]]
+        var scrollbackAttrs: [[CellAttr]]
         var cursorX: Int
         var cursorY: Int
         var ptyCols: Int
         var ptyRows: Int
         var savedCursorX: Int
         var savedCursorY: Int
+        var currentAttr: CellAttr
     }
 
     /// Static cache: session ID → PTY state. Persists across view re-creation.
     private static var ptyCache: [UUID: PTYCacheEntry] = [:]
 
-    /// Destroy a cached PTY when its tab is closed.
+    /// Destroy a cached PTY when its tab is closed (off main thread to avoid blocking).
     static func destroyCachedPTY(sessionId: UUID) {
         if let entry = ptyCache.removeValue(forKey: sessionId) {
-            pier_terminal_destroy(entry.handle)
+            let handle = entry.handle
+            DispatchQueue.global(qos: .utility).async {
+                pier_terminal_destroy(handle)
+            }
         }
     }
 
@@ -170,18 +194,23 @@ class TerminalNSView: NSView {
     private var pendingCwdCheck = false
     private var sshExitDetected = false  // Prevent repeated SSH exit notifications
 
-    // Screen buffer (visible area)
+    // Screen buffer (visible area) + parallel attribute buffer
     private var screenBuffer: [[Character]] = []
+    private var screenAttrs: [[CellAttr]] = []
     private var cursorX: Int = 0
     private var cursorY: Int = 0
+
+    // Current SGR state (applied to each new character)
+    private var currentAttr = CellAttr.default
 
     // Saved cursor position (ESC 7 / ESC 8, CSI s / CSI u)
     private var savedCursorX: Int = 0
     private var savedCursorY: Int = 0
 
-    // Scrollback buffer (max 10,000 lines)
+    // Scrollback buffer (max 10,000 lines) + parallel attribute buffer
     private let maxScrollback = 10_000
     private var scrollbackBuffer: [[Character]] = []
+    private var scrollbackAttrs: [[CellAttr]] = []
 
     // Text selection
     private var selectionStart: (row: Int, col: Int)?
@@ -201,6 +230,7 @@ class TerminalNSView: NSView {
     // Cached fonts and attributes (rebuilt on theme/font change)
     private var cachedMonoFont: NSFont!
     private var cachedFallbackFont: NSFont!
+    private var cachedPowerlineFont: NSFont?
     private var cachedNormalAttrs: [NSAttributedString.Key: Any] = [:]
     private var cachedFallbackAttrs: [NSAttributedString.Key: Any] = [:]
     private var cachedURLAttrs: [NSAttributedString.Key: Any] = [:]
@@ -216,10 +246,14 @@ class TerminalNSView: NSView {
         super.init(coder: coder)
         setupView()
     }
+    private var blurEffectView: NSVisualEffectView?
 
     private func setupView() {
         wantsLayer = true
         layer?.backgroundColor = theme.background.cgColor
+
+        // Set up background blur effect view
+        updateBlurEffect()
 
         // Calculate cell dimensions from font
         let font = NSFont(name: fontFamily, size: fontSize)
@@ -236,8 +270,13 @@ class TerminalNSView: NSView {
 
         // Blink timer for cursor
         blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
-            self?.cursorVisible.toggle()
-            self?.needsDisplay = true
+            guard let self = self else { return }
+            if AppThemeManager.shared.cursorBlink {
+                self.cursorVisible.toggle()
+            } else {
+                self.cursorVisible = true
+            }
+            self.needsDisplay = true
         }
 
         // Listen for SFTP directory changes → cd in terminal
@@ -296,11 +335,37 @@ class TerminalNSView: NSView {
 
         if theme.id != newTheme.id {
             theme = newTheme
+            layer?.backgroundColor = theme.background.cgColor
             changed = true
         }
 
+        // Always refresh for opacity/blur/cursor changes
+        updateBlurEffect()
+        changed = true
+
         if changed {
             needsDisplay = true
+        }
+    }
+
+    /// Manage the NSVisualEffectView behind the terminal for blur effects.
+    private func updateBlurEffect() {
+        let mgr = AppThemeManager.shared
+        if mgr.terminalBlur && mgr.terminalOpacity < 1.0 {
+            if blurEffectView == nil {
+                let effectView = NSVisualEffectView()
+                effectView.material = .hudWindow
+                effectView.blendingMode = .behindWindow
+                effectView.state = .active
+                effectView.autoresizingMask = [.width, .height]
+                effectView.frame = bounds
+                addSubview(effectView, positioned: .below, relativeTo: nil)
+                blurEffectView = effectView
+            }
+            blurEffectView?.frame = bounds
+        } else {
+            blurEffectView?.removeFromSuperview()
+            blurEffectView = nil
         }
     }
 
@@ -328,8 +393,11 @@ class TerminalNSView: NSView {
         if currentSessionId == sessionId {
             stopTimers()
             if let handle = terminalHandle {
-                pier_terminal_destroy(handle)
                 terminalHandle = nil
+                // Destroy PTY off main thread to avoid blocking UI
+                DispatchQueue.global(qos: .utility).async {
+                    pier_terminal_destroy(handle)
+                }
             }
             currentSessionId = nil
         }
@@ -364,6 +432,31 @@ class TerminalNSView: NSView {
         cachedMonoFont = NSFont(name: fontFamily, size: fontSize)
             ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         cachedFallbackFont = NSFont.systemFont(ofSize: fontSize)
+
+        // Try to find a Powerline-compatible font for special symbols
+        let powerlineFontNames = [
+            fontFamily,  // User's font may already have Powerline glyphs
+            "MesloLGS NF",
+            "MesloLGS Nerd Font Mono",
+            "Symbols Nerd Font Mono",
+            "Hack Nerd Font Mono",
+            "JetBrainsMono Nerd Font Mono",
+            "FiraCode Nerd Font Mono",
+        ]
+        cachedPowerlineFont = nil
+        for name in powerlineFontNames {
+            if let font = NSFont(name: name, size: fontSize) {
+                // Verify it has the Powerline branch glyph (U+E0A0)
+                let ctFont = font as CTFont
+                var glyph: CGGlyph = 0
+                var char: UniChar = 0xE0A0
+                if CTFontGetGlyphsForCharacters(ctFont, &char, &glyph, 1), glyph != 0 {
+                    cachedPowerlineFont = font
+                    break
+                }
+            }
+        }
+
         cachedNormalAttrs = [
             .font: cachedMonoFont!,
             .foregroundColor: theme.foreground,
@@ -394,27 +487,35 @@ class TerminalNSView: NSView {
         sshOutputAccumulator = ""
         sshPasswordAutoTyped = false
         sshAuthFailureReported = false
+        sshPasswordPromptSeen = false
+        sshAuthSuccessNotified = false
 
         // ── Try to restore from cache ──
         if let cached = TerminalNSView.ptyCache.removeValue(forKey: session.id) {
             terminalHandle = cached.handle
             screenBuffer = cached.screenBuffer
+            screenAttrs = cached.screenAttrs
             scrollbackBuffer = cached.scrollbackBuffer
+            scrollbackAttrs = cached.scrollbackAttrs
             cursorX = cached.cursorX
             cursorY = cached.cursorY
             ptyCols = cached.ptyCols
             ptyRows = cached.ptyRows
             savedCursorX = cached.savedCursorX
             savedCursorY = cached.savedCursorY
+            currentAttr = cached.currentAttr
             startReadLoop()
             needsDisplay = true
         } else {
             // New session — need to create PTY
             terminalHandle = nil
             screenBuffer = []
+            screenAttrs = []
             scrollbackBuffer = []
+            scrollbackAttrs = []
             cursorX = 0
             cursorY = 0
+            currentAttr = .default
             pendingSession = session
 
             let visibleSize = enclosingScrollView?.contentView.bounds.size ?? .zero
@@ -436,13 +537,16 @@ class TerminalNSView: NSView {
         let entry = PTYCacheEntry(
             handle: handle,
             screenBuffer: screenBuffer,
+            screenAttrs: screenAttrs,
             scrollbackBuffer: scrollbackBuffer,
+            scrollbackAttrs: scrollbackAttrs,
             cursorX: cursorX,
             cursorY: cursorY,
             ptyCols: ptyCols,
             ptyRows: ptyRows,
             savedCursorX: savedCursorX,
-            savedCursorY: savedCursorY
+            savedCursorY: savedCursorY,
+            currentAttr: currentAttr
         )
         TerminalNSView.ptyCache[sessionId] = entry
         // Detach handle from this view (cache now owns it)
@@ -501,7 +605,10 @@ class TerminalNSView: NSView {
             terminalHandle = nil
         }
         screenBuffer = []
+        screenAttrs = []
         scrollbackBuffer = []
+        scrollbackAttrs = []
+        currentAttr = .default
         cursorX = 0
         cursorY = 0
     }
@@ -523,6 +630,8 @@ class TerminalNSView: NSView {
         if terminalHandle != nil {
             // Initialize screen buffer to match PTY size
             screenBuffer = Array(repeating: Array(repeating: Character(" "), count: cols), count: rows)
+            screenAttrs = Array(repeating: Array(repeating: .default, count: cols), count: rows)
+            currentAttr = .default
             startReadLoop()
         }
     }
@@ -556,6 +665,8 @@ class TerminalNSView: NSView {
 
         if terminalHandle != nil {
             screenBuffer = Array(repeating: Array(repeating: Character(" "), count: cols), count: rows)
+            screenAttrs = Array(repeating: Array(repeating: .default, count: cols), count: rows)
+            currentAttr = .default
             startReadLoop()
         }
     }
@@ -614,6 +725,7 @@ class TerminalNSView: NSView {
         if !sshPasswordAutoTyped {
             // SSH password prompts end with "password:" or "password: " (with optional leading text)
             if lower.hasSuffix("password: ") || lower.hasSuffix("password:") {
+                sshPasswordPromptSeen = true
                 if let password = currentSession?.pendingSSHPassword, !password.isEmpty {
                     // Auto-type the password
                     let input = password + "\n"
@@ -635,6 +747,25 @@ class TerminalNSView: NSView {
                 if let sessionId = currentSessionId {
                     NotificationCenter.default.post(
                         name: .terminalSSHAuthFailed,
+                        object: sessionId
+                    )
+                }
+            }
+        }
+
+        // 3. SSH auth success detection — after password prompt, if we see
+        //    shell prompt or welcome banner, auth succeeded
+        if sshPasswordPromptSeen && !sshAuthSuccessNotified && !sshAuthFailureReported {
+            // Look for typical SSH login success indicators
+            if lower.contains("last login:") ||
+               lower.contains("welcome to") ||
+               lower.hasSuffix("$ ") ||
+               lower.hasSuffix("# ") ||
+               lower.hasSuffix("% ") {
+                sshAuthSuccessNotified = true
+                if let sessionId = currentSessionId {
+                    NotificationCenter.default.post(
+                        name: .terminalSSHAuthSuccess,
                         object: sessionId
                     )
                 }
@@ -780,26 +911,32 @@ class TerminalNSView: NSView {
             if cursorY >= visibleRows {
                 if !screenBuffer.isEmpty {
                     scrollbackBuffer.append(screenBuffer.removeFirst())
+                    scrollbackAttrs.append(screenAttrs.removeFirst())
                 }
                 screenBuffer.append(Array(repeating: " ", count: cols))
+                screenAttrs.append(Array(repeating: .default, count: cols))
                 cursorY = visibleRows - 1
             }
             while cursorY >= screenBuffer.count {
                 screenBuffer.append(Array(repeating: " ", count: cols))
+                screenAttrs.append(Array(repeating: .default, count: cols))
             }
         }
 
         // Ensure buffer has the row
         while cursorY >= screenBuffer.count {
             screenBuffer.append(Array(repeating: " ", count: cols))
+            screenAttrs.append(Array(repeating: .default, count: cols))
         }
 
         if cursorY < screenBuffer.count && cursorX < screenBuffer[cursorY].count {
             screenBuffer[cursorY][cursorX] = char
+            screenAttrs[cursorY][cursorX] = currentAttr
             cursorX += 1
             // For wide characters, place a zero-width placeholder in the next cell
             if charWidth == 2 && cursorX < screenBuffer[cursorY].count {
                 screenBuffer[cursorY][cursorX] = "\u{200B}" // zero-width space as placeholder
+                screenAttrs[cursorY][cursorX] = currentAttr
                 cursorX += 1
             }
         }
@@ -874,16 +1011,20 @@ class TerminalNSView: NSView {
                     // Scroll: move top line to scrollback
                     if !screenBuffer.isEmpty {
                         scrollbackBuffer.append(screenBuffer.removeFirst())
+                        scrollbackAttrs.append(screenAttrs.removeFirst())
                     }
                     screenBuffer.append(Array(repeating: " ", count: cols))
+                    screenAttrs.append(Array(repeating: .default, count: cols))
                     cursorY = visibleRows - 1
                     if scrollbackBuffer.count > maxScrollback {
                         scrollbackBuffer.removeFirst(scrollbackBuffer.count - maxScrollback)
+                        scrollbackAttrs.removeFirst(scrollbackAttrs.count - maxScrollback)
                     }
                 }
                 // Ensure screenBuffer has enough rows
                 while cursorY >= screenBuffer.count {
                     screenBuffer.append(Array(repeating: " ", count: cols))
+                    screenAttrs.append(Array(repeating: .default, count: cols))
                 }
             case 0x0D: // CR (\r)
                 cursorX = 0
@@ -923,8 +1064,10 @@ class TerminalNSView: NSView {
                     } else {
                         // Scroll down: insert blank line at top
                         screenBuffer.insert(Array(repeating: " ", count: cols), at: 0)
+                        screenAttrs.insert(Array(repeating: .default, count: cols), at: 0)
                         if screenBuffer.count > visibleRows {
                             screenBuffer.removeLast()
+                            screenAttrs.removeLast()
                         }
                     }
                     ansiState = .normal
@@ -999,25 +1142,30 @@ class TerminalNSView: NSView {
                 if cursorY < screenBuffer.count {
                     for x in cursorX..<min(cols, screenBuffer[cursorY].count) {
                         screenBuffer[cursorY][x] = " "
+                        screenAttrs[cursorY][x] = .default
                     }
                     for y in (cursorY + 1)..<screenBuffer.count {
                         screenBuffer[y] = Array(repeating: " ", count: cols)
+                        screenAttrs[y] = Array(repeating: .default, count: cols)
                     }
                 }
             case 1: // Clear from start to cursor
                 for y in 0..<cursorY {
                     if y < screenBuffer.count {
                         screenBuffer[y] = Array(repeating: " ", count: cols)
+                        screenAttrs[y] = Array(repeating: .default, count: cols)
                     }
                 }
                 if cursorY < screenBuffer.count {
                     for x in 0...min(cursorX, screenBuffer[cursorY].count - 1) {
                         screenBuffer[cursorY][x] = " "
+                        screenAttrs[cursorY][x] = .default
                     }
                 }
             case 2, 3: // Clear entire screen
                 for y in 0..<screenBuffer.count {
                     screenBuffer[y] = Array(repeating: " ", count: cols)
+                    screenAttrs[y] = Array(repeating: .default, count: cols)
                 }
             default:
                 break
@@ -1029,19 +1177,22 @@ class TerminalNSView: NSView {
             case 0: // Clear from cursor to end of line
                 for x in cursorX..<min(cols, screenBuffer[cursorY].count) {
                     screenBuffer[cursorY][x] = " "
+                    screenAttrs[cursorY][x] = .default
                 }
             case 1: // Clear from start to cursor
                 for x in 0...min(cursorX, screenBuffer[cursorY].count - 1) {
                     screenBuffer[cursorY][x] = " "
+                    screenAttrs[cursorY][x] = .default
                 }
             case 2: // Clear entire line
                 screenBuffer[cursorY] = Array(repeating: " ", count: cols)
+                screenAttrs[cursorY] = Array(repeating: .default, count: cols)
             default:
                 break
             }
 
         case 0x6D: // 'm' — SGR (Select Graphic Rendition)
-            break // Ignore color/style codes for now
+            handleSGR(params: params)
 
         case 0x68, 0x6C: // 'h'/'l' — Set/Reset Mode (e.g., ?2004h for bracketed paste)
             break // Ignore mode set/reset
@@ -1067,8 +1218,10 @@ class TerminalNSView: NSView {
             for _ in 0..<n {
                 if cursorY < screenBuffer.count {
                     screenBuffer.insert(Array(repeating: " ", count: cols), at: cursorY)
+                    screenAttrs.insert(Array(repeating: .default, count: cols), at: cursorY)
                     if screenBuffer.count > visibleRows {
                         screenBuffer.removeLast()
+                        screenAttrs.removeLast()
                     }
                 }
             }
@@ -1078,7 +1231,9 @@ class TerminalNSView: NSView {
             for _ in 0..<n {
                 if cursorY < screenBuffer.count {
                     screenBuffer.remove(at: cursorY)
+                    screenAttrs.remove(at: cursorY)
                     screenBuffer.append(Array(repeating: " ", count: cols))
+                    screenAttrs.append(Array(repeating: .default, count: cols))
                 }
             }
 
@@ -1089,6 +1244,8 @@ class TerminalNSView: NSView {
                     if cursorX < screenBuffer[cursorY].count {
                         screenBuffer[cursorY].remove(at: cursorX)
                         screenBuffer[cursorY].append(" ")
+                        screenAttrs[cursorY].remove(at: cursorX)
+                        screenAttrs[cursorY].append(.default)
                     }
                 }
             }
@@ -1098,8 +1255,10 @@ class TerminalNSView: NSView {
             if cursorY < screenBuffer.count {
                 for _ in 0..<n {
                     screenBuffer[cursorY].insert(" ", at: min(cursorX, screenBuffer[cursorY].count))
+                    screenAttrs[cursorY].insert(.default, at: min(cursorX, screenAttrs[cursorY].count))
                     if screenBuffer[cursorY].count > cols {
                         screenBuffer[cursorY].removeLast()
+                        screenAttrs[cursorY].removeLast()
                     }
                 }
             }
@@ -1112,6 +1271,157 @@ class TerminalNSView: NSView {
         }
     }
 
+    // MARK: - SGR (Select Graphic Rendition) Parser
+
+    /// Parse and apply SGR parameters to the current cell attribute state.
+    private func handleSGR(params: String) {
+        // Empty params means SGR 0 (reset)
+        let codes: [Int]
+        if params.isEmpty {
+            codes = [0]
+        } else {
+            codes = params.split(separator: ";").compactMap { Int($0) }
+        }
+
+        var i = 0
+        while i < codes.count {
+            let code = codes[i]
+            switch code {
+            case 0:    // Reset
+                currentAttr = .default
+            case 1:    // Bold
+                currentAttr.bold = true
+            case 2:    // Dim
+                currentAttr.dim = true
+            case 3:    // Italic
+                currentAttr.italic = true
+            case 4:    // Underline
+                currentAttr.underline = true
+            case 7:    // Inverse
+                currentAttr.inverse = true
+            case 22:   // Normal intensity (not bold, not dim)
+                currentAttr.bold = false
+                currentAttr.dim = false
+            case 23:   // Not italic
+                currentAttr.italic = false
+            case 24:   // Not underlined
+                currentAttr.underline = false
+            case 27:   // Not inverse
+                currentAttr.inverse = false
+            case 30...37:  // Standard foreground colors
+                currentAttr.fg = UInt8(code - 30 + 1) // 1-8
+            case 38:   // Extended foreground color
+                if i + 1 < codes.count && codes[i + 1] == 5 && i + 2 < codes.count {
+                    // 256-color: ESC[38;5;{n}m
+                    currentAttr.fg = UInt8(min(255, codes[i + 2]) + 1) // offset by 1 (0=default)
+                    i += 2
+                } else if i + 1 < codes.count && codes[i + 1] == 2 && i + 4 < codes.count {
+                    // True color: ESC[38;2;r;g;b — map to nearest 256-color
+                    let r = codes[i + 2], g = codes[i + 3], b = codes[i + 4]
+                    currentAttr.fg = UInt8(nearest256Color(r: r, g: g, b: b) + 1)
+                    i += 4
+                }
+            case 39:   // Default foreground
+                currentAttr.fg = 0
+            case 40...47:  // Standard background colors
+                currentAttr.bg = UInt8(code - 40 + 1) // 1-8
+            case 48:   // Extended background color
+                if i + 1 < codes.count && codes[i + 1] == 5 && i + 2 < codes.count {
+                    currentAttr.bg = UInt8(min(255, codes[i + 2]) + 1)
+                    i += 2
+                } else if i + 1 < codes.count && codes[i + 1] == 2 && i + 4 < codes.count {
+                    let r = codes[i + 2], g = codes[i + 3], b = codes[i + 4]
+                    currentAttr.bg = UInt8(nearest256Color(r: r, g: g, b: b) + 1)
+                    i += 4
+                }
+            case 49:   // Default background
+                currentAttr.bg = 0
+            case 90...97:  // Bright foreground colors
+                currentAttr.fg = UInt8(code - 90 + 9) // 9-16
+            case 100...107: // Bright background colors
+                currentAttr.bg = UInt8(code - 100 + 9)
+            default:
+                break
+            }
+            i += 1
+        }
+    }
+
+    /// Map true-color (r, g, b) to nearest 256-color index.
+    private func nearest256Color(r: Int, g: Int, b: Int) -> Int {
+        // Use grayscale ramp if close to gray
+        if r == g && g == b {
+            if r < 8 { return 16 }  // black
+            if r > 248 { return 231 }  // white
+            return 232 + Int(round(Double(r - 8) / 247.0 * 23.0))
+        }
+        // Map to 6x6x6 color cube (indices 16-231)
+        let ri = Int(round(Double(r) / 255.0 * 5.0))
+        let gi = Int(round(Double(g) / 255.0 * 5.0))
+        let bi = Int(round(Double(b) / 255.0 * 5.0))
+        return 16 + 36 * ri + 6 * gi + bi
+    }
+
+    // MARK: - ANSI Color Resolution
+
+    /// Standard 8 ANSI colors (indices 0-7).
+    private static let ansi8Colors: [NSColor] = [
+        NSColor(srgbRed: 0.0,  green: 0.0,  blue: 0.0,  alpha: 1), // 0 Black
+        NSColor(srgbRed: 0.8,  green: 0.0,  blue: 0.0,  alpha: 1), // 1 Red
+        NSColor(srgbRed: 0.0,  green: 0.8,  blue: 0.0,  alpha: 1), // 2 Green
+        NSColor(srgbRed: 0.8,  green: 0.8,  blue: 0.0,  alpha: 1), // 3 Yellow
+        NSColor(srgbRed: 0.2,  green: 0.4,  blue: 0.9,  alpha: 1), // 4 Blue
+        NSColor(srgbRed: 0.8,  green: 0.0,  blue: 0.8,  alpha: 1), // 5 Magenta
+        NSColor(srgbRed: 0.0,  green: 0.8,  blue: 0.8,  alpha: 1), // 6 Cyan
+        NSColor(srgbRed: 0.75, green: 0.75, blue: 0.75, alpha: 1), // 7 White
+    ]
+
+    /// Bright 8 ANSI colors (indices 8-15).
+    private static let ansiBrightColors: [NSColor] = [
+        NSColor(srgbRed: 0.5,  green: 0.5,  blue: 0.5,  alpha: 1), // 8  Bright Black (Gray)
+        NSColor(srgbRed: 1.0,  green: 0.33, blue: 0.33, alpha: 1), // 9  Bright Red
+        NSColor(srgbRed: 0.33, green: 1.0,  blue: 0.33, alpha: 1), // 10 Bright Green
+        NSColor(srgbRed: 1.0,  green: 1.0,  blue: 0.33, alpha: 1), // 11 Bright Yellow
+        NSColor(srgbRed: 0.4,  green: 0.6,  blue: 1.0,  alpha: 1), // 12 Bright Blue
+        NSColor(srgbRed: 1.0,  green: 0.33, blue: 1.0,  alpha: 1), // 13 Bright Magenta
+        NSColor(srgbRed: 0.33, green: 1.0,  blue: 1.0,  alpha: 1), // 14 Bright Cyan
+        NSColor(srgbRed: 1.0,  green: 1.0,  blue: 1.0,  alpha: 1), // 15 Bright White
+    ]
+
+    /// Resolve a CellAttr color code to NSColor.
+    /// colorCode: 0=default, 1-8=standard, 9-16=bright, 17-256=256-color palette (offset by 1)
+    private func resolveAnsiColor(_ colorCode: UInt8, isForeground: Bool) -> NSColor? {
+        switch colorCode {
+        case 0:
+            return nil // Use theme default
+        case 1...8:
+            return Self.ansi8Colors[Int(colorCode) - 1]
+        case 9...16:
+            return Self.ansiBrightColors[Int(colorCode) - 9]
+        default:
+            // 256-color palette (colorCode - 1 = actual 256-color index)
+            let idx = Int(colorCode) - 1
+            if idx < 16 {
+                // Standard + bright (already handled but just in case)
+                return idx < 8 ? Self.ansi8Colors[idx] : Self.ansiBrightColors[idx - 8]
+            } else if idx < 232 {
+                // 6x6x6 color cube (indices 16-231)
+                let cubeIdx = idx - 16
+                let r = cubeIdx / 36
+                let g = (cubeIdx % 36) / 6
+                let b = cubeIdx % 6
+                let rr = r == 0 ? 0.0 : (Double(r) * 40.0 + 55.0) / 255.0
+                let gg = g == 0 ? 0.0 : (Double(g) * 40.0 + 55.0) / 255.0
+                let bb = b == 0 ? 0.0 : (Double(b) * 40.0 + 55.0) / 255.0
+                return NSColor(srgbRed: rr, green: gg, blue: bb, alpha: 1)
+            } else if idx < 256 {
+                // Grayscale ramp (indices 232-255) → 8 to 238
+                let level = Double((idx - 232) * 10 + 8) / 255.0
+                return NSColor(srgbRed: level, green: level, blue: level, alpha: 1)
+            }
+            return nil
+        }
+    }
 
     private func updateDocumentSize() {
         let totalLines = scrollbackBuffer.count + screenBuffer.count
@@ -1180,14 +1490,26 @@ class TerminalNSView: NSView {
         return screenBuffer[screenRow]
     }
 
+    /// Get the attribute array for the given absolute row (scrollback + screen).
+    private func attrLineAtRow(_ row: Int) -> [CellAttr]? {
+        let scrollbackCount = scrollbackAttrs.count
+        if row < scrollbackCount {
+            return scrollbackAttrs[row]
+        }
+        let screenRow = row - scrollbackCount
+        guard screenRow < screenAttrs.count else { return nil }
+        return screenAttrs[screenRow]
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
 
         // Ensure cached attrs are initialized
         if cachedMonoFont == nil { rebuildCachedAttrs() }
 
-        // Background
-        context.setFillColor(theme.background.cgColor)
+        // Background with opacity
+        let opacity = CGFloat(AppThemeManager.shared.terminalOpacity)
+        context.setFillColor(theme.background.withAlphaComponent(opacity).cgColor)
         context.fill(bounds)
 
         let scrollbackCount = scrollbackBuffer.count
@@ -1202,6 +1524,7 @@ class TerminalNSView: NSView {
         // Render visible lines (isFlipped: row 0 at y=0, row 1 at y=cellHeight, etc.)
         for row in firstVisibleRow..<lastVisibleRow {
             guard let line = lineAtRow(row) else { break }
+            let attrLine = attrLineAtRow(row)
             let y = CGFloat(row) * cellHeight
 
             // Check if this row has URLs
@@ -1225,20 +1548,80 @@ class TerminalNSView: NSView {
                 }
             }
 
-            // Render text character by character
+            // Render text character by character with per-cell ANSI attributes
             for (col, char) in line.enumerated() {
+                let cellAttr = (attrLine != nil && col < attrLine!.count) ? attrLine![col] : .default
+
+                // Resolve foreground and background colors
+                var fgColor: NSColor
+                var bgColor: NSColor?
+
+                if cellAttr.inverse {
+                    // Inverse: swap fg/bg
+                    fgColor = resolveAnsiColor(cellAttr.bg, isForeground: false) ?? theme.background
+                    let resolvedBg = resolveAnsiColor(cellAttr.fg, isForeground: true) ?? theme.foreground
+                    bgColor = resolvedBg
+                } else {
+                    fgColor = resolveAnsiColor(cellAttr.fg, isForeground: true) ?? theme.foreground
+                    bgColor = resolveAnsiColor(cellAttr.bg, isForeground: false)
+                }
+
+                // Dim: reduce alpha
+                if cellAttr.dim {
+                    fgColor = fgColor.withAlphaComponent(0.5)
+                }
+
+                // Draw cell background if non-default
+                if let bg = bgColor {
+                    let cellRect = NSRect(
+                        x: CGFloat(col) * cellWidth + 2,
+                        y: y,
+                        width: cellWidth,
+                        height: cellHeight
+                    )
+                    context.setFillColor(bg.cgColor)
+                    context.fill(cellRect)
+                }
+
                 // Skip spaces and zero-width space placeholders (wide char 2nd cell)
                 guard char != " " && char != "\u{200B}" else { continue }
 
-                // Choose font: use fallback for non-ASCII (CJK, emoji, etc.)
+                // URL styling overrides
+                let isURL = !rowURLs.isEmpty && rowURLs.contains(where: { col >= $0.startCol && col < $0.endCol })
+
+                // Build font with bold/italic traits + Powerline fallback
                 let isASCII = char.asciiValue != nil
-                let attrs: [NSAttributedString.Key: Any]
-                if !rowURLs.isEmpty && rowURLs.contains(where: { col >= $0.startCol && col < $0.endCol }) {
-                    attrs = cachedURLAttrs
+                let isPowerline = char.unicodeScalars.first.map {
+                    (0xE0A0...0xE0D4).contains(Int($0.value)) ||
+                    (0xE200...0xE2FF).contains(Int($0.value)) ||
+                    (0xF000...0xF8FF).contains(Int($0.value))
+                } ?? false
+                let baseFont: NSFont
+                if isPowerline, let plFont = cachedPowerlineFont {
+                    baseFont = plFont
                 } else if isASCII {
-                    attrs = cachedNormalAttrs
+                    baseFont = cachedMonoFont
                 } else {
-                    attrs = cachedFallbackAttrs
+                    baseFont = cachedFallbackFont
+                }
+                var font = baseFont
+
+                if cellAttr.bold || cellAttr.italic {
+                    var traits: NSFontTraitMask = []
+                    if cellAttr.bold { traits.insert(.boldFontMask) }
+                    if cellAttr.italic { traits.insert(.italicFontMask) }
+                    if let converted = NSFontManager.shared.convert(baseFont, toHaveTrait: traits) as NSFont? {
+                        font = converted
+                    }
+                }
+
+                // Build attributes
+                var attrs: [NSAttributedString.Key: Any] = [
+                    .font: font,
+                    .foregroundColor: isURL ? NSColor.linkColor : fgColor,
+                ]
+                if cellAttr.underline || isURL {
+                    attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
                 }
 
                 let str = NSAttributedString(string: String(char), attributes: attrs)
@@ -1249,14 +1632,23 @@ class TerminalNSView: NSView {
         // Render cursor (only in screen area, not scrollback)
         if cursorVisible {
             let cursorAbsRow = scrollbackCount + cursorY
-            let cursorRect = NSRect(
-                x: CGFloat(cursorX) * cellWidth + 2,
-                y: CGFloat(cursorAbsRow) * cellHeight,
-                width: cellWidth,
-                height: cellHeight
-            )
+            let x = CGFloat(cursorX) * cellWidth + 2
+            let y = CGFloat(cursorAbsRow) * cellHeight
+            let style = AppThemeManager.shared.cursorStyle
+
             context.setFillColor(theme.cursor.cgColor)
-            context.fill(cursorRect)
+            switch style {
+            case .block:
+                let cursorRect = NSRect(x: x, y: y, width: cellWidth, height: cellHeight)
+                context.setFillColor(theme.cursor.withAlphaComponent(0.7).cgColor)
+                context.fill(cursorRect)
+            case .underline:
+                let cursorRect = NSRect(x: x, y: y + cellHeight - 2, width: cellWidth, height: 2)
+                context.fill(cursorRect)
+            case .bar:
+                let cursorRect = NSRect(x: x, y: y, width: 2, height: cellHeight)
+                context.fill(cursorRect)
+            }
         }
     }
 
@@ -1537,8 +1929,24 @@ class TerminalNSView: NSView {
     deinit {
         readTimer?.invalidate()
         blinkTimer?.invalidate()
-        if let handle = terminalHandle {
-            pier_terminal_destroy(handle)
+        // Save PTY to cache instead of destroying — the session survives
+        // NSView deallocation (e.g. tab switch). Only handleTabClosed destroys PTYs.
+        if let sessionId = currentSessionId, let handle = terminalHandle {
+            let entry = PTYCacheEntry(
+                handle: handle,
+                screenBuffer: screenBuffer,
+                screenAttrs: screenAttrs,
+                scrollbackBuffer: scrollbackBuffer,
+                scrollbackAttrs: scrollbackAttrs,
+                cursorX: cursorX,
+                cursorY: cursorY,
+                ptyCols: ptyCols,
+                ptyRows: ptyRows,
+                savedCursorX: savedCursorX,
+                savedCursorY: savedCursorY,
+                currentAttr: currentAttr
+            )
+            TerminalNSView.ptyCache[sessionId] = entry
         }
     }
 }

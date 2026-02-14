@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// Represents an SSH server connection profile.
 struct ServerProfile: Identifiable, Codable {
@@ -23,6 +24,14 @@ struct TerminalTab: Identifiable {
     var isSSH: Bool = false
     var serverProfile: ServerProfile? = nil
     var shellPath: String = "/bin/zsh"
+    /// Per-tab color label (auto-assigned for SSH, user-customizable)
+    var colorTag: Int? = nil  // nil=none, 0-7 = palette index
+
+    /// Preset tab color palette
+    static let colorPalette: [NSColor] = [
+        .systemRed, .systemOrange, .systemYellow, .systemGreen,
+        .systemBlue, .systemPurple, .systemPink, .systemTeal,
+    ]
 }
 
 /// Info about a terminal session for rendering.

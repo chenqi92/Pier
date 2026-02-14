@@ -84,15 +84,33 @@ class RemoteServiceManager: ObservableObject {
     /// - Parameters:
     ///   - profile: The connection profile.
     ///   - preloadedPassword: Optional pre-loaded password to avoid extra Keychain access.
-    func connect(profile: ConnectionProfile, preloadedPassword: String? = nil) {
+    func connect(profile: ConnectionProfile, preloadedPassword: String? = nil, keychainDenied: Bool = false) {
         currentProfileId = profile.id
         if profile.authType == .keyFile, let keyPath = profile.keyFilePath {
             connectWithKey(host: profile.host, port: profile.port, username: profile.username, keyPath: keyPath)
         } else {
-            // Use pre-loaded password if provided, otherwise load from Keychain
-            let password = preloadedPassword ?? (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)")) ?? ""
+            // Use pre-loaded password if provided; skip Keychain if denied earlier
+            let password: String
+            if let pwd = preloadedPassword {
+                password = pwd
+            } else if keychainDenied {
+                // Keychain was denied — don't attempt SSH with empty password
+                // (would block for SSH timeout). Wait for SSH auth success in terminal.
+                connectionStatus = ""
+                return
+            } else {
+                password = (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)")) ?? ""
+            }
             connect(host: profile.host, port: profile.port, username: profile.username, password: password)
         }
+    }
+
+    /// Retry connection with a specific password (e.g. after user typed it in terminal).
+    func retryConnect(profile: ConnectionProfile, password: String) {
+        // Disconnect any failed / partial connection first
+        if sshHandle != nil { disconnect() }
+        currentProfileId = profile.id
+        connect(host: profile.host, port: profile.port, username: profile.username, password: password)
     }
 
     /// Connect to a remote server and detect services.

@@ -18,6 +18,23 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Terminal cursor style.
+enum CursorStyle: String, CaseIterable, Identifiable {
+    case block = "block"
+    case underline = "underline"
+    case bar = "bar"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .block:     return LS("settings.cursorBlock")
+        case .underline: return LS("settings.cursorUnderline")
+        case .bar:       return LS("settings.cursorBar")
+        }
+    }
+}
+
 /// Language preference: follow system or force a locale.
 enum LanguageMode: String, CaseIterable, Identifiable {
     case system = "system"
@@ -52,6 +69,15 @@ class AppThemeManager: ObservableObject {
     // Font settings
     @AppStorage("pier.fontSize") var fontSize: Double = 13
     @AppStorage("pier.fontFamily") var fontFamily: String = "SF Mono"
+    @AppStorage("pier.fontLigatures") var fontLigatures: Bool = false
+
+    // Cursor settings
+    @AppStorage("pier.cursorStyle") var cursorStyle: CursorStyle = .block
+    @AppStorage("pier.cursorBlink") var cursorBlink: Bool = true
+
+    // Terminal visual settings
+    @AppStorage("pier.terminalOpacity") var terminalOpacity: Double = 1.0
+    @AppStorage("pier.terminalBlur") var terminalBlur: Bool = false
 
     // Pane width memory
     @AppStorage("pier.sidebarWidth") var sidebarWidth: Double = 200
@@ -107,6 +133,7 @@ class AppThemeManager: ObservableObject {
         }
         UserDefaults.standard.synchronize()
         invalidateLocalizedBundle()
+        objectWillChange.send()
     }
 
     /// Switch terminal theme by ID.

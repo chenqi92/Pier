@@ -559,3 +559,36 @@
 // MARK: - Panel
 
 "panel.openService" = "Open %@";
+
+// MARK: - Terminal Beautification
+
+/* Cursor */
+"settings.cursor" = "Cursor";
+"settings.cursorStyle" = "Cursor Style";
+"settings.cursorBlock" = "Block";
+"settings.cursorUnderline" = "Underline";
+"settings.cursorBar" = "Bar";
+"settings.cursorBlink" = "Cursor Blink";
+
+/* Terminal Appearance */
+"settings.terminalAppearance" = "Appearance";
+"settings.backgroundOpacity" = "Background Opacity";
+"settings.backgroundBlur" = "Background Blur";
+"settings.fontLigatures" = "Font Ligatures";
+
+/* Tab Colors */
+"tab.setColor" = "Set Tab Color";
+"tab.clearColor" = "Clear Color";
+"color.red" = "Red";
+"color.orange" = "Orange";
+"color.yellow" = "Yellow";
+"color.green" = "Green";
+"color.blue" = "Blue";
+"color.purple" = "Purple";
+"color.pink" = "Pink";
+"color.teal" = "Teal";
+
+/* Split Pane */
+"terminal.splitHorizontal" = "Split Horizontally";
+"terminal.splitVertical" = "Split Vertically";
+"terminal.closePane" = "Close Pane";

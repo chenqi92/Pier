@@ -132,21 +132,71 @@ struct SettingsView: View {
     // MARK: - Terminal
 
     private var terminalSettings: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(LS("settings.terminal"))
-                .font(.title2)
-                .fontWeight(.bold)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text(LS("settings.terminal"))
+                    .font(.title2)
+                    .fontWeight(.bold)
 
-            GroupBox(label: Text(LS("theme.terminal"))) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(TerminalTheme.allThemes, id: \.id) { theme in
-                        themeRow(theme)
+                // Terminal Theme
+                GroupBox(label: Text(LS("theme.terminal"))) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(TerminalTheme.allThemes, id: \.id) { theme in
+                            themeRow(theme)
+                        }
                     }
+                    .padding(8)
                 }
-                .padding(8)
-            }
 
-            Spacer()
+                // Cursor
+                GroupBox(label: Text(LS("settings.cursor"))) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text(LS("settings.cursorStyle"))
+                                .font(.caption)
+                            Spacer()
+                            Picker("", selection: $themeManager.cursorStyle) {
+                                ForEach(CursorStyle.allCases) { style in
+                                    Text(style.displayName).tag(style)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: 240)
+                        }
+
+                        Toggle(LS("settings.cursorBlink"), isOn: $themeManager.cursorBlink)
+                            .font(.caption)
+                    }
+                    .padding(8)
+                }
+
+                // Appearance
+                GroupBox(label: Text(LS("settings.terminalAppearance"))) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text(LS("settings.backgroundOpacity"))
+                                .font(.caption)
+                            Spacer()
+                            Slider(value: $themeManager.terminalOpacity, in: 0.3...1.0, step: 0.05)
+                                .frame(maxWidth: 180)
+                            Text("\(Int(themeManager.terminalOpacity * 100))%")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .frame(width: 32)
+                        }
+
+                        Toggle(LS("settings.backgroundBlur"), isOn: $themeManager.terminalBlur)
+                            .font(.caption)
+
+                        Toggle(LS("settings.fontLigatures"), isOn: $themeManager.fontLigatures)
+                            .font(.caption)
+                    }
+                    .padding(8)
+                }
+
+                Spacer()
+            }
         }
     }
 

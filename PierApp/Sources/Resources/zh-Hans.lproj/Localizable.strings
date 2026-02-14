@@ -559,3 +559,36 @@
 // MARK: - Panel
 
 "panel.openService" = "打开 %@";
+
+// MARK: - Terminal Beautification
+
+/* Cursor */
+"settings.cursor" = "光标";
+"settings.cursorStyle" = "光标样式";
+"settings.cursorBlock" = "方块";
+"settings.cursorUnderline" = "下划线";
+"settings.cursorBar" = "竖线";
+"settings.cursorBlink" = "光标闪烁";
+
+/* Terminal Appearance */
+"settings.terminalAppearance" = "外观";
+"settings.backgroundOpacity" = "背景透明度";
+"settings.backgroundBlur" = "背景模糊";
+"settings.fontLigatures" = "字体连字";
+
+/* Tab Colors */
+"tab.setColor" = "设置标签颜色";
+"tab.clearColor" = "清除颜色";
+"color.red" = "红色";
+"color.orange" = "橙色";
+"color.yellow" = "黄色";
+"color.green" = "绿色";
+"color.blue" = "蓝色";
+"color.purple" = "紫色";
+"color.pink" = "粉色";
+"color.teal" = "青色";
+
+/* Split Pane */
+"terminal.splitHorizontal" = "水平分屏";
+"terminal.splitVertical" = "垂直分屏";
+"terminal.closePane" = "关闭面板";

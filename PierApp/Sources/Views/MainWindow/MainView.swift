@@ -13,10 +13,13 @@ struct MainView: View {
     @StateObject private var terminalViewModel = TerminalViewModel()
     @EnvironmentObject var serviceManager: RemoteServiceManager
 
+    /// Stable fallback service manager — avoids creating a new one on every SwiftUI read.
+    @StateObject private var fallbackServiceManager = RemoteServiceManager()
+
     /// The service manager for the currently selected terminal tab.
-    /// Each tab has its own manager; falls back to an empty one (never the global shared one).
+    /// Each tab has its own manager; falls back to a stable empty instance.
     private var activeServiceManager: RemoteServiceManager {
-        terminalViewModel.activeServiceManager ?? RemoteServiceManager()
+        terminalViewModel.activeServiceManager ?? fallbackServiceManager
     }
 
     @State private var showLeftPanel = true
@@ -48,7 +51,6 @@ struct MainView: View {
             if showRightPanel {
                 RightPanelView(serviceManager: activeServiceManager)
                     .frame(minWidth: 320, idealWidth: rightPanelWidth, maxWidth: 600)
-                    .id(terminalViewModel.selectedTabId)
             }
         }
         .toolbar {
@@ -290,6 +292,15 @@ struct TerminalContainerView: View {
             // Terminal content
             if viewModel.tabs.isEmpty {
                 emptyState
+            } else if let tabId = viewModel.selectedTabId,
+                      let splitNode = viewModel.splitNodes[tabId] {
+                TerminalSplitView(
+                    node: splitNode,
+                    onSplitH: { nodeId in viewModel.splitHorizontal(tabId: tabId, nodeId: nodeId) },
+                    onSplitV: { nodeId in viewModel.splitVertical(tabId: tabId, nodeId: nodeId) },
+                    onClosePane: { nodeId in viewModel.closePane(tabId: tabId, nodeId: nodeId) }
+                )
+                .layoutPriority(1)
             } else {
                 TerminalView(session: viewModel.currentSession)
                     .layoutPriority(1)
@@ -335,7 +346,8 @@ struct TerminalTabBar: View {
                             tab: tab,
                             isSelected: viewModel.selectedTabId == tab.id,
                             onSelect: { viewModel.selectTab(tab.id) },
-                            onClose: { viewModel.closeTab(tab.id) }
+                            onClose: { viewModel.closeTab(tab.id) },
+                            onColorChange: { color in viewModel.setTabColor(tab.id, color: color) }
                         )
                     }
                 }
@@ -374,10 +386,19 @@ struct TerminalTabItem: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    var onColorChange: ((Int?) -> Void)? = nil
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 0) {
+            // Color tag strip
+            if let colorIdx = tab.colorTag, colorIdx < TerminalTab.colorPalette.count {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color(nsColor: TerminalTab.colorPalette[colorIdx]))
+                    .frame(width: 3, height: 18)
+                    .padding(.trailing, 4)
+            }
+
             Image(systemName: tab.isSSH ? "network" : "terminal")
                 .font(.system(size: 10))
                 .foregroundColor(tab.isSSH ? .green : (isSelected ? .accentColor : .secondary))
@@ -386,6 +407,7 @@ struct TerminalTabItem: View {
                 .font(.system(size: 11, weight: isSelected ? .medium : .regular))
                 .foregroundColor(isSelected ? .primary : .secondary)
                 .lineLimit(1)
+                .padding(.leading, 4)
 
             Button(action: onClose) {
                 Image(systemName: "xmark.circle.fill")
@@ -394,6 +416,7 @@ struct TerminalTabItem: View {
             }
             .buttonStyle(.borderless)
             .opacity(isSelected || isHovered ? 1 : 0)
+            .padding(.leading, 4)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
@@ -420,6 +443,32 @@ struct TerminalTabItem: View {
                 isHovered = hovering
             }
         }
+        .contextMenu {
+            Menu(LS("tab.setColor")) {
+                ForEach(0..<TerminalTab.colorPalette.count, id: \.self) { idx in
+                    Button(action: { onColorChange?(idx) }) {
+                        HStack {
+                            Circle()
+                                .fill(Color(nsColor: TerminalTab.colorPalette[idx]))
+                                .frame(width: 10, height: 10)
+                            Text(tabColorName(idx))
+                        }
+                    }
+                }
+                Divider()
+                Button(LS("tab.clearColor")) {
+                    onColorChange?(nil)
+                }
+            }
+        }
+    }
+
+    private func tabColorName(_ idx: Int) -> String {
+        let names = [
+            LS("color.red"), LS("color.orange"), LS("color.yellow"), LS("color.green"),
+            LS("color.blue"), LS("color.purple"), LS("color.pink"), LS("color.teal"),
+        ]
+        return idx < names.count ? names[idx] : ""
     }
 }
 
