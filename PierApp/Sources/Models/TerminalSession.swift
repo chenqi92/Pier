@@ -47,6 +47,9 @@ struct RemoteFile: Identifiable {
     let isDir: Bool
     let size: UInt64
     let modified: Date?
+    var permissions: String = ""
+    var owner: String = ""
+    var group: String = ""
 }
 
 /// Transfer progress info.

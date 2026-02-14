@@ -63,11 +63,16 @@ class FileItem: Identifiable, ObservableObject {
         }
     }
 
+    /// Shared formatter to avoid repeated allocations.
+    private static let sizeFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
+        f.countStyle = .file
+        return f
+    }()
+
     /// Human-readable file size.
     var formattedSize: String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: Int64(size))
+        Self.sizeFormatter.string(fromByteCount: Int64(size))
     }
 }

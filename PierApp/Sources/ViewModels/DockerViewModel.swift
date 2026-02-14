@@ -106,6 +106,11 @@ class DockerViewModel: ObservableObject {
         self.isRemoteMode = serviceManager.isConnected
     }
 
+    deinit {
+        timer?.cancel()
+        statsTimer?.cancel()
+    }
+
     func checkDockerAvailability() {
         Task {
             isLoading = true

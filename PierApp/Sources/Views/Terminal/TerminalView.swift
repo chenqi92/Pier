@@ -74,7 +74,7 @@ class TerminalNSView: NSView {
 
     // Theme (replaces hardcoded colors)
     var theme: TerminalTheme = .defaultDark {
-        didSet { applyTheme() }
+        didSet { applyTheme(); rebuildCachedAttrs() }
     }
 
     // PTY handle from Rust
@@ -107,6 +107,20 @@ class TerminalNSView: NSView {
 
     // URL detection
     private var detectedURLs: [(range: NSRange, url: URL, row: Int, startCol: Int, endCol: Int)] = []
+    private var lastURLDetectionTime: CFAbsoluteTime = 0
+    private lazy var urlDetector: NSDataDetector? = {
+        try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    }()
+
+    // Reusable read buffer (avoid 64KB allocation per tick)
+    private var readBuffer = [UInt8](repeating: 0, count: 65536)
+
+    // Cached fonts and attributes (rebuilt on theme/font change)
+    private var cachedMonoFont: NSFont!
+    private var cachedFallbackFont: NSFont!
+    private var cachedNormalAttrs: [NSAttributedString.Key: Any] = [:]
+    private var cachedFallbackAttrs: [NSAttributedString.Key: Any] = [:]
+    private var cachedURLAttrs: [NSAttributedString.Key: Any] = [:]
 
     // MARK: - Lifecycle
 
@@ -137,12 +151,56 @@ class TerminalNSView: NSView {
             self?.cursorVisible.toggle()
             self?.setNeedsDisplay(self?.bounds ?? .zero)
         }
+
+        // Listen for SFTP directory changes → cd in terminal
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSftpDirectoryChanged(_:)),
+            name: .sftpDirectoryChanged,
+            object: nil
+        )
+    }
+
+    @objc private func handleSftpDirectoryChanged(_ notification: Notification) {
+        guard let info = notification.object as? [String: String],
+              let path = info["path"],
+              let handle = terminalHandle else { return }
+
+        // Send "cd <path>\n" to the terminal PTY
+        let cdCommand = "cd \(shellEscapeForTerminal(path))\n"
+        let bytes = Array(cdCommand.utf8)
+        pier_terminal_write(handle, bytes, UInt(bytes.count))
+    }
+
+    /// Shell-escape a path for terminal cd command.
+    private func shellEscapeForTerminal(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// Apply the current theme colors to the view.
     func applyTheme() {
         layer?.backgroundColor = theme.background.cgColor
         needsDisplay = true
+    }
+
+    /// Rebuild cached font and attribute dictionaries.
+    private func rebuildCachedAttrs() {
+        cachedMonoFont = NSFont(name: fontFamily, size: fontSize)
+            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        cachedFallbackFont = NSFont.systemFont(ofSize: fontSize)
+        cachedNormalAttrs = [
+            .font: cachedMonoFont!,
+            .foregroundColor: theme.foreground,
+        ]
+        cachedFallbackAttrs = [
+            .font: cachedFallbackFont!,
+            .foregroundColor: theme.foreground,
+        ]
+        cachedURLAttrs = [
+            .font: cachedMonoFont!,
+            .foregroundColor: NSColor.systemBlue,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
     }
 
     /// Called by updateNSView when the session changes.
@@ -200,6 +258,9 @@ class TerminalNSView: NSView {
     private func stopTerminal() {
         readTimer?.invalidate()
         readTimer = nil
+        blinkTimer?.invalidate()
+        blinkTimer = nil
+        NotificationCenter.default.removeObserver(self, name: .sftpDirectoryChanged, object: nil)
         if let handle = terminalHandle {
             pier_terminal_destroy(handle)
             terminalHandle = nil
@@ -241,14 +302,18 @@ class TerminalNSView: NSView {
     private func readTerminalOutput() {
         guard let handle = terminalHandle else { return }
 
-        var buffer = [UInt8](repeating: 0, count: 65536)
-        let bytesRead = pier_terminal_read(handle, &buffer, UInt(buffer.count))
+        let bytesRead = pier_terminal_read(handle, &readBuffer, UInt(readBuffer.count))
 
         if bytesRead > 0 {
-            let data = Array(buffer[0..<Int(bytesRead)])
+            let data = Array(readBuffer[0..<Int(bytesRead)])
             processTerminalOutput(data)
             updateDocumentSize()
-            detectURLsInBuffer()
+            // Throttle URL detection to at most once per 500ms
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - lastURLDetectionTime > 0.5 {
+                lastURLDetectionTime = now
+                detectURLsInBuffer()
+            }
             needsDisplay = true
         }
     }
@@ -281,69 +346,163 @@ class TerminalNSView: NSView {
     private var ansiState: AnsiState = .normal
     private var csiParams: String = ""
 
+    // UTF-8 multi-byte accumulator
+    private var utf8Buffer: [UInt8] = []
+    private var utf8Remaining: Int = 0
+
+    /// Check if a Unicode scalar is a wide (full-width / CJK) character that occupies 2 terminal cells.
+    private func isWideCharacter(_ scalar: Unicode.Scalar) -> Bool {
+        let v = scalar.value
+        // CJK Unified Ideographs and extensions
+        if v >= 0x2E80 && v <= 0x9FFF { return true }
+        if v >= 0xF900 && v <= 0xFAFF { return true }
+        // Hangul
+        if v >= 0xAC00 && v <= 0xD7AF { return true }
+        // Fullwidth Forms
+        if v >= 0xFF01 && v <= 0xFF60 { return true }
+        if v >= 0xFFE0 && v <= 0xFFE6 { return true }
+        // CJK Unified Ideographs Extension B+
+        if v >= 0x20000 && v <= 0x2FA1F { return true }
+        return false
+    }
+
+    /// Place a decoded character into the screen buffer at the current cursor position,
+    /// handling line wrap and wide (double-width) characters.
+    private func placeCharacter(_ char: Character) {
+        let cols = visibleCols
+        let charWidth: Int
+        if let scalar = char.unicodeScalars.first, isWideCharacter(scalar) {
+            charWidth = 2
+        } else {
+            charWidth = 1
+        }
+
+        // Check if we need to wrap before placing
+        if cursorX + charWidth > cols {
+            cursorX = 0
+            cursorY += 1
+            if cursorY >= visibleRows {
+                if !screenBuffer.isEmpty {
+                    scrollbackBuffer.append(screenBuffer.removeFirst())
+                }
+                screenBuffer.append(Array(repeating: " ", count: cols))
+                cursorY = visibleRows - 1
+            }
+            while cursorY >= screenBuffer.count {
+                screenBuffer.append(Array(repeating: " ", count: cols))
+            }
+        }
+
+        // Ensure buffer has the row
+        while cursorY >= screenBuffer.count {
+            screenBuffer.append(Array(repeating: " ", count: cols))
+        }
+
+        if cursorY < screenBuffer.count && cursorX < screenBuffer[cursorY].count {
+            screenBuffer[cursorY][cursorX] = char
+            cursorX += 1
+            // For wide characters, place a zero-width placeholder in the next cell
+            if charWidth == 2 && cursorX < screenBuffer[cursorY].count {
+                screenBuffer[cursorY][cursorX] = "\u{200B}" // zero-width space as placeholder
+                cursorX += 1
+            }
+        }
+    }
+
     private func processTerminalOutput(_ bytes: [UInt8]) {
         let cols = visibleCols
 
         for byte in bytes {
-            let char = Character(UnicodeScalar(byte))
+            // If we are accumulating a multi-byte UTF-8 sequence, continue collecting
+            if utf8Remaining > 0 {
+                if byte & 0xC0 == 0x80 {
+                    // Valid continuation byte
+                    utf8Buffer.append(byte)
+                    utf8Remaining -= 1
+                    if utf8Remaining == 0 {
+                        // Decode the complete UTF-8 sequence
+                        if let str = String(bytes: utf8Buffer, encoding: .utf8),
+                           let char = str.first {
+                            placeCharacter(char)
+                        }
+                        utf8Buffer.removeAll()
+                    }
+                } else {
+                    // Invalid continuation — discard buffer and reprocess this byte
+                    utf8Buffer.removeAll()
+                    utf8Remaining = 0
+                    // Fall through to process this byte normally below
+                    processTerminalByte(byte, cols: cols)
+                }
+                continue
+            }
 
-            switch ansiState {
-            case .normal:
-                switch byte {
-                case 0x1B: // ESC
-                    ansiState = .escape
-                case 0x0A: // LF (\n)
-                    cursorY += 1
-                    if cursorY >= visibleRows {
-                        // Scroll: move top line to scrollback
-                        if !screenBuffer.isEmpty {
-                            scrollbackBuffer.append(screenBuffer.removeFirst())
-                        }
-                        screenBuffer.append(Array(repeating: " ", count: cols))
-                        cursorY = visibleRows - 1
-                        if scrollbackBuffer.count > maxScrollback {
-                            scrollbackBuffer.removeFirst(scrollbackBuffer.count - maxScrollback)
-                        }
+            // Check if this byte starts a multi-byte UTF-8 sequence (in .normal state only)
+            if ansiState == .normal && byte >= 0xC0 {
+                if byte & 0xE0 == 0xC0 {
+                    // 2-byte sequence
+                    utf8Buffer = [byte]
+                    utf8Remaining = 1
+                    continue
+                } else if byte & 0xF0 == 0xE0 {
+                    // 3-byte sequence
+                    utf8Buffer = [byte]
+                    utf8Remaining = 2
+                    continue
+                } else if byte & 0xF8 == 0xF0 {
+                    // 4-byte sequence
+                    utf8Buffer = [byte]
+                    utf8Remaining = 3
+                    continue
+                }
+                // Invalid lead byte (0xF8+), ignore
+                continue
+            }
+
+            processTerminalByte(byte, cols: cols)
+        }
+    }
+
+    /// Process a single byte that is not part of a multi-byte UTF-8 sequence.
+    private func processTerminalByte(_ byte: UInt8, cols: Int) {
+        let char = Character(UnicodeScalar(byte))
+
+        switch ansiState {
+        case .normal:
+            switch byte {
+            case 0x1B: // ESC
+                ansiState = .escape
+            case 0x0A: // LF (\n)
+                cursorY += 1
+                if cursorY >= visibleRows {
+                    // Scroll: move top line to scrollback
+                    if !screenBuffer.isEmpty {
+                        scrollbackBuffer.append(screenBuffer.removeFirst())
                     }
-                    // Ensure screenBuffer has enough rows
-                    while cursorY >= screenBuffer.count {
-                        screenBuffer.append(Array(repeating: " ", count: cols))
-                    }
-                case 0x0D: // CR (\r)
-                    cursorX = 0
-                case 0x08: // BS (backspace)
-                    if cursorX > 0 { cursorX -= 1 }
-                case 0x09: // TAB
-                    cursorX = min(((cursorX / 8) + 1) * 8, cols - 1)
-                case 0x07: // BEL
-                    break // Ignore bell
-                case 0x00...0x06, 0x0B, 0x0C, 0x0E...0x1A, 0x1C...0x1F:
-                    break // Ignore other control characters
-                default:
-                    // Printable character
-                    while cursorY >= screenBuffer.count {
-                        screenBuffer.append(Array(repeating: " ", count: cols))
-                    }
-                    if cursorX >= cols {
-                        // Line wrap
-                        cursorX = 0
-                        cursorY += 1
-                        if cursorY >= visibleRows {
-                            if !screenBuffer.isEmpty {
-                                scrollbackBuffer.append(screenBuffer.removeFirst())
-                            }
-                            screenBuffer.append(Array(repeating: " ", count: cols))
-                            cursorY = visibleRows - 1
-                        }
-                        while cursorY >= screenBuffer.count {
-                            screenBuffer.append(Array(repeating: " ", count: cols))
-                        }
-                    }
-                    if cursorY < screenBuffer.count && cursorX < screenBuffer[cursorY].count {
-                        screenBuffer[cursorY][cursorX] = char
-                        cursorX += 1
+                    screenBuffer.append(Array(repeating: " ", count: cols))
+                    cursorY = visibleRows - 1
+                    if scrollbackBuffer.count > maxScrollback {
+                        scrollbackBuffer.removeFirst(scrollbackBuffer.count - maxScrollback)
                     }
                 }
+                // Ensure screenBuffer has enough rows
+                while cursorY >= screenBuffer.count {
+                    screenBuffer.append(Array(repeating: " ", count: cols))
+                }
+            case 0x0D: // CR (\r)
+                cursorX = 0
+            case 0x08: // BS (backspace)
+                if cursorX > 0 { cursorX -= 1 }
+            case 0x09: // TAB
+                cursorX = min(((cursorX / 8) + 1) * 8, cols - 1)
+            case 0x07: // BEL
+                break // Ignore bell
+            case 0x00...0x06, 0x0B, 0x0C, 0x0E...0x1A, 0x1C...0x1F:
+                break // Ignore other control characters
+            default:
+                // ASCII printable character
+                placeCharacter(char)
+            }
 
             case .escape:
                 switch byte {
@@ -407,7 +566,6 @@ class TerminalNSView: NSView {
                 // Expecting '\' (0x5C) to terminate OSC
                 ansiState = .normal
             }
-        }
     }
 
     private func handleCSI(finalByte: UInt8, params: String) {
@@ -583,11 +741,24 @@ class TerminalNSView: NSView {
 
     private func detectURLsInBuffer() {
         detectedURLs.removeAll()
-        let allLines = scrollbackBuffer + screenBuffer
+        guard let detector = urlDetector else { return }
 
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return }
+        // Only scan visible + near-visible lines, not entire scrollback
+        let clipBounds = enclosingScrollView?.contentView.bounds ?? bounds
+        let scrollbackCount = scrollbackBuffer.count
+        let totalLines = scrollbackCount + screenBuffer.count
+        let firstRow = max(0, Int(clipBounds.origin.y / cellHeight) - 5)
+        let lastRow = min(totalLines, firstRow + Int(clipBounds.height / cellHeight) + 10)
 
-        for (row, line) in allLines.enumerated() {
+        for row in firstRow..<lastRow {
+            let line: [Character]
+            if row < scrollbackCount {
+                line = scrollbackBuffer[row]
+            } else {
+                let screenRow = row - scrollbackCount
+                guard screenRow < screenBuffer.count else { continue }
+                line = screenBuffer[screenRow]
+            }
             let text = String(line)
             let range = NSRange(text.startIndex..., in: text)
             let matches = detector.matches(in: text, range: range)
@@ -602,29 +773,29 @@ class TerminalNSView: NSView {
 
     // MARK: - Rendering
 
+    /// Access a line by absolute row index without copying the entire buffer.
+    private func lineAtRow(_ row: Int) -> [Character]? {
+        let scrollbackCount = scrollbackBuffer.count
+        if row < scrollbackCount {
+            return scrollbackBuffer[row]
+        }
+        let screenRow = row - scrollbackCount
+        guard screenRow < screenBuffer.count else { return nil }
+        return screenBuffer[screenRow]
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        // Ensure cached attrs are initialized
+        if cachedMonoFont == nil { rebuildCachedAttrs() }
 
         // Background
         context.setFillColor(theme.background.cgColor)
         context.fill(bounds)
 
-        let font = NSFont(name: fontFamily, size: fontSize)
-            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-
-        let normalAttrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: theme.foreground,
-        ]
-
-        let urlAttrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.systemBlue,
-            .underlineStyle: NSUnderlineStyle.single.rawValue,
-        ]
-
-        let allLines = scrollbackBuffer + screenBuffer
-        let totalLines = allLines.count
+        let scrollbackCount = scrollbackBuffer.count
+        let totalLines = scrollbackCount + screenBuffer.count
 
         // Calculate visible range from scroll position
         let clipBounds = enclosingScrollView?.contentView.bounds ?? bounds
@@ -634,8 +805,7 @@ class TerminalNSView: NSView {
 
         // Render visible lines (isFlipped: row 0 at y=0, row 1 at y=cellHeight, etc.)
         for row in firstVisibleRow..<lastVisibleRow {
-            guard row < allLines.count else { break }
-            let line = allLines[row]
+            guard let line = lineAtRow(row) else { break }
             let y = CGFloat(row) * cellHeight
 
             // Check if this row has URLs
@@ -659,24 +829,30 @@ class TerminalNSView: NSView {
                 }
             }
 
-            // Render text character by character for URL styling
-            if !rowURLs.isEmpty {
-                for (col, char) in line.enumerated() {
-                    let isURL = rowURLs.contains { col >= $0.startCol && col < $0.endCol }
-                    let attrs = isURL ? urlAttrs : normalAttrs
-                    let str = NSAttributedString(string: String(char), attributes: attrs)
-                    str.draw(at: NSPoint(x: CGFloat(col) * cellWidth + 2, y: y))
+            // Render text character by character
+            for (col, char) in line.enumerated() {
+                // Skip spaces and zero-width space placeholders (wide char 2nd cell)
+                guard char != " " && char != "\u{200B}" else { continue }
+
+                // Choose font: use fallback for non-ASCII (CJK, emoji, etc.)
+                let isASCII = char.asciiValue != nil
+                let attrs: [NSAttributedString.Key: Any]
+                if !rowURLs.isEmpty && rowURLs.contains(where: { col >= $0.startCol && col < $0.endCol }) {
+                    attrs = cachedURLAttrs
+                } else if isASCII {
+                    attrs = cachedNormalAttrs
+                } else {
+                    attrs = cachedFallbackAttrs
                 }
-            } else {
-                let text = String(line)
-                let attrString = NSAttributedString(string: text, attributes: normalAttrs)
-                attrString.draw(at: NSPoint(x: 2, y: y))
+
+                let str = NSAttributedString(string: String(char), attributes: attrs)
+                str.draw(at: NSPoint(x: CGFloat(col) * cellWidth + 2, y: y))
             }
         }
 
         // Render cursor (only in screen area, not scrollback)
         if cursorVisible {
-            let cursorAbsRow = scrollbackBuffer.count + cursorY
+            let cursorAbsRow = scrollbackCount + cursorY
             let cursorRect = NSRect(
                 x: CGFloat(cursorX) * cellWidth + 2,
                 y: CGFloat(cursorAbsRow) * cellHeight,

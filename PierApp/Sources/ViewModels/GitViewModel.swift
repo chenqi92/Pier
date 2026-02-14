@@ -129,6 +129,10 @@ class GitViewModel: ObservableObject {
         checkGitRepo()
     }
 
+    deinit {
+        timer?.cancel()
+    }
+
     func checkGitRepo() {
         Task {
             let result = await runGit(["rev-parse", "--is-inside-work-tree"])
@@ -379,6 +383,9 @@ class GitViewModel: ObservableObject {
             var currentAuthor = ""
             var currentDate = ""
 
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+
             for rawLine in output.split(separator: "\n", omittingEmptySubsequences: false) {
                 let line = String(rawLine)
 
@@ -389,9 +396,7 @@ class GitViewModel: ObservableObject {
                 } else if line.hasPrefix("author-time ") {
                     if let ts = TimeInterval(line.dropFirst(12)) {
                         let date = Date(timeIntervalSince1970: ts)
-                        let fmt = DateFormatter()
-                        fmt.dateFormat = "yyyy-MM-dd"
-                        currentDate = fmt.string(from: date)
+                        currentDate = dateFormatter.string(from: date)
                     }
                 } else if line.hasPrefix("\t") {
                     lineNum += 1

@@ -132,6 +132,19 @@
 "sftp.notConnected" = "Not Connected";
 "sftp.selectMarkdown" = "Select a Markdown file\nfrom the file browser";
 "sftp.connectToServer" = "Connect to Server";
+"sftp.newFolder" = "New Folder";
+"sftp.folderName" = "Folder Name";
+"sftp.create" = "Create";
+"sftp.cancel" = "Cancel";
+"sftp.refresh" = "Refresh";
+"sftp.goUp" = "Go Up";
+"sftp.open" = "Open";
+"sftp.delete" = "Delete";
+"sftp.deleteFailed" = "Failed to delete file";
+"sftp.mkdirFailed" = "Failed to create folder";
+"sftp.listFailed" = "Failed to list directory";
+"sftp.uploadNotReady" = "File upload via SFTP is not yet available";
+"sftp.downloadNotReady" = "File download via SFTP is not yet available";
 
 /* ═══════════════════════════════════════
    Settings
@@ -157,6 +170,11 @@
 "ssh.detectingServices" = "Detecting services...";
 "ssh.connectFailed" = "Connection failed";
 "ssh.servicesDetected %lld %lld" = "%lld services found (%lld running)";
+"ssh.serviceDetectionTitle" = "Service Detection";
+"ssh.serviceDetectionDesc" = "Connect to an SSH server via Connection Manager to auto-detect services like MySQL, Redis, and Docker.";
+"ssh.connectNow" = "Connect";
+"ssh.detectedServicesTitle" = "Detected Services";
+"ssh.refreshServices" = "Refresh Services";
 
 "service.running" = "Running";
 "service.stopped" = "Stopped";

@@ -132,6 +132,19 @@
 "sftp.notConnected" = "未连接";
 "sftp.selectMarkdown" = "从文件浏览器中\n选择 Markdown 文件";
 "sftp.connectToServer" = "连接到服务器";
+"sftp.newFolder" = "新建文件夹";
+"sftp.folderName" = "文件夹名称";
+"sftp.create" = "创建";
+"sftp.cancel" = "取消";
+"sftp.refresh" = "刷新";
+"sftp.goUp" = "返回上级";
+"sftp.open" = "打开";
+"sftp.delete" = "删除";
+"sftp.deleteFailed" = "删除文件失败";
+"sftp.mkdirFailed" = "创建文件夹失败";
+"sftp.listFailed" = "列出目录失败";
+"sftp.uploadNotReady" = "SFTP 文件上传功能尚未可用";
+"sftp.downloadNotReady" = "SFTP 文件下载功能尚未可用";
 
 /* ═══════════════════════════════════════
    设置
@@ -157,6 +170,11 @@
 "ssh.detectingServices" = "正在检测服务...";
 "ssh.connectFailed" = "连接失败";
 "ssh.servicesDetected %lld %lld" = "发现 %lld 个服务（%lld 个运行中）";
+"ssh.serviceDetectionTitle" = "服务检测";
+"ssh.serviceDetectionDesc" = "通过连接管理器连接 SSH 服务器，自动检测 MySQL、Redis、Docker 等服务。";
+"ssh.connectNow" = "连接";
+"ssh.detectedServicesTitle" = "已检测到的服务";
+"ssh.refreshServices" = "刷新服务";
 
 "service.running" = "运行中";
 "service.stopped" = "已停止";

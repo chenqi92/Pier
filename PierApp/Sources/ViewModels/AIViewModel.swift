@@ -42,6 +42,10 @@ class AIViewModel: ObservableObject {
         self.provider = provider ?? OpenAIProvider()
     }
 
+    deinit {
+        currentTask?.cancel()
+    }
+
     // MARK: - Send Message
 
     /// Send a user message and stream the AI response.

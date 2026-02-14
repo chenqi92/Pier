@@ -13,6 +13,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        // Set custom app icon (swift build doesn't create .app bundle,
+        // so CFBundleIconFile in Info.plist doesn't take effect in the Dock)
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
+            ?? Bundle.module.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
+
         // Initialize Rust core exactly once (fixes B1: was in onAppear, could fire multiple times)
         pier_init()
 
