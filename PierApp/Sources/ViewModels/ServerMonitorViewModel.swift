@@ -87,7 +87,26 @@ class ServerMonitorViewModel: ObservableObject {
 
     // MARK: - Lifecycle
 
+    func resetState() {
+        stopMonitoring()
+        snapshots.removeAll()
+        disks.removeAll()
+        topProcesses.removeAll()
+        gpuInfos.removeAll()
+        hasGPU = false
+        hostname = ""
+        kernelVersion = ""
+        uptime = ""
+        processCount = 0
+        networkRxRate = 0
+        networkTxRate = 0
+        lastNetworkRx = 0
+        lastNetworkTx = 0
+        lastSnapshotTime = nil
+    }
+
     func startMonitoring() {
+        resetState()
         guard pollingTimer == nil else { return }
         isLoading = true
         // Initial full load

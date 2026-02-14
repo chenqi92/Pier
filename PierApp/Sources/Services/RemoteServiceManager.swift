@@ -49,7 +49,9 @@ struct DetectedService: Codable, Identifiable {
 /// (MySQL, Redis, PostgreSQL, Docker) and publishes the results so the
 /// right panel can dynamically show only the available tool tabs.
 @MainActor
-class RemoteServiceManager: ObservableObject {
+class RemoteServiceManager: ObservableObject, Identifiable {
+
+    let id = UUID()
 
     // MARK: - Published State
 
@@ -63,6 +65,9 @@ class RemoteServiceManager: ObservableObject {
     @Published var activeTunnels: [ServiceTunnel] = []
     @Published var savedProfiles: [ConnectionProfile] = []
     @Published var savedGroups: [ServerGroup] = []
+
+    /// Persisted right-panel tab selection per terminal tab.
+    @Published var lastSelectedPanelMode: RightPanelMode = .markdown
 
     // MARK: - Private
 
@@ -344,41 +349,62 @@ class RemoteServiceManager: ObservableObject {
 
     // MARK: - Remote Execution
 
-    /// Execute a command on the remote server.
-    func exec(_ command: String) async -> (exitCode: Int, stdout: String) {
+    /// Execute a command on the remote server with a timeout.
+    ///
+    /// Uses a fire-and-forget pattern for the blocking FFI call so the
+    /// timeout actually works even when `pier_ssh_exec` blocks indefinitely.
+    func exec(_ command: String, timeout: TimeInterval = 30) async -> (exitCode: Int, stdout: String) {
         guard let handle = sshHandle else {
             return (-1, "Not connected")
         }
 
-        return await Task.detached {
-            let resultPtr = command.withCString { cmdC in
-                pier_ssh_exec(handle, cmdC)
-            }
+        return await withCheckedContinuation { continuation in
+            let guard_ = ContinuationGuard()
 
-            guard let resultPtr else {
-                return (-1, "Exec failed")
-            }
-
-            let jsonString = String(cString: resultPtr)
-            pier_string_free(resultPtr)
-
-            // Parse JSON with mixed types: exit_code is Int, stdout is String
-            if let data = jsonString.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                let exitCode: Int
-                if let code = json["exit_code"] as? Int {
-                    exitCode = code
-                } else if let codeStr = json["exit_code"] as? String, let code = Int(codeStr) {
-                    exitCode = code
-                } else {
-                    exitCode = -1
+            // Fire-and-forget: blocking FFI runs in a fully detached task.
+            // If it finishes after the timeout, the result is simply discarded.
+            Task.detached {
+                let resultPtr = command.withCString { cmdC in
+                    pier_ssh_exec(handle, cmdC)
                 }
-                let stdout = json["stdout"] as? String ?? ""
-                return (exitCode, stdout)
+
+                guard let resultPtr else {
+                    if await guard_.tryResume() {
+                        continuation.resume(returning: (-1, "Exec failed"))
+                    }
+                    return
+                }
+
+                let jsonString = String(cString: resultPtr)
+                pier_string_free(resultPtr)
+
+                var parsed: (Int, String) = (-1, jsonString)
+                if let data = jsonString.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let exitCode: Int
+                    if let code = json["exit_code"] as? Int {
+                        exitCode = code
+                    } else if let codeStr = json["exit_code"] as? String, let code = Int(codeStr) {
+                        exitCode = code
+                    } else {
+                        exitCode = -1
+                    }
+                    parsed = (exitCode, json["stdout"] as? String ?? "")
+                }
+
+                if await guard_.tryResume() {
+                    continuation.resume(returning: parsed)
+                }
             }
 
-            return (-1, jsonString)
-        }.value
+            // Timeout: if FFI hasn't finished, resume with error
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                if await guard_.tryResume() {
+                    continuation.resume(returning: (-1, "Command timed out"))
+                }
+            }
+        }
     }
 
     // MARK: - Panel Mode Filtering
@@ -408,5 +434,21 @@ class RemoteServiceManager: ObservableObject {
         if let handle = sshHandle {
             pier_ssh_disconnect(handle)
         }
+    }
+}
+
+// MARK: - Continuation Guard (thread-safe single-resume)
+
+/// Ensures a `CheckedContinuation` is resumed exactly once when racing
+/// a blocking FFI call against a timeout.
+private actor ContinuationGuard {
+    private var resumed = false
+
+    /// Returns `true` if this is the first call (caller should resume).
+    /// Returns `false` if already resumed (caller should discard).
+    func tryResume() -> Bool {
+        if resumed { return false }
+        resumed = true
+        return true
     }
 }

@@ -4,10 +4,18 @@ import SwiftUI
 /// Docker management, Git panel, MySQL client, Redis, Log viewer.
 /// Remote-context tabs only appear when services are detected via SSH.
 struct RightPanelView: View {
-    @State private var selectedMode: RightPanelMode = .markdown
+    @State private var selectedMode: RightPanelMode
     @State private var markdownPath: String? = nil
     @StateObject private var remoteFileVM = RemoteFileViewModel()
     @ObservedObject var serviceManager: RemoteServiceManager
+
+    init(serviceManager: RemoteServiceManager) {
+        self.serviceManager = serviceManager
+        // Restore persisted panel mode, but fall back to .markdown if unavailable
+        let saved = serviceManager.lastSelectedPanelMode
+        let available = serviceManager.availablePanelModes
+        _selectedMode = State(initialValue: available.contains(saved) ? saved : .markdown)
+    }
 
     // Detected SSH from terminal (for inline connect prompt)
     @State private var detectedSSHHost: String?
@@ -66,6 +74,12 @@ struct RightPanelView: View {
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         .onAppear {
             remoteFileVM.serviceManager = serviceManager
+            if serviceManager.isConnected {
+                remoteFileVM.onConnectionChanged(connected: true)
+            }
+        }
+        .onChange(of: selectedMode) { _, newMode in
+            serviceManager.lastSelectedPanelMode = newMode
         }
         .onReceive(NotificationCenter.default.publisher(for: .previewMarkdown)) { notification in
             if let path = notification.object as? String {

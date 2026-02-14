@@ -25,7 +25,7 @@ struct LocalFileView: View {
                 fileTreeList
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     // MARK: - Header
@@ -63,7 +63,7 @@ struct LocalFileView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     // MARK: - Search
@@ -83,10 +83,10 @@ struct LocalFileView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+        .background(Color(nsColor: .textBackgroundColor))
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.3))
+                .fill(Color(nsColor: .separatorColor))
                 .frame(height: 0.5)
         }
     }
@@ -99,7 +99,8 @@ struct LocalFileView: View {
                 FileTreeNode(item: item, viewModel: viewModel)
             }
         }
-        .listStyle(.sidebar)
+        .listStyle(.inset)
+        .scrollContentBackground(.hidden)
         .transaction { transaction in
             // Disable the default SwiftUI "drop-in" animation for tree expand/collapse
             transaction.animation = nil

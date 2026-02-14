@@ -50,6 +50,16 @@ struct ServerMonitorView: View {
                 viewModel.stopMonitoring()
             }
         }
+        .onChange(of: serviceManager?.id) { _, _ in
+            // Different tab selected — reset and restart for the new server
+            viewModel.resetState()
+            if let sm = serviceManager {
+                viewModel.serviceManager = sm
+                if sm.isConnected {
+                    viewModel.startMonitoring()
+                }
+            }
+        }
         .onDisappear {
             viewModel.stopMonitoring()
         }

@@ -39,7 +39,7 @@ struct LeftPanelView: View {
                 ServerListPanelView(serviceManager: serviceManager, terminalViewModel: terminalViewModel)
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     // MARK: - Tab Bar
@@ -70,7 +70,7 @@ struct LeftPanelView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 }
 
@@ -212,7 +212,7 @@ struct ServerListPanelView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     // MARK: - Search Bar

@@ -50,6 +50,7 @@ struct MainView: View {
             // ── Right Panel: Multi-function Area ──
             if showRightPanel {
                 RightPanelView(serviceManager: activeServiceManager)
+                    .id(activeServiceManager.id)
                     .frame(minWidth: 320, idealWidth: rightPanelWidth, maxWidth: 600)
             }
         }
