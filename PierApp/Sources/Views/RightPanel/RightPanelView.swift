@@ -389,7 +389,7 @@ struct RightPanelView: View {
                                 .foregroundColor(.accentColor)
                         }
                         .buttonStyle(.borderless)
-                        .help("Open \(service.name)")
+                        .help(String(format: LS("panel.openService"), service.name))
                     }
                 }
             }

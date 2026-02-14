@@ -109,7 +109,7 @@ struct DiffView: View {
             }
         }
         .font(.system(size: 11, design: .monospaced))
-        .background(Color(red: 0.08, green: 0.08, blue: 0.10))
+        .background(Color(nsColor: .textBackgroundColor))
     }
 
     private func inlineLineView(_ line: DiffLine) -> some View {
@@ -172,7 +172,7 @@ struct DiffView: View {
             }
         }
         .font(.system(size: 11, design: .monospaced))
-        .background(Color(red: 0.08, green: 0.08, blue: 0.10))
+        .background(Color(nsColor: .textBackgroundColor))
     }
 
     private func sideLineView(_ line: DiffLine, isLeft: Bool) -> some View {

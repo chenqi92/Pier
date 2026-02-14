@@ -157,9 +157,9 @@ struct AIChatView: View {
         }
     }
 
-    private func quickActionButton(_ label: LocalizedStringKey, icon: String, action: @escaping () -> Void) -> some View {
+    private func quickActionButton(_ label: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(label, systemImage: icon)
+            Label(LS(label), systemImage: icon)
                 .font(.system(size: 9))
         }
         .buttonStyle(.bordered)

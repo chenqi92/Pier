@@ -105,7 +105,7 @@ struct SSHKeyManagerView: View {
             if let key = selectedKey {
                 VStack(alignment: .leading, spacing: 12) {
                     // Key info
-                    GroupBox("ssh.keyInfo") {
+                    GroupBox(label: Text(LS("ssh.keyInfo"))) {
                         VStack(alignment: .leading, spacing: 6) {
                             infoRow("ssh.keyName", value: key.name)
                             infoRow("ssh.keyType", value: key.type.uppercased())
@@ -117,7 +117,7 @@ struct SSHKeyManagerView: View {
 
                     // Public key
                     if key.hasPublicKey {
-                        GroupBox("ssh.publicKey") {
+                        GroupBox(label: Text(LS("ssh.publicKey"))) {
                             VStack(alignment: .leading, spacing: 4) {
                                 ScrollView {
                                     Text(publicKeyContent)
@@ -169,9 +169,9 @@ struct SSHKeyManagerView: View {
         }
     }
 
-    private func infoRow(_ label: LocalizedStringKey, value: String) -> some View {
+    private func infoRow(_ label: String, value: String) -> some View {
         HStack(alignment: .top) {
-            Text(label)
+            Text(LS(label))
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundColor(.secondary)
                 .frame(width: 70, alignment: .trailing)
@@ -198,9 +198,9 @@ struct SSHKeyManagerView: View {
                 TextField(LS("ssh.keyName"), text: $newKeyName)
                 TextField(LS("ssh.comment"), text: $newKeyComment)
 
-                Toggle("ssh.usePassphrase", isOn: $showPassphraseField)
+                Toggle(LS("ssh.usePassphrase"), isOn: $showPassphraseField)
                 if showPassphraseField {
-                    SecureField("ssh.passphrase", text: $passphrase)
+                    SecureField(LS("ssh.passphrase"), text: $passphrase)
                 }
             }
             .formStyle(.grouped)
@@ -212,7 +212,7 @@ struct SSHKeyManagerView: View {
             }
 
             HStack {
-                Button("cancel") { isGeneratingKey = false }
+                Button(LS("docker.cancel")) { isGeneratingKey = false }
                     .keyboardShortcut(.escape)
                 Spacer()
                 Button(LS("ssh.generate")) { generateKey() }

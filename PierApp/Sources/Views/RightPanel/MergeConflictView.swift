@@ -136,7 +136,7 @@ struct MergeConflictView: View {
         VStack(spacing: 0) {
             // Hunk header
             HStack {
-                Text("Conflict \(index + 1)")
+                Text(String(format: LS("git.conflictNumber"), index + 1))
                     .font(.system(size: 9, weight: .semibold))
 
                 Spacer()
@@ -169,7 +169,7 @@ struct MergeConflictView: View {
             HStack(spacing: 1) {
                 // Ours
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("OURS")
+                    Text(LS("git.ours"))
                         .font(.system(size: 8, weight: .bold))
                         .foregroundColor(.green)
                         .padding(.horizontal, 6)
@@ -188,7 +188,7 @@ struct MergeConflictView: View {
 
                 // Theirs
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("THEIRS")
+                    Text(LS("git.theirs"))
                         .font(.system(size: 8, weight: .bold))
                         .foregroundColor(.blue)
                         .padding(.horizontal, 6)

@@ -25,7 +25,7 @@ struct SettingsView: View {
         HSplitView {
             // Section sidebar
             List(SettingsSection.allCases, selection: $selectedSection) { section in
-                Label(LocalizedStringKey(section.rawValue), systemImage: section.icon)
+                Label(LS(section.rawValue), systemImage: section.icon)
                     .tag(section)
             }
             .listStyle(.sidebar)
@@ -56,7 +56,7 @@ struct SettingsView: View {
                 .font(.title2)
                 .fontWeight(.bold)
 
-            GroupBox("theme.appearance") {
+            GroupBox(label: Text(LS("theme.appearance"))) {
                 VStack(alignment: .leading, spacing: 12) {
                     Picker(LS("theme.mode"), selection: $themeManager.appearanceMode) {
                         ForEach(AppearanceMode.allCases) { mode in
@@ -69,7 +69,24 @@ struct SettingsView: View {
                 .padding(8)
             }
 
-            GroupBox("settings.font") {
+            GroupBox(LS("settings.language")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker(LS("settings.language"), selection: $themeManager.languageMode) {
+                        ForEach(LanguageMode.allCases) { lang in
+                            Text(lang.displayName).tag(lang)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 300)
+
+                    Text(LS("settings.restartHint"))
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                .padding(8)
+            }
+
+            GroupBox(label: Text(LS("settings.font"))) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text(LS("settings.fontFamily"))
@@ -99,7 +116,7 @@ struct SettingsView: View {
                     }
 
                     // Preview
-                    Text("The quick brown fox jumps over the lazy dog")
+                    Text(LS("settings.fontPreview"))
                         .font(.system(size: CGFloat(themeManager.fontSize), design: .monospaced))
                         .padding(8)
                         .background(Color(nsColor: .textBackgroundColor))
@@ -120,7 +137,7 @@ struct SettingsView: View {
                 .font(.title2)
                 .fontWeight(.bold)
 
-            GroupBox("theme.terminal") {
+            GroupBox(label: Text(LS("theme.terminal"))) {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(TerminalTheme.allThemes, id: \.id) { theme in
                         themeRow(theme)
@@ -181,7 +198,7 @@ struct SettingsView: View {
                 .font(.title2)
                 .fontWeight(.bold)
 
-            GroupBox("settings.keyboardShortcuts") {
+            GroupBox(label: Text(LS("settings.keyboardShortcuts"))) {
                 VStack(spacing: 0) {
                     shortcutRow("settings.newTab", shortcut: "⌘T")
                     Divider()
@@ -210,9 +227,9 @@ struct SettingsView: View {
         }
     }
 
-    private func shortcutRow(_ label: LocalizedStringKey, shortcut: String) -> some View {
+    private func shortcutRow(_ label: String, shortcut: String) -> some View {
         HStack {
-            Text(label)
+            Text(LS(label))
                 .font(.caption)
             Spacer()
             Text(shortcut)

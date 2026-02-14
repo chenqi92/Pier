@@ -110,7 +110,7 @@ struct LogViewerView: View {
                     .foregroundColor(viewModel.isJsonMode ? .blue : .secondary)
             }
             .buttonStyle(.borderless)
-            .help("JSON")
+            .help(LS("log.jsonMode"))
 
             Button(action: { viewModel.openLogFile() }) {
                 Image(systemName: "folder")
@@ -146,7 +146,7 @@ struct LogViewerView: View {
                 .foregroundColor(.secondary)
                 .font(.caption)
 
-            TextField("Filter logs...", text: $viewModel.filterText)
+            TextField(LS("log.filterPlaceholder"), text: $viewModel.filterText)
                 .textFieldStyle(.plain)
                 .font(.caption)
 
@@ -209,7 +209,7 @@ struct LogViewerView: View {
                 .padding(.vertical, 2)
             }
             .font(.system(size: 11, design: .monospaced))
-            .background(Color(red: 0.08, green: 0.08, blue: 0.1))
+            .background(Color(nsColor: .textBackgroundColor))
             .onChange(of: viewModel.filteredLines.count) { _, _ in
                 if viewModel.autoScroll, let lastLine = viewModel.filteredLines.last {
                     withAnimation(.easeOut(duration: 0.1)) {
@@ -246,7 +246,7 @@ struct LogViewerView: View {
             // Message
             Text(highlightedText(line.message))
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(line.level?.textColor ?? .white)
+                .foregroundColor(line.level?.textColor ?? Color(nsColor: .labelColor))
                 .textSelection(.enabled)
         }
         .padding(.vertical, 1)
@@ -293,7 +293,7 @@ struct LogViewerView: View {
             .help(LS("db.export"))
             .disabled(viewModel.filteredLines.isEmpty)
 
-            Text("\(viewModel.filteredLines.count)/\(viewModel.allLines.count) lines")
+            Text(String(format: LS("log.lineCount"), viewModel.filteredLines.count, viewModel.allLines.count))
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
         }

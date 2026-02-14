@@ -459,3 +459,103 @@
 "conn.localTerminal" = "Local Terminal";
 "conn.localTerminalDesc" = "Open a new local shell session";
 "conn.savedConnections" = "Saved Connections";
+
+// MARK: - Docker Extended
+
+"docker.logs" = "Logs: %@";
+"docker.close" = "Close";
+"docker.containerDetails" = "Container Details";
+"docker.imageDetails" = "Image Details";
+"docker.volumeDetails" = "Volume Details";
+"docker.inspect" = "Inspect";
+"docker.history" = "History";
+"docker.tagImage" = "Tag Image";
+"docker.apply" = "Apply";
+"docker.cancel" = "Cancel";
+"docker.pullPlaceholder" = "Pull image name...";
+"docker.pullImage" = "Pull image";
+"docker.pruneImages" = "Prune dangling images";
+"docker.runContainerEllipsis" = "Run Container...";
+"docker.removeImage" = "Remove image";
+"docker.forceRemove" = "Force Remove";
+"docker.containerName" = "Container Name";
+"docker.portMappings" = "Port Mappings";
+"docker.envVars" = "Environment Variables";
+"docker.volumeMounts" = "Volume Mounts";
+"docker.restartPolicy" = "Restart Policy";
+"docker.commandOptional" = "Command (optional)";
+"docker.addPort" = "Add Port";
+"docker.addVariable" = "Add Variable";
+"docker.addVolume" = "Add Volume";
+"docker.createAndRun" = "Create & Run";
+"docker.restartNo" = "No";
+"docker.restartAlways" = "Always";
+"docker.restartOnFailure" = "On Failure";
+"docker.restartUnlessStopped" = "Unless Stopped";
+"docker.noImages" = "No images";
+"docker.noVolumes" = "No volumes";
+"docker.pruneUnused" = "Prune Unused";
+"docker.browseFiles" = "Browse files";
+
+// MARK: - Server Monitor
+
+"monitor.server" = "Server";
+"monitor.cpu" = "CPU";
+"monitor.memory" = "Memory";
+"monitor.network" = "Network";
+"monitor.gpu" = "GPU";
+"monitor.storage" = "Storage";
+"monitor.topProcesses" = "Top Processes";
+"monitor.command" = "COMMAND";
+"monitor.cpuPercent" = "CPU%";
+"monitor.memPercent" = "MEM%";
+"monitor.user" = "USER";
+"monitor.procs" = "%lld procs";
+"monitor.load" = "Load: %@";
+"monitor.swap" = "Swap: %@ / %@";
+
+// MARK: - Merge Conflict Extended
+
+"git.conflictNumber" = "Conflict %lld";
+"git.ours" = "OURS";
+"git.theirs" = "THEIRS";
+
+// MARK: - Log Viewer Extended
+
+"log.filterPlaceholder" = "Filter logs...";
+"log.jsonMode" = "JSON";
+
+// MARK: - AI Settings Extended
+
+"ai.providerOpenAI" = "OpenAI";
+"ai.providerClaude" = "Claude";
+"ai.providerOllama" = "Ollama (Local)";
+"ai.provider" = "Provider:";
+"ai.apiKey" = "API Key:";
+"ai.model" = "Model:";
+
+// MARK: - Language Settings
+
+"settings.language" = "Language";
+"settings.languageSystem" = "System";
+"settings.languageChinese" = "中文";
+"settings.languageEnglish" = "English";
+"settings.restartHint" = "Language change takes effect after restart";
+"settings.fontPreview" = "The quick brown fox jumps over the lazy dog";
+
+// MARK: - Git Extended
+
+"git.staged" = "Staged (%lld)";
+"git.unstaged" = "Changes (%lld)";
+"git.commitPlaceholder" = "Commit message...";
+
+// MARK: - Docker Placeholders
+
+"docker.hostPort" = "Host";
+"docker.containerPort" = "Container";
+"docker.hostPath" = "Host path";
+"docker.containerPath" = "Container path";
+
+// MARK: - Panel
+
+"panel.openService" = "Open %@";

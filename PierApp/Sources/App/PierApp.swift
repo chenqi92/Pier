@@ -47,12 +47,12 @@ struct AISettingsView: View {
 
     var body: some View {
         Form {
-            Picker("Provider:", selection: $llmProvider) {
-                Text("OpenAI").tag("openai")
-                Text("Claude").tag("claude")
-                Text("Ollama (Local)").tag("ollama")
+            Picker(LS("ai.provider"), selection: $llmProvider) {
+                Text(LS("ai.providerOpenAI")).tag("openai")
+                Text(LS("ai.providerClaude")).tag("claude")
+                Text(LS("ai.providerOllama")).tag("ollama")
             }
-            SecureField("API Key:", text: $apiKeyField)
+            SecureField(LS("ai.apiKey"), text: $apiKeyField)
                 .onChange(of: apiKeyField) { _, newValue in
                     guard !newValue.isEmpty else { return }
                     do {
@@ -62,7 +62,7 @@ struct AISettingsView: View {
                         saveStatus = "❌ \(error.localizedDescription)"
                     }
                 }
-            TextField("Model:", text: $llmModel)
+            TextField(LS("ai.model"), text: $llmModel)
             if let status = saveStatus {
                 Text(status)
                     .font(.caption)

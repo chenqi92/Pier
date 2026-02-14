@@ -22,7 +22,7 @@ struct MainView: View {
     @State private var showLeftPanel = true
     @State private var showRightPanel = true
     @State private var leftPanelWidth: CGFloat = 250
-    @State private var rightPanelWidth: CGFloat = 380
+    @State private var rightPanelWidth: CGFloat = 480
     @State private var showNewTabChooser = false
     @State private var showAuthFailedDialog = false
     @State private var retryPassword = ""
@@ -47,7 +47,7 @@ struct MainView: View {
             // ── Right Panel: Multi-function Area ──
             if showRightPanel {
                 RightPanelView(serviceManager: activeServiceManager)
-                    .frame(minWidth: 250, idealWidth: rightPanelWidth, maxWidth: 600)
+                    .frame(minWidth: 320, idealWidth: rightPanelWidth, maxWidth: 600)
                     .id(terminalViewModel.selectedTabId)
             }
         }

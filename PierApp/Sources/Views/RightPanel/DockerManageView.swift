@@ -94,10 +94,10 @@ struct DockerManageView: View {
             HStack {
                 Image(systemName: "doc.text")
                     .foregroundColor(.blue)
-                Text("Logs: \(viewModel.logsContainerName)")
+                Text(String(format: LS("docker.logs"), viewModel.logsContainerName))
                     .font(.headline)
                 Spacer()
-                Button("Close") { viewModel.showContainerLogs = false }
+                Button(LS("docker.close")) { viewModel.showContainerLogs = false }
                     .buttonStyle(.borderless)
             }
             .padding()
@@ -120,10 +120,10 @@ struct DockerManageView: View {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.blue)
-                Text("Container Details")
+                Text(LS("docker.containerDetails"))
                     .font(.headline)
                 Spacer()
-                Button("Close") { viewModel.showContainerInspect = false }
+                Button(LS("docker.close")) { viewModel.showContainerInspect = false }
                     .buttonStyle(.borderless)
             }
             .padding()
@@ -232,7 +232,7 @@ struct DockerManageView: View {
                     Button(LS("docker.restart")) { viewModel.restartContainer(container.id) }
                     Divider()
                     Button(LS("docker.viewLogs")) { viewModel.viewContainerLogs(container.id) }
-                    Button("Inspect") { viewModel.inspectContainer(container.id) }
+                    Button(LS("docker.inspect")) { viewModel.inspectContainer(container.id) }
                     Button(LS("docker.execShell")) {
                         NotificationCenter.default.post(
                             name: .dockerExecShell,
@@ -308,7 +308,7 @@ struct DockerManageView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(pullImageName.isEmpty)
-                .help("Pull image")
+                .help(LS("docker.pullImage"))
 
                 Divider().frame(height: 14)
 
@@ -318,7 +318,7 @@ struct DockerManageView: View {
                         .foregroundColor(.orange)
                 }
                 .buttonStyle(.borderless)
-                .help("Prune dangling images")
+                .help(LS("docker.pruneImages"))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -360,7 +360,7 @@ struct DockerManageView: View {
                                 .foregroundColor(.green)
                         }
                         .buttonStyle(.borderless)
-                        .help("Run container...")
+                        .help(LS("docker.runContainerEllipsis"))
 
                         Button(action: { viewModel.removeImage(image.id) }) {
                             Image(systemName: "trash")
@@ -368,16 +368,16 @@ struct DockerManageView: View {
                                 .foregroundColor(.red.opacity(0.7))
                         }
                         .buttonStyle(.borderless)
-                        .help("Remove image")
+                        .help(LS("docker.removeImage"))
                     }
                     .padding(.vertical, 2)
                     .contextMenu {
-                        Button("Run Container...") {
+                        Button(LS("docker.runContainerEllipsis")) {
                             let ref = image.repository == "<none>" ? image.id : "\(image.repository):\(image.tag)"
                             openRunDialog(imageRef: ref)
                         }
                         Divider()
-                        Button("Inspect") {
+                        Button(LS("docker.inspect")) {
                             Task {
                                 if let json = await viewModel.inspectImage(image.id) {
                                     imageInspectContent = json
@@ -385,7 +385,7 @@ struct DockerManageView: View {
                                 }
                             }
                         }
-                        Button("History") {
+                        Button(LS("docker.history")) {
                             Task {
                                 if let history = await viewModel.imageHistory(image.id) {
                                     imageInspectContent = history
@@ -393,21 +393,21 @@ struct DockerManageView: View {
                                 }
                             }
                         }
-                        Button("Tag...") {
+                        Button(LS("docker.tagImage")) {
                             tagTargetId = image.id
                             tagInput = image.repository == "<none>" ? "" : "\(image.repository):\(image.tag)"
                             showTagSheet = true
                         }
                         Divider()
-                        Button("Remove") { viewModel.removeImage(image.id) }
-                        Button("Force Remove", role: .destructive) { viewModel.forceRemoveImage(image.id) }
+                        Button(LS("docker.remove")) { viewModel.removeImage(image.id) }
+                        Button(LS("docker.forceRemove"), role: .destructive) { viewModel.forceRemoveImage(image.id) }
                     }
                 }
             }
             .listStyle(.plain)
             .overlay {
                 if viewModel.images.isEmpty && !viewModel.isLoading {
-                    Text("No images")
+                    Text(LS("docker.noImages"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -416,10 +416,10 @@ struct DockerManageView: View {
         .sheet(isPresented: $showImageInspect) {
             VStack(spacing: 0) {
                 HStack {
-                    Text("Image Details")
+                    Text(LS("docker.imageDetails"))
                         .font(.headline)
                     Spacer()
-                    Button("Close") { showImageInspect = false }
+                    Button(LS("docker.close")) { showImageInspect = false }
                         .buttonStyle(.borderless)
                 }
                 .padding()
@@ -436,14 +436,14 @@ struct DockerManageView: View {
         }
         .sheet(isPresented: $showTagSheet) {
             VStack(spacing: 12) {
-                Text("Tag Image")
+                Text(LS("docker.tagImage"))
                     .font(.headline)
                 TextField("repository:tag", text: $tagInput)
                     .textFieldStyle(.roundedBorder)
                 HStack {
-                    Button("Cancel") { showTagSheet = false }
+                    Button(LS("docker.cancel")) { showTagSheet = false }
                     Spacer()
-                    Button("Apply") {
+                    Button(LS("docker.apply")) {
                         if !tagInput.isEmpty {
                             viewModel.tagImage(tagTargetId, newTag: tagInput)
                         }
@@ -471,7 +471,7 @@ struct DockerManageView: View {
                     .foregroundColor(.green)
                     .font(.title3)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Run Container")
+                    Text(LS("docker.runContainer"))
                         .font(.headline)
                     Text(runImageName)
                         .font(.system(size: 11, design: .monospaced))
@@ -486,17 +486,17 @@ struct DockerManageView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     // Container name
-                    dialogSection(title: "Container Name", icon: "tag") {
+                    dialogSection(title: LS("docker.containerName"), icon: "tag") {
                         TextField("e.g. my-app", text: $runContainerName)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 11))
                     }
 
                     // Port mappings
-                    dialogSection(title: "Port Mappings", icon: "network") {
+                    dialogSection(title: LS("docker.portMappings"), icon: "network") {
                         ForEach(runPorts.indices, id: \.self) { i in
                             HStack(spacing: 4) {
-                                TextField("Host", text: Binding(
+                                TextField(LS("docker.hostPort"), text: Binding(
                                     get: { runPorts[i].host },
                                     set: { runPorts[i].host = $0 }
                                 ))
@@ -505,7 +505,7 @@ struct DockerManageView: View {
                                 .frame(width: 70)
                                 Text(":")
                                     .foregroundColor(.secondary)
-                                TextField("Container", text: Binding(
+                                TextField(LS("docker.containerPort"), text: Binding(
                                     get: { runPorts[i].container },
                                     set: { runPorts[i].container = $0 }
                                 ))
@@ -523,14 +523,14 @@ struct DockerManageView: View {
                             }
                         }
                         Button(action: { runPorts.append(("", "")) }) {
-                            Label("Add Port", systemImage: "plus.circle")
+                            Label(LS("docker.addPort"), systemImage: "plus.circle")
                                 .font(.system(size: 10))
                         }
                         .buttonStyle(.borderless)
                     }
 
                     // Environment variables
-                    dialogSection(title: "Environment Variables", icon: "list.bullet.rectangle") {
+                    dialogSection(title: LS("docker.envVars"), icon: "list.bullet.rectangle") {
                         ForEach(runEnvVars.indices, id: \.self) { i in
                             HStack(spacing: 4) {
                                 TextField("KEY", text: Binding(
@@ -558,17 +558,17 @@ struct DockerManageView: View {
                             }
                         }
                         Button(action: { runEnvVars.append(("", "")) }) {
-                            Label("Add Variable", systemImage: "plus.circle")
+                            Label(LS("docker.addVariable"), systemImage: "plus.circle")
                                 .font(.system(size: 10))
                         }
                         .buttonStyle(.borderless)
                     }
 
                     // Volume mounts
-                    dialogSection(title: "Volume Mounts", icon: "externaldrive") {
+                    dialogSection(title: LS("docker.volumeMounts"), icon: "externaldrive") {
                         ForEach(runVolumes.indices, id: \.self) { i in
                             HStack(spacing: 4) {
-                                TextField("Host path", text: Binding(
+                                TextField(LS("docker.hostPath"), text: Binding(
                                     get: { runVolumes[i].host },
                                     set: { runVolumes[i].host = $0 }
                                 ))
@@ -576,7 +576,7 @@ struct DockerManageView: View {
                                 .font(.system(size: 10))
                                 Text("→")
                                     .foregroundColor(.secondary)
-                                TextField("Container path", text: Binding(
+                                TextField(LS("docker.containerPath"), text: Binding(
                                     get: { runVolumes[i].container },
                                     set: { runVolumes[i].container = $0 }
                                 ))
@@ -593,26 +593,26 @@ struct DockerManageView: View {
                             }
                         }
                         Button(action: { runVolumes.append(("", "")) }) {
-                            Label("Add Volume", systemImage: "plus.circle")
+                            Label(LS("docker.addVolume"), systemImage: "plus.circle")
                                 .font(.system(size: 10))
                         }
                         .buttonStyle(.borderless)
                     }
 
                     // Restart policy
-                    dialogSection(title: "Restart Policy", icon: "arrow.counterclockwise") {
+                    dialogSection(title: LS("docker.restartPolicy"), icon: "arrow.counterclockwise") {
                         Picker("", selection: $runRestartPolicy) {
-                            Text("No").tag("no")
-                            Text("Always").tag("always")
-                            Text("On Failure").tag("on-failure")
-                            Text("Unless Stopped").tag("unless-stopped")
+                            Text(LS("docker.restartNo")).tag("no")
+                            Text(LS("docker.restartAlways")).tag("always")
+                            Text(LS("docker.restartOnFailure")).tag("on-failure")
+                            Text(LS("docker.restartUnlessStopped")).tag("unless-stopped")
                         }
                         .pickerStyle(.segmented)
                         .font(.system(size: 10))
                     }
 
                     // Command override
-                    dialogSection(title: "Command (optional)", icon: "terminal") {
+                    dialogSection(title: LS("docker.commandOptional"), icon: "terminal") {
                         TextField("e.g. /bin/sh", text: $runCommand)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 11, design: .monospaced))
@@ -625,7 +625,7 @@ struct DockerManageView: View {
 
             // Footer buttons
             HStack {
-                Button("Cancel") {
+                Button(LS("docker.cancel")) {
                     showRunDialog = false
                 }
 
@@ -643,7 +643,7 @@ struct DockerManageView: View {
                     )
                     showRunDialog = false
                 }) {
-                    Label("Create & Run", systemImage: "play.fill")
+                    Label(LS("docker.createAndRun"), systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
@@ -676,7 +676,7 @@ struct DockerManageView: View {
             // Prune toolbar
             HStack {
                 Button(action: { viewModel.pruneVolumes() }) {
-                    Label("Prune Unused", systemImage: "trash.circle")
+                    Label(LS("docker.pruneUnused"), systemImage: "trash.circle")
                         .font(.caption)
                         .foregroundColor(.orange)
                 }
@@ -720,7 +720,7 @@ struct DockerManageView: View {
                                     .foregroundColor(.blue)
                             }
                             .buttonStyle(.borderless)
-                            .help("Browse files")
+                            .help(LS("docker.browseFiles"))
                         }
 
                         // File listing panel (collapsible)
@@ -741,7 +741,7 @@ struct DockerManageView: View {
                                 }
                             }
                             .padding(6)
-                            .background(Color.black.opacity(0.15))
+                            .background(Color(nsColor: .separatorColor).opacity(0.2))
                             .cornerRadius(4)
                         }
 
@@ -753,7 +753,7 @@ struct DockerManageView: View {
                     }
                     .padding(.vertical, 2)
                     .contextMenu {
-                        Button("Inspect") {
+                        Button(LS("docker.inspect")) {
                             Task {
                                 if let json = await viewModel.inspectVolume(volume.name) {
                                     volumeInspectContent = json
@@ -761,11 +761,11 @@ struct DockerManageView: View {
                                 }
                             }
                         }
-                        Button("Browse Files") {
+                        Button(LS("docker.browseFiles")) {
                             viewModel.browseVolume(volume.mountpoint)
                         }
                         Divider()
-                        Button("Remove", role: .destructive) {
+                        Button(LS("docker.remove"), role: .destructive) {
                             viewModel.removeVolume(volume.name)
                         }
                     }
@@ -774,7 +774,7 @@ struct DockerManageView: View {
             .listStyle(.plain)
             .overlay {
                 if viewModel.volumes.isEmpty && !viewModel.isLoading {
-                    Text("No volumes")
+                    Text(LS("docker.noVolumes"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -783,10 +783,10 @@ struct DockerManageView: View {
         .sheet(isPresented: $showVolumeInspect) {
             VStack(spacing: 0) {
                 HStack {
-                    Text("Volume Details")
+                    Text(LS("docker.volumeDetails"))
                         .font(.headline)
                     Spacer()
-                    Button("Close") { showVolumeInspect = false }
+                    Button(LS("docker.close")) { showVolumeInspect = false }
                         .buttonStyle(.borderless)
                 }
                 .padding()

@@ -164,7 +164,7 @@ struct GitPanelView: View {
         VStack(spacing: 0) {
             // Staged section
             if !viewModel.stagedFiles.isEmpty {
-                sectionHeader("Staged (\(viewModel.stagedFiles.count))", color: .green)
+                sectionHeader(String(format: LS("git.staged"), viewModel.stagedFiles.count), color: .green)
                 List(viewModel.stagedFiles) { file in
                     gitFileRow(file: file, staged: true)
                 }
@@ -173,7 +173,7 @@ struct GitPanelView: View {
             }
 
             // Unstaged section
-            sectionHeader("Changes (\(viewModel.unstagedFiles.count))", color: .orange)
+            sectionHeader(String(format: LS("git.unstaged"), viewModel.unstagedFiles.count), color: .orange)
             List(viewModel.unstagedFiles) { file in
                 gitFileRow(file: file, staged: false)
             }
@@ -249,7 +249,7 @@ struct GitPanelView: View {
 
     private var commitArea: some View {
         VStack(spacing: 6) {
-            TextField("Commit message...", text: $viewModel.commitMessage, axis: .vertical)
+            TextField(LS("git.commitPlaceholder"), text: $viewModel.commitMessage, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.caption)
                 .lineLimit(3...5)

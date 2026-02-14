@@ -63,7 +63,7 @@ struct ServerMonitorView: View {
                 Image(systemName: "server.rack")
                     .font(.system(size: 14))
                     .foregroundColor(.blue)
-                Text(viewModel.hostname.isEmpty ? "Server" : viewModel.hostname)
+                Text(viewModel.hostname.isEmpty ? LS("monitor.server") : viewModel.hostname)
                     .font(.system(size: 12, weight: .bold))
                 Spacer()
                 if viewModel.isLoading {
@@ -74,7 +74,7 @@ struct ServerMonitorView: View {
             HStack(spacing: 12) {
                 infoChip(icon: "memorychip", label: viewModel.kernelVersion)
                 infoChip(icon: "clock", label: viewModel.uptime)
-                infoChip(icon: "list.number", label: "\(viewModel.processCount) procs")
+                infoChip(icon: "list.number", label: String(format: LS("monitor.procs"), viewModel.processCount))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -98,7 +98,7 @@ struct ServerMonitorView: View {
     // MARK: - CPU
 
     private var cpuSection: some View {
-        MonitorCard(title: "CPU", icon: "cpu", color: .orange) {
+        MonitorCard(title: LS("monitor.cpu"), icon: "cpu", color: .orange) {
             VStack(spacing: 6) {
                 HStack {
                     GaugeRing(value: viewModel.currentCPU, maxValue: 100, color: cpuColor(viewModel.currentCPU))
@@ -107,7 +107,7 @@ struct ServerMonitorView: View {
                         Text(String(format: "%.1f%%", viewModel.currentCPU))
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                             .foregroundColor(cpuColor(viewModel.currentCPU))
-                        Text("Load: \(viewModel.currentLoadAvg)")
+                        Text(String(format: LS("monitor.load"), viewModel.currentLoadAvg))
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
@@ -154,7 +154,7 @@ struct ServerMonitorView: View {
     // MARK: - Memory
 
     private var memorySection: some View {
-        MonitorCard(title: "Memory", icon: "memorychip", color: .purple) {
+        MonitorCard(title: LS("monitor.memory"), icon: "memorychip", color: .purple) {
             VStack(spacing: 6) {
                 if let last = viewModel.snapshots.last {
                     HStack {
@@ -169,7 +169,7 @@ struct ServerMonitorView: View {
                                     .foregroundColor(.secondary)
                             }
                             if last.swapTotal > 0 {
-                                Text("Swap: \(viewModel.formattedMB(last.swapUsed)) / \(viewModel.formattedMB(last.swapTotal))")
+                                Text(String(format: LS("monitor.swap"), viewModel.formattedMB(last.swapUsed), viewModel.formattedMB(last.swapTotal)))
                                     .font(.system(size: 9))
                                     .foregroundColor(.secondary)
                             }
@@ -218,7 +218,7 @@ struct ServerMonitorView: View {
     // MARK: - Network
 
     private var networkSection: some View {
-        MonitorCard(title: "Network", icon: "network", color: .cyan) {
+        MonitorCard(title: LS("monitor.network"), icon: "network", color: .cyan) {
             VStack(spacing: 6) {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -256,7 +256,7 @@ struct ServerMonitorView: View {
     // MARK: - GPU
 
     private var gpuSection: some View {
-        MonitorCard(title: "GPU", icon: "display", color: .green) {
+        MonitorCard(title: LS("monitor.gpu"), icon: "display", color: .green) {
             VStack(spacing: 6) {
                 ForEach(viewModel.gpuInfos) { gpu in
                     VStack(alignment: .leading, spacing: 4) {
@@ -287,7 +287,7 @@ struct ServerMonitorView: View {
     // MARK: - Disk
 
     private var diskSection: some View {
-        MonitorCard(title: "Storage", icon: "internaldrive", color: .orange) {
+        MonitorCard(title: LS("monitor.storage"), icon: "internaldrive", color: .orange) {
             VStack(spacing: 6) {
                 ForEach(viewModel.disks) { disk in
                     VStack(alignment: .leading, spacing: 3) {
@@ -324,14 +324,14 @@ struct ServerMonitorView: View {
     // MARK: - Processes
 
     private var processesSection: some View {
-        MonitorCard(title: "Top Processes", icon: "list.bullet.rectangle", color: .teal) {
+        MonitorCard(title: LS("monitor.topProcesses"), icon: "list.bullet.rectangle", color: .teal) {
             VStack(spacing: 0) {
                 // Header
                 HStack {
-                    Text("COMMAND").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("CPU%").frame(width: 40, alignment: .trailing)
-                    Text("MEM%").frame(width: 40, alignment: .trailing)
-                    Text("USER").frame(width: 45, alignment: .trailing)
+                    Text(LS("monitor.command")).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(LS("monitor.cpuPercent")).frame(width: 40, alignment: .trailing)
+                    Text(LS("monitor.memPercent")).frame(width: 40, alignment: .trailing)
+                    Text(LS("monitor.user")).frame(width: 45, alignment: .trailing)
                 }
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundColor(.secondary)

@@ -459,3 +459,103 @@
 "conn.localTerminal" = "本地终端";
 "conn.localTerminalDesc" = "打开一个新的本地 Shell 会话";
 "conn.savedConnections" = "已保存的连接";
+
+// MARK: - Docker Extended
+
+"docker.logs" = "日志: %@";
+"docker.close" = "关闭";
+"docker.containerDetails" = "容器详情";
+"docker.imageDetails" = "镜像详情";
+"docker.volumeDetails" = "存储卷详情";
+"docker.inspect" = "检查";
+"docker.history" = "历史";
+"docker.tagImage" = "标记镜像";
+"docker.apply" = "应用";
+"docker.cancel" = "取消";
+"docker.pullPlaceholder" = "输入镜像名称...";
+"docker.pullImage" = "拉取镜像";
+"docker.pruneImages" = "清理悬空镜像";
+"docker.runContainerEllipsis" = "运行容器...";
+"docker.removeImage" = "删除镜像";
+"docker.forceRemove" = "强制删除";
+"docker.containerName" = "容器名称";
+"docker.portMappings" = "端口映射";
+"docker.envVars" = "环境变量";
+"docker.volumeMounts" = "卷挂载";
+"docker.restartPolicy" = "重启策略";
+"docker.commandOptional" = "命令（可选）";
+"docker.addPort" = "添加端口";
+"docker.addVariable" = "添加变量";
+"docker.addVolume" = "添加卷";
+"docker.createAndRun" = "创建并运行";
+"docker.restartNo" = "不重启";
+"docker.restartAlways" = "始终";
+"docker.restartOnFailure" = "失败时";
+"docker.restartUnlessStopped" = "除非停止";
+"docker.noImages" = "暂无镜像";
+"docker.noVolumes" = "暂无存储卷";
+"docker.pruneUnused" = "清理未使用";
+"docker.browseFiles" = "浏览文件";
+
+// MARK: - Server Monitor
+
+"monitor.server" = "服务器";
+"monitor.cpu" = "CPU";
+"monitor.memory" = "内存";
+"monitor.network" = "网络";
+"monitor.gpu" = "GPU";
+"monitor.storage" = "存储";
+"monitor.topProcesses" = "进程排行";
+"monitor.command" = "命令";
+"monitor.cpuPercent" = "CPU%";
+"monitor.memPercent" = "内存%";
+"monitor.user" = "用户";
+"monitor.procs" = "%lld 个进程";
+"monitor.load" = "负载: %@";
+"monitor.swap" = "交换: %@ / %@";
+
+// MARK: - Merge Conflict Extended
+
+"git.conflictNumber" = "冲突 %lld";
+"git.ours" = "本地";
+"git.theirs" = "远程";
+
+// MARK: - Log Viewer Extended
+
+"log.filterPlaceholder" = "过滤日志...";
+"log.jsonMode" = "JSON";
+
+// MARK: - AI Settings Extended
+
+"ai.providerOpenAI" = "OpenAI";
+"ai.providerClaude" = "Claude";
+"ai.providerOllama" = "Ollama（本地）";
+"ai.provider" = "服务商:";
+"ai.apiKey" = "API 密钥:";
+"ai.model" = "模型:";
+
+// MARK: - Language Settings
+
+"settings.language" = "语言";
+"settings.languageSystem" = "跟随系统";
+"settings.languageChinese" = "中文";
+"settings.languageEnglish" = "English";
+"settings.restartHint" = "语言切换将在重启后生效";
+"settings.fontPreview" = "天地玄黄宇宙洪荒 The quick brown fox";
+
+// MARK: - Git Extended
+
+"git.staged" = "已暂存 (%lld)";
+"git.unstaged" = "未暂存 (%lld)";
+"git.commitPlaceholder" = "提交信息...";
+
+// MARK: - Docker Placeholders
+
+"docker.hostPort" = "主机端口";
+"docker.containerPort" = "容器端口";
+"docker.hostPath" = "主机路径";
+"docker.containerPath" = "容器路径";
+
+// MARK: - Panel
+
+"panel.openService" = "打开 %@";

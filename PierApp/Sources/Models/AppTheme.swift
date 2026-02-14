@@ -9,11 +9,28 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var displayName: LocalizedStringKey {
+    var displayName: String {
         switch self {
-        case .system: return "theme.system"
-        case .light:  return "theme.light"
-        case .dark:   return "theme.dark"
+        case .system: return LS("theme.system")
+        case .light:  return LS("theme.light")
+        case .dark:   return LS("theme.dark")
+        }
+    }
+}
+
+/// Language preference: follow system or force a locale.
+enum LanguageMode: String, CaseIterable, Identifiable {
+    case system = "system"
+    case chinese = "zh-Hans"
+    case english = "en"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .system:  return LS("settings.languageSystem")
+        case .chinese: return LS("settings.languageChinese")
+        case .english: return LS("settings.languageEnglish")
         }
     }
 }
@@ -24,6 +41,10 @@ class AppThemeManager: ObservableObject {
 
     @AppStorage("pier.appearance") var appearanceMode: AppearanceMode = .system {
         didSet { applyAppearance() }
+    }
+
+    @AppStorage("pier.language") var languageMode: LanguageMode = .system {
+        didSet { applyLanguage() }
     }
 
     @AppStorage("pier.terminalTheme") var terminalThemeId: String = "default_dark"
@@ -43,6 +64,7 @@ class AppThemeManager: ObservableObject {
 
     private init() {
         applyAppearance()
+        applyLanguage()
     }
 
     /// Apply the stored appearance mode to NSApp.
@@ -55,6 +77,19 @@ class AppThemeManager: ObservableObject {
         case .dark:
             NSApp.appearance = NSAppearance(named: .darkAqua)
         }
+    }
+
+    /// Apply the stored language preference via UserDefaults.
+    func applyLanguage() {
+        switch languageMode {
+        case .system:
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        case .chinese:
+            UserDefaults.standard.set(["zh-Hans"], forKey: "AppleLanguages")
+        case .english:
+            UserDefaults.standard.set(["en"], forKey: "AppleLanguages")
+        }
+        UserDefaults.standard.synchronize()
     }
 
     /// Switch terminal theme by ID.

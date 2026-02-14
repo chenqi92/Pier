@@ -224,14 +224,14 @@ struct RedisClientView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func infoCard(icon: String, title: LocalizedStringKey, value: String) -> some View {
+    private func infoCard(icon: String, title: String, value: String) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
                 .font(.caption)
                 .foregroundColor(.secondary)
             Text(value)
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
-            Text(title)
+            Text(LS(title))
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
         }
