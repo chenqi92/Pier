@@ -405,3 +405,12 @@
 "git.acceptOurs" = "Ours";
 "git.acceptTheirs" = "Theirs";
 "git.acceptBoth" = "Both";
+
+// MARK: - Batch 7: Release Prep
+
+"updater.checkForUpdates" = "Check for Updates…";
+"updater.lastCheck" = "Last check";
+"updater.autoCheck" = "Automatically check for updates";
+"release.signing" = "Code Signing";
+"release.notarization" = "Notarization";
+"release.packaging" = "DMG Packaging";

@@ -405,3 +405,12 @@
 "git.acceptOurs" = "Ours";
 "git.acceptTheirs" = "Theirs";
 "git.acceptBoth" = "两者都要";
+
+// MARK: - Batch 7: Release Prep
+
+"updater.checkForUpdates" = "检查更新…";
+"updater.lastCheck" = "上次检查";
+"updater.autoCheck" = "自动检查更新";
+"release.signing" = "代码签名";
+"release.notarization" = "公证";
+"release.packaging" = "DMG 打包";
