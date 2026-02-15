@@ -28,6 +28,7 @@ class SSHKnownHosts {
 
     private var entries: [KnownHostEntry] = []
     private let knownHostsPath: String
+    private let lock = NSLock()
 
     init() {
         knownHostsPath = NSHomeDirectory() + "/.ssh/known_hosts"
@@ -36,6 +37,9 @@ class SSHKnownHosts {
 
     /// Reload the known_hosts file.
     func loadKnownHosts() {
+        lock.lock()
+        defer { lock.unlock() }
+
         entries.removeAll()
 
         guard let content = try? String(contentsOfFile: knownHostsPath, encoding: .utf8) else { return }
@@ -57,7 +61,9 @@ class SSHKnownHosts {
 
     /// Verify a host key against known_hosts.
     func verify(host: String, port: Int, keyType: String, keyData: String) -> HostKeyVerification {
+        lock.lock()
         let matching = entries.filter { $0.matches(host: host, port: port) && $0.keyType == keyType }
+        lock.unlock()
 
         if matching.isEmpty {
             return .unknown
@@ -89,15 +95,19 @@ class SSHKnownHosts {
         }
 
         // Reload
+        lock.lock()
         entries.append(KnownHostEntry(hostPattern: hostStr, keyType: keyType, keyData: keyData))
+        lock.unlock()
     }
 
     /// Remove all entries for a host (used when user accepts new key for changed host).
     func removeHostKey(host: String, port: Int) {
+        lock.lock()
         entries.removeAll { $0.matches(host: host, port: port) }
+        let content = entries.map { "\($0.hostPattern) \($0.keyType) \($0.keyData)" }.joined(separator: "\n")
+        lock.unlock()
 
         // Rewrite file
-        let content = entries.map { "\($0.hostPattern) \($0.keyType) \($0.keyData)" }.joined(separator: "\n")
         try? (content + "\n").write(toFile: knownHostsPath, atomically: true, encoding: .utf8)
     }
 

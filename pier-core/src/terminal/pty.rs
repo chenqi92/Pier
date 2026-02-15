@@ -144,20 +144,23 @@ impl Drop for PtyProcess {
             // Send SIGTERM for graceful shutdown
             libc::kill(self.child_pid, libc::SIGTERM);
 
-            // Wait briefly for graceful exit (non-blocking check)
+            // Non-blocking reap loop — avoids blocking the caller's thread.
+            // Try up to 5 times with 50ms sleeps before sending SIGKILL.
             let mut status: libc::c_int = 0;
-            let waited = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
-
-            if waited == 0 {
-                // Child still running — give it a moment, then force kill
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                let waited2 = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
-                if waited2 == 0 {
-                    libc::kill(self.child_pid, libc::SIGKILL);
-                    // Blocking wait to ensure zombie is reaped
-                    libc::waitpid(self.child_pid, &mut status, 0);
+            for attempt in 0..5 {
+                let waited = libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
+                if waited != 0 {
+                    return; // Reaped (or error — either way, done)
                 }
+                if attempt == 2 {
+                    // After 150ms of SIGTERM, escalate to SIGKILL
+                    libc::kill(self.child_pid, libc::SIGKILL);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
             }
+            // Final non-blocking attempt — if still not reaped, the OS will
+            // clean up the zombie when the parent process exits.
+            libc::waitpid(self.child_pid, &mut status, libc::WNOHANG);
         }
     }
 }

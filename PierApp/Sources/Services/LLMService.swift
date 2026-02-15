@@ -105,6 +105,7 @@ class LLMService: ObservableObject {
         let url = baseURL.appendingPathComponent("chat/completions")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 30
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -129,6 +130,7 @@ class LLMService: ObservableObject {
         let url = baseURL.appendingPathComponent("messages")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 30
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
@@ -153,6 +155,7 @@ class LLMService: ObservableObject {
         let url = baseURL.appendingPathComponent("generate")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let body: [String: Any] = [

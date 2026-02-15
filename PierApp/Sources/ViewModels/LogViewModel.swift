@@ -175,6 +175,10 @@ class LogViewModel: ObservableObject {
     }
 
     private func startFileMonitor(_ path: String) {
+        // Cancel any existing monitor first to avoid fd leaks (M3 fix)
+        fileMonitor?.cancel()
+        fileMonitor = nil
+
         let fd = open(path, O_RDONLY)
         guard fd >= 0 else { return }
 

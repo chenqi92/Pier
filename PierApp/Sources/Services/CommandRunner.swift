@@ -50,12 +50,14 @@ actor CommandRunner {
     ///   - arguments: Command-line arguments.
     ///   - currentDirectory: Working directory for the process.
     ///   - environment: Additional environment variables (merged with inherited).
+    ///   - timeout: Maximum seconds to wait before killing the process (default: 60).
     /// - Returns: A `CommandResult` with stdout, stderr, and exit code.
     func run(
         _ executable: String,
         arguments: [String],
         currentDirectory: String? = nil,
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        timeout: TimeInterval = 60
     ) async -> CommandResult {
         guard let path = resolveExecutable(executable) else {
             return CommandResult(
@@ -69,7 +71,8 @@ actor CommandRunner {
             executablePath: path,
             arguments: arguments,
             currentDirectory: currentDirectory,
-            environment: environment
+            environment: environment,
+            timeout: timeout
         )
     }
 
@@ -78,7 +81,8 @@ actor CommandRunner {
         executablePath: String,
         arguments: [String],
         currentDirectory: String?,
-        environment: [String: String]?
+        environment: [String: String]?,
+        timeout: TimeInterval
     ) async -> CommandResult {
         await withCheckedContinuation { continuation in
             let process = Process()
@@ -103,26 +107,68 @@ actor CommandRunner {
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
 
+            // Track whether the continuation has resumed to prevent double-resume
+            let resumed = NSLock()
+            var hasResumed = false
+
+            // Timeout: kill the process if it runs too long
+            let timeoutWork = DispatchWorkItem { [weak process] in
+                guard let process, process.isRunning else { return }
+                process.terminate()
+                // Give a brief moment for SIGTERM, then SIGKILL
+                DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak process] in
+                    guard let process, process.isRunning else { return }
+                    process.interrupt() // SIGINT as final fallback
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWork)
+
             // Use terminationHandler for fully async execution (fixes B5)
-            process.terminationHandler = { _ in
+            process.terminationHandler = { proc in
+                timeoutWork.cancel()
+
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
 
                 let stdout = String(data: stdoutData, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let stderr = String(data: stderrData, encoding: .utf8)?
+                var stderr = String(data: stderrData, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+                // Detect timeout-based termination
+                let exitCode = proc.terminationStatus
+                if proc.terminationReason == .uncaughtSignal || exitCode == 15 /* SIGTERM */ {
+                    stderr = "Process timed out after \(Int(timeout))s and was terminated. " + stderr
+                }
+
+                resumed.lock()
+                guard !hasResumed else {
+                    resumed.unlock()
+                    return
+                }
+                hasResumed = true
+                resumed.unlock()
 
                 continuation.resume(returning: CommandResult(
                     stdout: stdout,
                     stderr: stderr,
-                    exitCode: process.terminationStatus
+                    exitCode: exitCode
                 ))
             }
 
             do {
                 try process.run()
             } catch {
+                timeoutWork.cancel()
+
+                resumed.lock()
+                guard !hasResumed else {
+                    resumed.unlock()
+                    return
+                }
+                hasResumed = true
+                resumed.unlock()
+
                 continuation.resume(returning: CommandResult(
                     stdout: "",
                     stderr: error.localizedDescription,

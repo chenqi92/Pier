@@ -15,20 +15,49 @@ pub struct SshSession {
     forwards: HashMap<u16, watch::Sender<bool>>,
 }
 
-/// Minimal SSH client handler.
-struct SshHandler;
+/// Minimal SSH client handler with host key verification.
+struct SshHandler {
+    /// Hostname for known_hosts lookup.
+    host: String,
+    /// Port for known_hosts lookup.
+    port: u16,
+}
 
 impl client::Handler for SshHandler {
     type Error = anyhow::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        // TODO: implement known_hosts checking for security
-        // For now, accept all keys (INSECURE - must be fixed before release)
-        log::warn!("Accepting server key without verification - implement known_hosts!");
-        Ok(true)
+        use russh::keys::known_hosts::{check_known_hosts, learn_known_hosts};
+
+        match check_known_hosts(&self.host, self.port, server_public_key) {
+            Ok(true) => {
+                log::info!("Host key verified for {}:{}", self.host, self.port);
+                Ok(true)
+            }
+            Ok(false) => {
+                // Key mismatch — possible MITM attack.
+                log::error!(
+                    "HOST KEY MISMATCH for {}:{} — possible MITM attack! Connection rejected.",
+                    self.host, self.port
+                );
+                Err(anyhow::anyhow!(
+                    "Host key mismatch for {}:{}. The server's key has changed, which could indicate a man-in-the-middle attack. \
+                     If you trust this change, remove the old key from ~/.ssh/known_hosts and reconnect.",
+                    self.host, self.port
+                ))
+            }
+            Err(_) => {
+                // Host not found in known_hosts — Trust On First Use (TOFU).
+                log::info!("New host key for {}:{} — adding to known_hosts (TOFU)", self.host, self.port);
+                if let Err(e) = learn_known_hosts(&self.host, self.port, server_public_key) {
+                    log::warn!("Failed to save host key: {}", e);
+                }
+                Ok(true)
+            }
+        }
     }
 }
 
@@ -44,7 +73,10 @@ impl SshSession {
     /// Establish an SSH connection.
     pub async fn connect(&mut self) -> Result<(), anyhow::Error> {
         let ssh_config = client::Config::default();
-        let handler = SshHandler;
+        let handler = SshHandler {
+            host: self.config.host.clone(),
+            port: self.config.port,
+        };
 
         // 10-second timeout for TCP connect to avoid blocking indefinitely
         // when the target host is unreachable (e.g. network change).
@@ -306,12 +338,20 @@ impl SshSession {
         let mut exit_code: i32 = -1;
         let mut got_eof = false;
 
+        // Overall command timeout: 60 seconds max for the entire command.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+
         loop {
-            // Safety: channel_read with timeout to avoid hanging
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                channel.wait(),
-            ).await {
+            // Check overall deadline
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                log::warn!("SSH exec overall timeout (60s) for command: {}", command);
+                break;
+            }
+
+            // Per-message timeout: min of 10s and remaining overall time
+            let msg_timeout = remaining.min(std::time::Duration::from_secs(10));
+            match tokio::time::timeout(msg_timeout, channel.wait()).await {
                 Ok(Some(msg)) => {
                     match msg {
                         russh::ChannelMsg::Data { ref data } => {
@@ -345,11 +385,6 @@ impl SshSession {
                     break;
                 }
             }
-        }
-
-        // If we got data but no explicit exit code, treat as success
-        if exit_code == -1 && !stdout.is_empty() {
-            exit_code = 0;
         }
 
         let output = String::from_utf8_lossy(&stdout).trim().to_string();

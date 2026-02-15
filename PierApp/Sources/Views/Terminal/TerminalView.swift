@@ -372,19 +372,20 @@ class TerminalNSView: NSView {
     @objc private func handleTerminalInput(_ notification: Notification) {
         guard let handle = terminalHandle else { return }
         var text: String?
-        var deliveryFlag: UnsafeMutablePointer<Bool>?
+        var deliveryFlag: AnyObject?
         if let info = notification.object as? [String: Any] {
             // From TerminalViewModel.sendInput: ["sessionId": UUID, "text": String]
             if let sessionId = info["sessionId"] as? UUID {
                 guard sessionId == currentSessionId else { return }
             }
             text = info["text"] as? String
-            deliveryFlag = info["deliveryFlag"] as? UnsafeMutablePointer<Bool>
+            deliveryFlag = info["deliveryFlag"] as AnyObject?
         }
         guard let inputText = text, !inputText.isEmpty else { return }
         let bytes = Array(inputText.utf8)
         pier_terminal_write(handle, bytes, UInt(bytes.count))
-        deliveryFlag?.pointee = true
+        // Set delivery flag (supports both class wrapper and legacy pointer)
+        deliveryFlag?.setValue(true, forKey: "value")
     }
 
     @objc private func handleTabClosed(_ notification: Notification) {

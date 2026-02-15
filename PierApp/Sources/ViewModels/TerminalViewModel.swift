@@ -225,24 +225,25 @@ class TerminalViewModel: ObservableObject {
     /// Send input to a specific session, retrying until it's delivered.
     /// Used after creating a new tab, since the PTY needs a layout pass to initialize.
     func sendInputToSession(_ sessionId: UUID, text: String, retriesLeft: Int = 15) {
-        // Check if the session's PTY is ready by looking for a response
-        let delivered = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
-        delivered.pointee = false
+        let delivered = DeliveryFlag()
 
         NotificationCenter.default.post(
             name: .terminalInput,
             object: ["sessionId": sessionId, "text": text, "deliveryFlag": delivered]
         )
 
-        let wasDelivered = delivered.pointee
-        delivered.deallocate()
-
-        if !wasDelivered && retriesLeft > 0 {
+        if !delivered.value && retriesLeft > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.sendInputToSession(sessionId, text: text, retriesLeft: retriesLeft - 1)
             }
         }
     }
+}
+
+/// Pass-by-reference Bool wrapper for notification-based delivery confirmation.
+/// Replaces UnsafeMutablePointer<Bool> — safer, no manual allocate/deallocate.
+@objc class DeliveryFlag: NSObject {
+    @objc dynamic var value = false
 }
 
 extension Notification.Name {

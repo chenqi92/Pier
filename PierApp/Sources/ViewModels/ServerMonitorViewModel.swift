@@ -131,7 +131,8 @@ class ServerMonitorViewModel: ObservableObject {
                 await self?.pollStats()
             }
         }
-        // Refresh disks/processes less frequently (every 15s) — must be stored!
+        // Refresh disks/processes less frequently (every 15s) — cancel old timer first
+        slowPollingTimer?.invalidate()
         slowPollingTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.loadDisks()

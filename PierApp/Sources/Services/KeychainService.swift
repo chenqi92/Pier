@@ -2,6 +2,8 @@ import Foundation
 import Security
 
 /// Secure credential storage using macOS Keychain.
+///
+/// Thread-safe: all mutable state is protected by `cacheLock`.
 class KeychainService {
 
     static let shared = KeychainService()
@@ -10,6 +12,7 @@ class KeychainService {
     /// In-memory cache to avoid repeated Keychain prompts.
     /// Key: Keychain account key, Value: (cachedValue, timestamp)
     private var cache: [String: (value: String?, timestamp: Date)] = [:]
+    private let cacheLock = NSLock()
     private let cacheTTL: TimeInterval = 600 // 10 minutes
 
     // MARK: - Save
@@ -36,15 +39,19 @@ class KeychainService {
         }
 
         // Update cache
+        cacheLock.lock()
         cache[key] = (value: value, timestamp: Date())
+        cacheLock.unlock()
     }
 
     // MARK: - Load
 
     func load(key: String) throws -> String? {
         // Check in-memory cache first
-        if let cached = cache[key],
-           Date().timeIntervalSince(cached.timestamp) < cacheTTL {
+        cacheLock.lock()
+        let cached = cache[key]
+        cacheLock.unlock()
+        if let cached, Date().timeIntervalSince(cached.timestamp) < cacheTTL {
             return cached.value
         }
 
@@ -66,11 +73,15 @@ class KeychainService {
                 throw KeychainError.decodingFailed
             }
             // Cache the loaded value
+            cacheLock.lock()
             cache[key] = (value: value, timestamp: Date())
+            cacheLock.unlock()
             return value
         case errSecItemNotFound:
             // Cache the "not found" result too
+            cacheLock.lock()
             cache[key] = (value: nil, timestamp: Date())
+            cacheLock.unlock()
             return nil
         default:
             throw KeychainError.loadFailed(status)
@@ -81,7 +92,9 @@ class KeychainService {
 
     func delete(key: String) throws {
         // Invalidate cache
+        cacheLock.lock()
         cache.removeValue(forKey: key)
+        cacheLock.unlock()
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

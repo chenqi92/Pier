@@ -373,8 +373,15 @@ pub extern "C" fn pier_ssh_exec(
     let session = unsafe { &*handle };
     let cmd_str = unsafe { CStr::from_ptr(command).to_str().unwrap_or("") };
 
-    match ssh_runtime().block_on(session.exec_command(cmd_str)) {
-        Ok((exit_code, stdout)) => {
+    // 60-second overall timeout to prevent blocking the FFI thread indefinitely
+    // when the SSH connection is dead (e.g. network change).
+    match ssh_runtime().block_on(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            session.exec_command(cmd_str),
+        )
+    ) {
+        Ok(Ok((exit_code, stdout))) => {
             let result = serde_json::json!({
                 "exit_code": exit_code,
                 "stdout": stdout,
@@ -384,11 +391,19 @@ pub extern "C" fn pier_ssh_exec(
                 Err(_) => std::ptr::null_mut(),
             }
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             log::error!("SSH exec failed: {}", e);
             let err = serde_json::json!({
                 "exit_code": -1,
                 "stdout": format!("Error: {}", e),
+            });
+            CString::new(err.to_string()).unwrap_or_default().into_raw()
+        }
+        Err(_) => {
+            log::warn!("SSH exec timed out after 60s for command: {}", cmd_str);
+            let err = serde_json::json!({
+                "exit_code": -1,
+                "stdout": "Error: command timed out after 60s",
             });
             CString::new(err.to_string()).unwrap_or_default().into_raw()
         }
@@ -415,10 +430,20 @@ pub extern "C" fn pier_ssh_forward_port(
     let session = unsafe { &mut *handle };
     let host_str = unsafe { CStr::from_ptr(remote_host).to_str().unwrap_or("") };
 
-    match ssh_runtime().block_on(session.start_port_forward(local_port, host_str, remote_port)) {
-        Ok(()) => 0,
-        Err(e) => {
+    // 10-second timeout: TcpListener::bind + SSH channel setup
+    match ssh_runtime().block_on(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            session.start_port_forward(local_port, host_str, remote_port),
+        )
+    ) {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
             log::error!("Port forward failed: {}", e);
+            -1
+        }
+        Err(_) => {
+            log::warn!("Port forward timed out after 10s for port {}", local_port);
             -1
         }
     }

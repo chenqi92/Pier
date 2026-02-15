@@ -134,7 +134,15 @@ class PostgreSQLViewModel: ObservableObject {
         }
     }
 
+    /// Sanitize a SQL identifier to prevent injection. Allows only alphanumerics and underscores.
+    private func sanitizeIdentifier(_ name: String) -> String {
+        String(name.filter { $0.isLetter || $0.isNumber || $0 == "_" })
+    }
+
     func loadColumns(for table: PGTable) async {
+        let safeSchema = sanitizeIdentifier(table.schema)
+        let safeName = sanitizeIdentifier(table.name)
+
         guard let output = await runPSQL([
             "--dbname", selectedDatabase,
             "--command", """
@@ -154,7 +162,7 @@ class PostgreSQLViewModel: ObservableObject {
                 ON kcu.constraint_name = rc.constraint_name
             LEFT JOIN information_schema.constraint_column_usage ccu
                 ON rc.unique_constraint_name = ccu.constraint_name
-            WHERE c.table_schema = '\(table.schema)' AND c.table_name = '\(table.name)'
+            WHERE c.table_schema = '\(safeSchema)' AND c.table_name = '\(safeName)'
             ORDER BY c.ordinal_position
             """,
             "--tuples-only", "--no-align", "--field-separator", "|"
