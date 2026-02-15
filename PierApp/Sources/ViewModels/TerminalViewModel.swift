@@ -138,30 +138,46 @@ class TerminalViewModel: ObservableObject {
     }
 
     func closeTab(_ id: UUID) {
-        // Notify TerminalNSView to destroy the cached PTY
-        NotificationCenter.default.post(name: .terminalTabClosed, object: id)
+        // 1. Compute new selectedTabId FIRST, before mutating any @Published state.
+        //    This prevents SwiftUI from re-rendering during intermediate inconsistent states
+        //    (e.g. selectedTabId pointing to a removed splitNode → Index out of range).
+        let newSelectedId: UUID?
+        if selectedTabId == id {
+            // Select the tab before this one, or the first remaining tab
+            if let idx = tabs.firstIndex(where: { $0.id == id }) {
+                let remaining = tabs.filter { $0.id != id }
+                if idx > 0 && idx - 1 < remaining.count {
+                    newSelectedId = remaining[idx - 1].id
+                } else {
+                    newSelectedId = remaining.first?.id
+                }
+            } else {
+                newSelectedId = nil
+            }
+        } else {
+            newSelectedId = selectedTabId
+        }
 
-        // Also close all split pane sessions for this tab
+        // 2. Notify TerminalNSView to destroy cached PTYs (before removing state)
+        NotificationCenter.default.post(name: .terminalTabClosed, object: id)
         if let root = splitNodes[id] {
             for s in root.allSessions where s.id != id {
                 NotificationCenter.default.post(name: .terminalTabClosed, object: s.id)
             }
         }
-        splitNodes.removeValue(forKey: id)
 
-        // Disconnect per-tab SSH service manager
+        // 3. Disconnect per-tab SSH service manager
         if let session = sessions[id] {
             Task { @MainActor in
                 session.remoteServiceManager?.disconnect()
             }
         }
 
+        // 4. Remove all state atomically (single @Published batch)
+        splitNodes.removeValue(forKey: id)
         tabs.removeAll { $0.id == id }
         sessions.removeValue(forKey: id)
-
-        if selectedTabId == id {
-            selectedTabId = tabs.last?.id
-        }
+        selectedTabId = newSelectedId
     }
 
     // MARK: - Split Pane

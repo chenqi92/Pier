@@ -4,6 +4,9 @@ import CPierCore
 /// Pier Terminal — macOS XShell-like terminal application.
 @main
 struct PierApp: App {
+    init() {
+    }
+
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var serviceManager = RemoteServiceManager()
 

@@ -117,6 +117,15 @@ struct CellAttr: Equatable {
     static let `default` = CellAttr()
 }
 
+/// A single terminal cell: character + visual attributes.
+/// By combining character and attributes into one struct, they can never go out of sync.
+struct TerminalCell: Equatable {
+    var character: Character = " "
+    var attr: CellAttr = .default
+
+    static let blank = TerminalCell()
+}
+
 /// AppKit NSView for high-performance terminal rendering.
 class TerminalNSView: NSView {
     var session: TerminalSessionInfo?
@@ -159,10 +168,8 @@ class TerminalNSView: NSView {
     /// Cached PTY state for a terminal session.
     struct PTYCacheEntry {
         let handle: OpaquePointer
-        var screenBuffer: [[Character]]
-        var screenAttrs: [[CellAttr]]
-        var scrollbackBuffer: [[Character]]
-        var scrollbackAttrs: [[CellAttr]]
+        var screen: [[TerminalCell]]
+        var scrollback: [[TerminalCell]]
         var cursorX: Int
         var cursorY: Int
         var ptyCols: Int
@@ -194,9 +201,8 @@ class TerminalNSView: NSView {
     private var pendingCwdCheck = false
     private var sshExitDetected = false  // Prevent repeated SSH exit notifications
 
-    // Screen buffer (visible area) + parallel attribute buffer
-    private var screenBuffer: [[Character]] = []
-    private var screenAttrs: [[CellAttr]] = []
+    // Screen buffer (visible area) — unified character + attribute per cell
+    private var screen: [[TerminalCell]] = []
     private var cursorX: Int = 0
     private var cursorY: Int = 0
 
@@ -207,10 +213,9 @@ class TerminalNSView: NSView {
     private var savedCursorX: Int = 0
     private var savedCursorY: Int = 0
 
-    // Scrollback buffer (max 10,000 lines) + parallel attribute buffer
+    // Scrollback buffer (max 10,000 lines) — unified character + attribute per cell
     private let maxScrollback = 10_000
-    private var scrollbackBuffer: [[Character]] = []
-    private var scrollbackAttrs: [[CellAttr]] = []
+    private var scrollback: [[TerminalCell]] = []
 
     // Text selection
     private var selectionStart: (row: Int, col: Int)?
@@ -401,6 +406,11 @@ class TerminalNSView: NSView {
                 }
             }
             currentSessionId = nil
+            // Clear buffers to prevent stale array accesses during SwiftUI re-render
+            screen = []
+            scrollback = []
+            cursorX = 0
+            cursorY = 0
         }
         // Also remove from static cache
         TerminalNSView.destroyCachedPTY(sessionId: sessionId)
@@ -494,10 +504,8 @@ class TerminalNSView: NSView {
         // ── Try to restore from cache ──
         if let cached = TerminalNSView.ptyCache.removeValue(forKey: session.id) {
             terminalHandle = cached.handle
-            screenBuffer = cached.screenBuffer
-            screenAttrs = cached.screenAttrs
-            scrollbackBuffer = cached.scrollbackBuffer
-            scrollbackAttrs = cached.scrollbackAttrs
+            screen = cached.screen
+            scrollback = cached.scrollback
             cursorX = cached.cursorX
             cursorY = cached.cursorY
             ptyCols = cached.ptyCols
@@ -510,10 +518,8 @@ class TerminalNSView: NSView {
         } else {
             // New session — need to create PTY
             terminalHandle = nil
-            screenBuffer = []
-            screenAttrs = []
-            scrollbackBuffer = []
-            scrollbackAttrs = []
+            screen = []
+            scrollback = []
             cursorX = 0
             cursorY = 0
             currentAttr = .default
@@ -537,10 +543,8 @@ class TerminalNSView: NSView {
         guard let sessionId = currentSessionId, let handle = terminalHandle else { return }
         let entry = PTYCacheEntry(
             handle: handle,
-            screenBuffer: screenBuffer,
-            screenAttrs: screenAttrs,
-            scrollbackBuffer: scrollbackBuffer,
-            scrollbackAttrs: scrollbackAttrs,
+            screen: screen,
+            scrollback: scrollback,
             cursorX: cursorX,
             cursorY: cursorY,
             ptyCols: ptyCols,
@@ -605,10 +609,8 @@ class TerminalNSView: NSView {
             pier_terminal_destroy(handle)
             terminalHandle = nil
         }
-        screenBuffer = []
-        screenAttrs = []
-        scrollbackBuffer = []
-        scrollbackAttrs = []
+        screen = []
+        scrollback = []
         currentAttr = .default
         cursorX = 0
         cursorY = 0
@@ -630,8 +632,7 @@ class TerminalNSView: NSView {
 
         if terminalHandle != nil {
             // Initialize screen buffer to match PTY size
-            screenBuffer = Array(repeating: Array(repeating: Character(" "), count: cols), count: rows)
-            screenAttrs = Array(repeating: Array(repeating: .default, count: cols), count: rows)
+            screen = Array(repeating: Array(repeating: .blank, count: cols), count: rows)
             currentAttr = .default
             startReadLoop()
         }
@@ -665,8 +666,7 @@ class TerminalNSView: NSView {
         }
 
         if terminalHandle != nil {
-            screenBuffer = Array(repeating: Array(repeating: Character(" "), count: cols), count: rows)
-            screenAttrs = Array(repeating: Array(repeating: .default, count: cols), count: rows)
+            screen = Array(repeating: Array(repeating: .blank, count: cols), count: rows)
             currentAttr = .default
             startReadLoop()
         }
@@ -680,7 +680,8 @@ class TerminalNSView: NSView {
     }
 
     private func readTerminalOutput() {
-        guard let handle = terminalHandle else { return }
+        // Bail if session was closed (timer callback may fire after handleTabClosed)
+        guard let handle = terminalHandle, currentSessionId != nil else { return }
 
         let bytesRead = pier_terminal_read(handle, &readBuffer, UInt(readBuffer.count))
 
@@ -780,13 +781,13 @@ class TerminalNSView: NSView {
         guard let sessionId = currentSessionId, !sshExitDetected else { return }
 
         // Scan the last few lines above the cursor for SSH disconnect patterns
-        let linesToScan = min(5, screenBuffer.count)
+        let linesToScan = min(5, screen.count)
         let startRow = max(0, cursorY - linesToScan)
         let endRow = cursorY
 
         for row in startRow..<endRow {
-            guard row >= 0 && row < screenBuffer.count else { continue }
-            let line = String(screenBuffer[row]).trimmingCharacters(in: .whitespaces)
+            guard row >= 0 && row < screen.count else { continue }
+            let line = String(screen[row].map { $0.character }).trimmingCharacters(in: .whitespaces)
 
             // Match patterns like:
             //   "Connection to 192.168.0.3 closed."
@@ -806,8 +807,8 @@ class TerminalNSView: NSView {
     /// Detect the current working directory from the terminal prompt.
     /// Matches patterns like: `user@host:path#` or `user@host:path$`
     private func detectPromptCwd() {
-        guard cursorY >= 0 && cursorY < screenBuffer.count else { return }
-        let line = String(screenBuffer[cursorY]).trimmingCharacters(in: .whitespaces)
+        guard cursorY >= 0 && cursorY < screen.count else { return }
+        let line = String(screen[cursorY].map { $0.character }).trimmingCharacters(in: .whitespaces)
         guard !line.isEmpty else { return }
 
         // Match common prompt patterns:
@@ -910,40 +911,36 @@ class TerminalNSView: NSView {
             cursorX = 0
             cursorY += 1
             if cursorY >= visibleRows {
-                if !screenBuffer.isEmpty {
-                    scrollbackBuffer.append(screenBuffer.removeFirst())
-                    scrollbackAttrs.append(screenAttrs.removeFirst())
+                if !screen.isEmpty {
+                    scrollback.append(screen.removeFirst())
                 }
-                screenBuffer.append(Array(repeating: " ", count: cols))
-                screenAttrs.append(Array(repeating: .default, count: cols))
+                screen.append(Array(repeating: .blank, count: cols))
                 cursorY = visibleRows - 1
             }
-            while cursorY >= screenBuffer.count {
-                screenBuffer.append(Array(repeating: " ", count: cols))
-                screenAttrs.append(Array(repeating: .default, count: cols))
+            while cursorY >= screen.count {
+                screen.append(Array(repeating: .blank, count: cols))
             }
         }
 
         // Ensure buffer has the row
-        while cursorY >= screenBuffer.count {
-            screenBuffer.append(Array(repeating: " ", count: cols))
-            screenAttrs.append(Array(repeating: .default, count: cols))
+        while cursorY >= screen.count {
+            screen.append(Array(repeating: .blank, count: cols))
         }
 
-        if cursorY < screenBuffer.count && cursorX < screenBuffer[cursorY].count {
-            screenBuffer[cursorY][cursorX] = char
-            screenAttrs[cursorY][cursorX] = currentAttr
+        if cursorY < screen.count && cursorX < screen[cursorY].count {
+            screen[cursorY][cursorX] = TerminalCell(character: char, attr: currentAttr)
             cursorX += 1
             // For wide characters, place a zero-width placeholder in the next cell
-            if charWidth == 2 && cursorX < screenBuffer[cursorY].count {
-                screenBuffer[cursorY][cursorX] = "\u{200B}" // zero-width space as placeholder
-                screenAttrs[cursorY][cursorX] = currentAttr
+            if charWidth == 2 && cursorX < screen[cursorY].count {
+                screen[cursorY][cursorX] = TerminalCell(character: "\u{200B}", attr: currentAttr)
                 cursorX += 1
             }
         }
     }
 
     private func processTerminalOutput(_ bytes: [UInt8]) {
+        // Guard: bail if screen was cleared (session closed)
+        guard !screen.isEmpty else { return }
         let cols = visibleCols
 
         for byte in bytes {
@@ -1010,22 +1007,18 @@ class TerminalNSView: NSView {
                 cursorY += 1
                 if cursorY >= visibleRows {
                     // Scroll: move top line to scrollback
-                    if !screenBuffer.isEmpty {
-                        scrollbackBuffer.append(screenBuffer.removeFirst())
-                        scrollbackAttrs.append(screenAttrs.removeFirst())
+                    if !screen.isEmpty {
+                        scrollback.append(screen.removeFirst())
                     }
-                    screenBuffer.append(Array(repeating: " ", count: cols))
-                    screenAttrs.append(Array(repeating: .default, count: cols))
+                    screen.append(Array(repeating: .blank, count: cols))
                     cursorY = visibleRows - 1
-                    if scrollbackBuffer.count > maxScrollback {
-                        scrollbackBuffer.removeFirst(scrollbackBuffer.count - maxScrollback)
-                        scrollbackAttrs.removeFirst(scrollbackAttrs.count - maxScrollback)
+                    if scrollback.count > maxScrollback {
+                        scrollback.removeFirst(scrollback.count - maxScrollback)
                     }
                 }
-                // Ensure screenBuffer has enough rows
-                while cursorY >= screenBuffer.count {
-                    screenBuffer.append(Array(repeating: " ", count: cols))
-                    screenAttrs.append(Array(repeating: .default, count: cols))
+                // Ensure screen has enough rows
+                while cursorY >= screen.count {
+                    screen.append(Array(repeating: .blank, count: cols))
                 }
             case 0x0D: // CR (\r)
                 cursorX = 0
@@ -1064,11 +1057,9 @@ class TerminalNSView: NSView {
                         cursorY -= 1
                     } else {
                         // Scroll down: insert blank line at top
-                        screenBuffer.insert(Array(repeating: " ", count: cols), at: 0)
-                        screenAttrs.insert(Array(repeating: .default, count: cols), at: 0)
-                        if screenBuffer.count > visibleRows {
-                            screenBuffer.removeLast()
-                            screenAttrs.removeLast()
+                        screen.insert(Array(repeating: .blank, count: cols), at: 0)
+                        if screen.count > visibleRows {
+                            screen.removeLast()
                         }
                     }
                     ansiState = .normal
@@ -1108,8 +1099,25 @@ class TerminalNSView: NSView {
             }
     }
 
+    /// Ensure screen buffer has at least `row + 1` rows,
+    /// and that the row at `row` has at least `visibleCols` columns.
+    private func ensureBufferCovers(row: Int) {
+        guard row >= 0 else { return }
+        let cols = max(1, visibleCols)
+        while screen.count <= row {
+            screen.append(Array(repeating: .blank, count: cols))
+        }
+        if screen[row].count < cols {
+            screen[row].append(contentsOf: Array(repeating: TerminalCell.blank, count: cols - screen[row].count))
+        }
+    }
+
     private func handleCSI(finalByte: UInt8, params: String) {
+        // Guard: bail if screen was cleared (session closed)
+        guard !screen.isEmpty else { return }
         let cols = visibleCols
+        guard cols > 0 else { return }
+
         let parts = params.split(separator: ";").map { Int($0) ?? 0 }
         let p1 = parts.first ?? 0
         let p2 = parts.count > 1 ? parts[1] : 0
@@ -1140,54 +1148,48 @@ class TerminalNSView: NSView {
         case 0x4A: // 'J' — Erase in Display
             switch p1 {
             case 0: // Clear from cursor to end
-                if cursorY < screenBuffer.count {
-                    for x in cursorX..<min(cols, screenBuffer[cursorY].count) {
-                        screenBuffer[cursorY][x] = " "
-                        screenAttrs[cursorY][x] = .default
-                    }
-                    for y in (cursorY + 1)..<screenBuffer.count {
-                        screenBuffer[y] = Array(repeating: " ", count: cols)
-                        screenAttrs[y] = Array(repeating: .default, count: cols)
-                    }
+                ensureBufferCovers(row: cursorY)
+                for x in cursorX..<min(cols, screen[cursorY].count) {
+                    screen[cursorY][x] = .blank
+                }
+                for y in (cursorY + 1)..<screen.count {
+                    screen[y] = Array(repeating: .blank, count: cols)
                 }
             case 1: // Clear from start to cursor
-                for y in 0..<cursorY {
-                    if y < screenBuffer.count {
-                        screenBuffer[y] = Array(repeating: " ", count: cols)
-                        screenAttrs[y] = Array(repeating: .default, count: cols)
-                    }
+                for y in 0..<min(cursorY, screen.count) {
+                    screen[y] = Array(repeating: .blank, count: cols)
                 }
-                if cursorY < screenBuffer.count {
-                    for x in 0...min(cursorX, screenBuffer[cursorY].count - 1) {
-                        screenBuffer[cursorY][x] = " "
-                        screenAttrs[cursorY][x] = .default
+                ensureBufferCovers(row: cursorY)
+                let endX = min(cursorX, screen[cursorY].count - 1)
+                if endX >= 0 {
+                    for x in 0...endX {
+                        screen[cursorY][x] = .blank
                     }
                 }
             case 2, 3: // Clear entire screen
-                for y in 0..<screenBuffer.count {
-                    screenBuffer[y] = Array(repeating: " ", count: cols)
-                    screenAttrs[y] = Array(repeating: .default, count: cols)
+                for y in 0..<screen.count {
+                    screen[y] = Array(repeating: .blank, count: cols)
                 }
             default:
                 break
             }
 
         case 0x4B: // 'K' — Erase in Line
-            guard cursorY < screenBuffer.count else { break }
+            ensureBufferCovers(row: cursorY)
             switch p1 {
             case 0: // Clear from cursor to end of line
-                for x in cursorX..<min(cols, screenBuffer[cursorY].count) {
-                    screenBuffer[cursorY][x] = " "
-                    screenAttrs[cursorY][x] = .default
+                for x in cursorX..<min(cols, screen[cursorY].count) {
+                    screen[cursorY][x] = .blank
                 }
             case 1: // Clear from start to cursor
-                for x in 0...min(cursorX, screenBuffer[cursorY].count - 1) {
-                    screenBuffer[cursorY][x] = " "
-                    screenAttrs[cursorY][x] = .default
+                let endX = min(cursorX, screen[cursorY].count - 1)
+                if endX >= 0 {
+                    for x in 0...endX {
+                        screen[cursorY][x] = .blank
+                    }
                 }
             case 2: // Clear entire line
-                screenBuffer[cursorY] = Array(repeating: " ", count: cols)
-                screenAttrs[cursorY] = Array(repeating: .default, count: cols)
+                screen[cursorY] = Array(repeating: .blank, count: cols)
             default:
                 break
             }
@@ -1217,50 +1219,39 @@ class TerminalNSView: NSView {
         case 0x4C: // 'L' — Insert Lines
             let n = max(1, p1)
             for _ in 0..<n {
-                if cursorY < screenBuffer.count {
-                    screenBuffer.insert(Array(repeating: " ", count: cols), at: cursorY)
-                    screenAttrs.insert(Array(repeating: .default, count: cols), at: cursorY)
-                    if screenBuffer.count > visibleRows {
-                        screenBuffer.removeLast()
-                        screenAttrs.removeLast()
-                    }
+                ensureBufferCovers(row: cursorY)
+                screen.insert(Array(repeating: .blank, count: cols), at: cursorY)
+                if screen.count > visibleRows {
+                    screen.removeLast()
                 }
             }
 
         case 0x4D: // 'M' (CSI) — Delete Lines
             let n = max(1, p1)
             for _ in 0..<n {
-                if cursorY < screenBuffer.count {
-                    screenBuffer.remove(at: cursorY)
-                    screenAttrs.remove(at: cursorY)
-                    screenBuffer.append(Array(repeating: " ", count: cols))
-                    screenAttrs.append(Array(repeating: .default, count: cols))
+                if cursorY < screen.count {
+                    screen.remove(at: cursorY)
+                    screen.append(Array(repeating: .blank, count: cols))
                 }
             }
 
         case 0x50: // 'P' — Delete Characters
             let n = max(1, p1)
-            if cursorY < screenBuffer.count {
-                for _ in 0..<n {
-                    if cursorX < screenBuffer[cursorY].count {
-                        screenBuffer[cursorY].remove(at: cursorX)
-                        screenBuffer[cursorY].append(" ")
-                        screenAttrs[cursorY].remove(at: cursorX)
-                        screenAttrs[cursorY].append(.default)
-                    }
+            ensureBufferCovers(row: cursorY)
+            for _ in 0..<n {
+                if cursorX < screen[cursorY].count {
+                    screen[cursorY].remove(at: cursorX)
+                    screen[cursorY].append(.blank)
                 }
             }
 
         case 0x40: // '@' — Insert Characters
             let n = max(1, p1)
-            if cursorY < screenBuffer.count {
-                for _ in 0..<n {
-                    screenBuffer[cursorY].insert(" ", at: min(cursorX, screenBuffer[cursorY].count))
-                    screenAttrs[cursorY].insert(.default, at: min(cursorX, screenAttrs[cursorY].count))
-                    if screenBuffer[cursorY].count > cols {
-                        screenBuffer[cursorY].removeLast()
-                        screenAttrs[cursorY].removeLast()
-                    }
+            ensureBufferCovers(row: cursorY)
+            for _ in 0..<n {
+                screen[cursorY].insert(.blank, at: min(cursorX, screen[cursorY].count))
+                if screen[cursorY].count > cols {
+                    screen[cursorY].removeLast()
                 }
             }
 
@@ -1425,7 +1416,7 @@ class TerminalNSView: NSView {
     }
 
     private func updateDocumentSize() {
-        let totalLines = scrollbackBuffer.count + screenBuffer.count
+        let totalLines = scrollback.count + screen.count
         let visibleHeight = enclosingScrollView?.contentView.bounds.height ?? bounds.height
         let requiredHeight = max(visibleHeight, CGFloat(totalLines) * cellHeight)
         let width = enclosingScrollView?.contentView.bounds.width ?? bounds.width
@@ -1452,21 +1443,22 @@ class TerminalNSView: NSView {
 
         // Only scan visible + near-visible lines, not entire scrollback
         let clipBounds = enclosingScrollView?.contentView.bounds ?? bounds
-        let scrollbackCount = scrollbackBuffer.count
-        let totalLines = scrollbackCount + screenBuffer.count
+        let scrollbackCount = scrollback.count
+        let totalLines = scrollbackCount + screen.count
         let firstRow = max(0, Int(clipBounds.origin.y / cellHeight) - 5)
         let lastRow = min(totalLines, firstRow + Int(clipBounds.height / cellHeight) + 10)
 
         for row in firstRow..<lastRow {
-            let line: [Character]
+            let cellLine: [TerminalCell]
             if row < scrollbackCount {
-                line = scrollbackBuffer[row]
+                guard row >= 0 && row < scrollback.count else { continue }
+                cellLine = scrollback[row]
             } else {
                 let screenRow = row - scrollbackCount
-                guard screenRow < screenBuffer.count else { continue }
-                line = screenBuffer[screenRow]
+                guard screenRow >= 0 && screenRow < screen.count else { continue }
+                cellLine = screen[screenRow]
             }
-            let text = String(line)
+            let text = String(cellLine.map { $0.character })
             let range = NSRange(text.startIndex..., in: text)
             let matches = detector.matches(in: text, range: range)
             for match in matches {
@@ -1480,26 +1472,16 @@ class TerminalNSView: NSView {
 
     // MARK: - Rendering
 
-    /// Access a line by absolute row index without copying the entire buffer.
-    private func lineAtRow(_ row: Int) -> [Character]? {
-        let scrollbackCount = scrollbackBuffer.count
+    /// Access a line by absolute row index (scrollback + screen).
+    private func cellLineAtRow(_ row: Int) -> [TerminalCell]? {
+        let scrollbackCount = scrollback.count
         if row < scrollbackCount {
-            return scrollbackBuffer[row]
+            guard row >= 0 else { return nil }
+            return scrollback[row]
         }
         let screenRow = row - scrollbackCount
-        guard screenRow < screenBuffer.count else { return nil }
-        return screenBuffer[screenRow]
-    }
-
-    /// Get the attribute array for the given absolute row (scrollback + screen).
-    private func attrLineAtRow(_ row: Int) -> [CellAttr]? {
-        let scrollbackCount = scrollbackAttrs.count
-        if row < scrollbackCount {
-            return scrollbackAttrs[row]
-        }
-        let screenRow = row - scrollbackCount
-        guard screenRow < screenAttrs.count else { return nil }
-        return screenAttrs[screenRow]
+        guard screenRow >= 0 && screenRow < screen.count else { return nil }
+        return screen[screenRow]
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1513,8 +1495,8 @@ class TerminalNSView: NSView {
         context.setFillColor(theme.background.withAlphaComponent(opacity).cgColor)
         context.fill(bounds)
 
-        let scrollbackCount = scrollbackBuffer.count
-        let totalLines = scrollbackCount + screenBuffer.count
+        let scrollbackCount = scrollback.count
+        let totalLines = scrollbackCount + screen.count
 
         // Calculate visible range from scroll position
         let clipBounds = enclosingScrollView?.contentView.bounds ?? bounds
@@ -1524,8 +1506,7 @@ class TerminalNSView: NSView {
 
         // Render visible lines (isFlipped: row 0 at y=0, row 1 at y=cellHeight, etc.)
         for row in firstVisibleRow..<lastVisibleRow {
-            guard let line = lineAtRow(row) else { break }
-            let attrLine = attrLineAtRow(row)
+            guard let line = cellLineAtRow(row) else { break }
             let y = CGFloat(row) * cellHeight
 
             // Check if this row has URLs
@@ -1550,8 +1531,9 @@ class TerminalNSView: NSView {
             }
 
             // Render text character by character with per-cell ANSI attributes
-            for (col, char) in line.enumerated() {
-                let cellAttr = (attrLine != nil && col < attrLine!.count) ? attrLine![col] : .default
+            for (col, cell) in line.enumerated() {
+                let cellAttr = cell.attr
+                let char = cell.character
 
                 // Resolve foreground and background colors
                 var fgColor: NSColor
@@ -1712,16 +1694,15 @@ class TerminalNSView: NSView {
         let eRow = normalized.end.row
         let eCol = normalized.end.col
 
-        let allLines = scrollbackBuffer + screenBuffer
         var result = ""
 
-        for row in sRow..<min(eRow + 1, allLines.count) {
-            let line = allLines[row]
+        for row in sRow..<min(eRow + 1, scrollback.count + screen.count) {
+            guard let line = cellLineAtRow(row) else { continue }
             let startCol = (row == sRow) ? min(sCol, line.count) : 0
             let endCol = (row == eRow) ? min(eCol, line.count) : line.count
 
             if startCol < endCol {
-                let slice = line[startCol..<endCol]
+                let slice = line[startCol..<endCol].map { $0.character }
                 result += String(slice)
             }
             if row < eRow {
@@ -1806,8 +1787,8 @@ class TerminalNSView: NSView {
 
     /// Read the current screen line when Enter is pressed and detect SSH commands.
     private func detectSSHCommand() {
-        guard cursorY >= 0, cursorY < screenBuffer.count else { return }
-        let line = String(screenBuffer[cursorY]).trimmingCharacters(in: .whitespaces)
+        guard cursorY >= 0, cursorY < screen.count else { return }
+        let line = String(screen[cursorY].map { $0.character }).trimmingCharacters(in: .whitespaces)
         // Strip shell prompt: take everything after the last $ or # or %
         let commandPart: String
         if let promptEnd = line.lastIndex(where: { $0 == "$" || $0 == "#" || $0 == "%" }) {
@@ -1898,7 +1879,7 @@ class TerminalNSView: NSView {
         resizeScreenBuffer()
 
         // Update document frame to fill visible area (use super to avoid re-triggering our setFrameSize override)
-        let totalLines = scrollbackBuffer.count + screenBuffer.count
+        let totalLines = scrollback.count + screen.count
         let requiredHeight = max(visibleSize.height, CGFloat(totalLines) * cellHeight)
         super.setFrameSize(NSSize(width: visibleSize.width, height: requiredHeight))
         needsDisplay = true
@@ -1907,18 +1888,18 @@ class TerminalNSView: NSView {
     /// Resize the screen buffer to match current ptyCols/ptyRows.
     private func resizeScreenBuffer() {
         // Resize screen buffer to match new dimensions
-        while screenBuffer.count < ptyRows {
-            screenBuffer.append(Array(repeating: Character(" "), count: ptyCols))
+        while screen.count < ptyRows {
+            screen.append(Array(repeating: .blank, count: ptyCols))
         }
-        while screenBuffer.count > ptyRows {
-            let overflow = screenBuffer.removeFirst()
-            scrollbackBuffer.append(overflow)
+        while screen.count > ptyRows {
+            let overflow = screen.removeFirst()
+            scrollback.append(overflow)
         }
-        for i in 0..<screenBuffer.count {
-            if screenBuffer[i].count < ptyCols {
-                screenBuffer[i].append(contentsOf: Array(repeating: Character(" "), count: ptyCols - screenBuffer[i].count))
-            } else if screenBuffer[i].count > ptyCols {
-                screenBuffer[i] = Array(screenBuffer[i].prefix(ptyCols))
+        for i in 0..<screen.count {
+            if screen[i].count < ptyCols {
+                screen[i].append(contentsOf: Array(repeating: TerminalCell.blank, count: ptyCols - screen[i].count))
+            } else if screen[i].count > ptyCols {
+                screen[i] = Array(screen[i].prefix(ptyCols))
             }
         }
         cursorX = min(cursorX, ptyCols - 1)
@@ -1935,10 +1916,8 @@ class TerminalNSView: NSView {
         if let sessionId = currentSessionId, let handle = terminalHandle {
             let entry = PTYCacheEntry(
                 handle: handle,
-                screenBuffer: screenBuffer,
-                screenAttrs: screenAttrs,
-                scrollbackBuffer: scrollbackBuffer,
-                scrollbackAttrs: scrollbackAttrs,
+                screen: screen,
+                scrollback: scrollback,
                 cursorX: cursorX,
                 cursorY: cursorY,
                 ptyCols: ptyCols,
