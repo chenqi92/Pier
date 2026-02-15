@@ -46,12 +46,19 @@ impl SshSession {
         let ssh_config = client::Config::default();
         let handler = SshHandler;
 
-        let mut session = client::connect(
-            Arc::new(ssh_config),
-            (self.config.host.as_str(), self.config.port),
-            handler,
-        )
-        .await?;
+        // 10-second timeout for TCP connect to avoid blocking indefinitely
+        // when the target host is unreachable (e.g. network change).
+        let mut session = match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            client::connect(
+                Arc::new(ssh_config),
+                (self.config.host.as_str(), self.config.port),
+                handler,
+            ),
+        ).await {
+            Ok(result) => result?,
+            Err(_) => return Err(anyhow::anyhow!("SSH connect timed out after 10s")),
+        };
 
         // Authenticate
         let result = match &self.config.auth {
@@ -113,9 +120,21 @@ impl SshSession {
     /// Disconnect the SSH session.
     pub async fn disconnect(&mut self) -> Result<(), anyhow::Error> {
         if let Some(handle) = self.handle.take() {
-            let h = handle.lock().await;
-            h.disconnect(Disconnect::ByApplication, "User disconnect", "en")
-                .await?;
+            // 5-second timeout: if the server is unreachable, the disconnect
+            // handshake will hang. We'd rather drop the handle than block.
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                async {
+                    let h = handle.lock().await;
+                    h.disconnect(Disconnect::ByApplication, "User disconnect", "en")
+                        .await
+                },
+            ).await;
+            match result {
+                Ok(Ok(())) => {},
+                Ok(Err(e)) => log::warn!("SSH disconnect error: {}", e),
+                Err(_) => log::warn!("SSH disconnect timed out, dropping handle"),
+            }
         }
         Ok(())
     }

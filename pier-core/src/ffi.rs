@@ -333,7 +333,21 @@ pub extern "C" fn pier_ssh_detect_services(handle: PierSshHandle) -> *mut c_char
     }
 
     let session = unsafe { &*handle };
-    let services = ssh_runtime().block_on(service_detector::detect_all(session));
+
+    // 30-second overall timeout for service detection to prevent blocking
+    // when the SSH connection is dead (e.g. network change).
+    let services = match ssh_runtime().block_on(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            service_detector::detect_all(session),
+        )
+    ) {
+        Ok(services) => services,
+        Err(_) => {
+            log::warn!("Service detection timed out after 30s");
+            Vec::new()
+        }
+    };
 
     match serde_json::to_string(&services) {
         Ok(json) => CString::new(json).unwrap_or_default().into_raw(),

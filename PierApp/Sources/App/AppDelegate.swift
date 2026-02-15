@@ -27,8 +27,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize Rust core exactly once (fixes B1: was in onAppear, could fire multiple times)
         pier_init()
 
-        // Configure app appearance
-        NSApp.appearance = NSAppearance(named: .darkAqua)
+        // Configure app appearance (use stored preference, not hardcoded dark)
+        AppThemeManager.shared.applyAppearance()
 
         // Set up global keyboard shortcuts (save monitor ref for cleanup, use [weak self])
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in

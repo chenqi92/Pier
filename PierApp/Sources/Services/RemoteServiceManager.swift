@@ -127,31 +127,47 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         errorMessage = nil
         detectedServices = []
 
-        Task.detached { [weak self] in
-            // SSH connect (blocking in Rust via tokio runtime)
-            let handle = host.withCString { hostC in
-                username.withCString { userC in
-                    password.withCString { passC in
-                        pier_ssh_connect(hostC, port, userC, 0, passC)
+        let connectTimeout: TimeInterval = 15
+
+        Task {
+            let handle: OpaquePointer? = await withCheckedContinuation { continuation in
+                let guard_ = ContinuationGuard()
+
+                // Fire-and-forget: blocking FFI runs in a fully detached task.
+                Task.detached {
+                    let h = host.withCString { hostC in
+                        username.withCString { userC in
+                            password.withCString { passC in
+                                pier_ssh_connect(hostC, port, userC, 0, passC)
+                            }
+                        }
+                    }
+                    if await guard_.tryResume() {
+                        continuation.resume(returning: h)
+                    }
+                }
+
+                // Timeout: resume with nil if FFI hasn't finished
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(connectTimeout * 1_000_000_000))
+                    if await guard_.tryResume() {
+                        continuation.resume(returning: nil)
                     }
                 }
             }
 
-            await MainActor.run {
-                guard let self else { return }
-                if let handle {
-                    self.sshHandle = handle
-                    self.isConnected = true
-                    self.isConnecting = false
-                    self.connectedHost = "\(host):\(port)"
-                    self.connectionStatus = String(localized: "ssh.connected")
-                    self.detectServices()
-                } else {
-                    self.isConnected = false
-                    self.isConnecting = false
-                    self.connectionStatus = String(localized: "ssh.disconnected")
-                    self.errorMessage = String(localized: "ssh.connectFailed")
-                }
+            if let handle {
+                self.sshHandle = handle
+                self.isConnected = true
+                self.isConnecting = false
+                self.connectedHost = "\(host):\(port)"
+                self.connectionStatus = String(localized: "ssh.connected")
+                self.detectServices()
+            } else {
+                self.isConnected = false
+                self.isConnecting = false
+                self.connectionStatus = String(localized: "ssh.disconnected")
+                self.errorMessage = String(localized: "ssh.connectFailed")
             }
         }
     }
@@ -165,30 +181,45 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         errorMessage = nil
         detectedServices = []
 
-        Task.detached { [weak self] in
-            let handle = host.withCString { hostC in
-                username.withCString { userC in
-                    keyPath.withCString { keyC in
-                        pier_ssh_connect(hostC, port, userC, 1, keyC)
+        let connectTimeout: TimeInterval = 15
+
+        Task {
+            let handle: OpaquePointer? = await withCheckedContinuation { continuation in
+                let guard_ = ContinuationGuard()
+
+                Task.detached {
+                    let h = host.withCString { hostC in
+                        username.withCString { userC in
+                            keyPath.withCString { keyC in
+                                pier_ssh_connect(hostC, port, userC, 1, keyC)
+                            }
+                        }
+                    }
+                    if await guard_.tryResume() {
+                        continuation.resume(returning: h)
+                    }
+                }
+
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(connectTimeout * 1_000_000_000))
+                    if await guard_.tryResume() {
+                        continuation.resume(returning: nil)
                     }
                 }
             }
 
-            await MainActor.run {
-                guard let self else { return }
-                if let handle {
-                    self.sshHandle = handle
-                    self.isConnected = true
-                    self.isConnecting = false
-                    self.connectedHost = "\(host):\(port)"
-                    self.connectionStatus = String(localized: "ssh.connected")
-                    self.detectServices()
-                } else {
-                    self.isConnected = false
-                    self.isConnecting = false
-                    self.connectionStatus = String(localized: "ssh.disconnected")
-                    self.errorMessage = String(localized: "ssh.connectFailed")
-                }
+            if let handle {
+                self.sshHandle = handle
+                self.isConnected = true
+                self.isConnecting = false
+                self.connectedHost = "\(host):\(port)"
+                self.connectionStatus = String(localized: "ssh.connected")
+                self.detectServices()
+            } else {
+                self.isConnected = false
+                self.isConnecting = false
+                self.connectionStatus = String(localized: "ssh.disconnected")
+                self.errorMessage = String(localized: "ssh.connectFailed")
             }
         }
     }
@@ -199,13 +230,19 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         stopAllTunnels()
 
         guard let handle = sshHandle else { return }
-        pier_ssh_disconnect(handle)
+        // Clear handle immediately to prevent further use
         sshHandle = nil
         isConnected = false
         detectedServices = []
         connectedHost = ""
         connectionStatus = String(localized: "ssh.disconnected")
         currentProfileId = nil
+
+        // Dispatch blocking FFI call off the main thread.
+        // The Rust side has a 5s disconnect timeout, so this won't block forever.
+        Task.detached {
+            pier_ssh_disconnect(handle)
+        }
     }
 
     // MARK: - Service Detection
@@ -217,30 +254,45 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         isDetecting = true
         connectionStatus = String(localized: "ssh.detectingServices")
 
-        Task.detached { [weak self] in
-            let jsonPtr = pier_ssh_detect_services(handle)
+        let detectTimeout: TimeInterval = 35
 
-            await MainActor.run {
-                guard let self else { return }
-                self.isDetecting = false
+        Task {
+            let jsonPtr: UnsafeMutablePointer<CChar>? = await withCheckedContinuation { continuation in
+                let guard_ = ContinuationGuard()
 
-                guard let jsonPtr else {
-                    self.connectionStatus = String(localized: "ssh.connected")
-                    return
+                Task.detached {
+                    let ptr = pier_ssh_detect_services(handle)
+                    if await guard_.tryResume() {
+                        continuation.resume(returning: ptr)
+                    }
                 }
 
-                let jsonString = String(cString: jsonPtr)
-                pier_string_free(jsonPtr)
-
-                if let data = jsonString.data(using: .utf8),
-                   let services = try? JSONDecoder().decode([DetectedService].self, from: data) {
-                    self.detectedServices = services
-                    let runningCount = services.filter(\.isRunning).count
-                    self.connectionStatus = String(localized: "ssh.servicesDetected \(services.count) \(runningCount)")
-                    self.autoEstablishTunnels()
-                } else {
-                    self.connectionStatus = String(localized: "ssh.connected")
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(detectTimeout * 1_000_000_000))
+                    if await guard_.tryResume() {
+                        continuation.resume(returning: nil)
+                    }
                 }
+            }
+
+            self.isDetecting = false
+
+            guard let jsonPtr else {
+                self.connectionStatus = String(localized: "ssh.connected")
+                return
+            }
+
+            let jsonString = String(cString: jsonPtr)
+            pier_string_free(jsonPtr)
+
+            if let data = jsonString.data(using: .utf8),
+               let services = try? JSONDecoder().decode([DetectedService].self, from: data) {
+                self.detectedServices = services
+                let runningCount = services.filter(\.isRunning).count
+                self.connectionStatus = String(localized: "ssh.servicesDetected \(services.count) \(runningCount)")
+                self.autoEstablishTunnels()
+            } else {
+                self.connectionStatus = String(localized: "ssh.connected")
             }
         }
     }
@@ -432,7 +484,10 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     deinit {
         if let handle = sshHandle {
-            pier_ssh_disconnect(handle)
+            // Fire-and-forget: don't block deinit on disconnect
+            Task.detached {
+                pier_ssh_disconnect(handle)
+            }
         }
     }
 }

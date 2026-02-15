@@ -93,14 +93,12 @@ struct SettingsView: View {
                             .font(.caption)
                         Spacer()
                         Picker("", selection: $themeManager.fontFamily) {
-                            Text("SF Mono").tag("SF Mono")
-                            Text("Menlo").tag("Menlo")
-                            Text("Monaco").tag("Monaco")
-                            Text("Courier New").tag("Courier New")
-                            Text("JetBrains Mono").tag("JetBrains Mono")
-                            Text("Fira Code").tag("Fira Code")
+                            ForEach(themeManager.availableFonts, id: \.name) { font in
+                                Text(font.name + (font.installed ? "" : " ⚠️"))
+                                    .tag(font.name)
+                            }
                         }
-                        .frame(width: 180)
+                        .frame(width: 200)
                     }
 
                     HStack {

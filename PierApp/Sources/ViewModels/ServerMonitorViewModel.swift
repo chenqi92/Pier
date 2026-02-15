@@ -69,6 +69,8 @@ class ServerMonitorViewModel: ObservableObject {
 
     weak var serviceManager: RemoteServiceManager?
     private var pollingTimer: Timer?
+    private var slowPollingTimer: Timer?
+    private var monitoringTask: Task<Void, Never>?
     private let maxSnapshots = 60  // ~3 min of history at 3s intervals
     private var lastNetworkRx: UInt64 = 0
     private var lastNetworkTx: UInt64 = 0
@@ -109,12 +111,17 @@ class ServerMonitorViewModel: ObservableObject {
         resetState()
         guard pollingTimer == nil else { return }
         isLoading = true
-        // Initial full load
-        Task {
+        // Initial full load (tracked task — cancelled on stopMonitoring)
+        monitoringTask = Task { [weak self] in
+            guard let self else { return }
             await loadSystemInfo()
+            guard !Task.isCancelled else { return }
             await pollStats()
+            guard !Task.isCancelled else { return }
             await loadDisks()
+            guard !Task.isCancelled else { return }
             await loadTopProcesses()
+            guard !Task.isCancelled else { return }
             await loadGPU()
             isLoading = false
         }
@@ -124,8 +131,8 @@ class ServerMonitorViewModel: ObservableObject {
                 await self?.pollStats()
             }
         }
-        // Refresh disks/processes less frequently (every 15s)
-        Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+        // Refresh disks/processes less frequently (every 15s) — must be stored!
+        slowPollingTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.loadDisks()
                 await self?.loadTopProcesses()
@@ -134,8 +141,12 @@ class ServerMonitorViewModel: ObservableObject {
     }
 
     func stopMonitoring() {
+        monitoringTask?.cancel()
+        monitoringTask = nil
         pollingTimer?.invalidate()
         pollingTimer = nil
+        slowPollingTimer?.invalidate()
+        slowPollingTimer = nil
     }
 
     // MARK: - System Info (once)

@@ -88,6 +88,34 @@ class AppThemeManager: ObservableObject {
         TerminalTheme.theme(forId: terminalThemeId)
     }
 
+    /// Font availability info for the settings UI.
+    struct FontOption {
+        let name: String
+        let installed: Bool
+    }
+
+    /// All supported monospaced font families, with system availability checks.
+    var availableFonts: [FontOption] {
+        let candidates = [
+            "SF Mono",
+            "Menlo",
+            "Monaco",
+            "Courier New",
+            "JetBrains Mono",
+            "Fira Code",
+            "Source Code Pro",
+            "Cascadia Code",
+            "IBM Plex Mono",
+            "Hack",
+            "Inconsolata",
+            "Roboto Mono",
+            "Ubuntu Mono",
+        ]
+        return candidates.map { name in
+            FontOption(name: name, installed: NSFont(name: name, size: 13) != nil)
+        }
+    }
+
     private init() {
         applyAppearance()
         applyLanguage()
