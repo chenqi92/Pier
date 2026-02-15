@@ -47,6 +47,22 @@ struct GPUInfo: Identifiable {
     let fanSpeed: String
 }
 
+/// Cached snapshot of monitor data for a specific server, used to avoid
+/// blank screens when switching between tabs or servers.
+struct CachedMonitorData {
+    var snapshots: [ServerSnapshot]
+    var disks: [DiskInfo]
+    var topProcesses: [ServerProcessInfo]
+    var gpuInfos: [GPUInfo]
+    var hasGPU: Bool
+    var hostname: String
+    var kernelVersion: String
+    var uptime: String
+    var processCount: Int
+    var networkRxRate: Double
+    var networkTxRate: Double
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -76,6 +92,14 @@ class ServerMonitorViewModel: ObservableObject {
     private var lastNetworkTx: UInt64 = 0
     private var lastSnapshotTime: Date?
 
+    /// Static in-memory cache keyed by server host string.
+    private static var cache: [String: CachedMonitorData] = [:]
+
+    /// The host key used for caching the current server's data.
+    private var cacheKey: String? {
+        serviceManager?.connectedHost.isEmpty == false ? serviceManager?.connectedHost : nil
+    }
+
     var memoryUsagePercent: Double {
         guard let last = snapshots.last, last.memoryTotal > 0 else { return 0 }
         return (last.memoryUsed / last.memoryTotal) * 100
@@ -87,10 +111,65 @@ class ServerMonitorViewModel: ObservableObject {
         return String(format: "%.2f  %.2f  %.2f", s.loadAvg1, s.loadAvg5, s.loadAvg15)
     }
 
+    // MARK: - Cache
+
+    private func saveToCache() {
+        guard let key = cacheKey, !snapshots.isEmpty else { return }
+        Self.cache[key] = CachedMonitorData(
+            snapshots: snapshots,
+            disks: disks,
+            topProcesses: topProcesses,
+            gpuInfos: gpuInfos,
+            hasGPU: hasGPU,
+            hostname: hostname,
+            kernelVersion: kernelVersion,
+            uptime: uptime,
+            processCount: processCount,
+            networkRxRate: networkRxRate,
+            networkTxRate: networkTxRate
+        )
+    }
+
+    private func restoreFromCache() -> Bool {
+        guard let key = cacheKey, let cached = Self.cache[key] else { return false }
+        snapshots = cached.snapshots
+        disks = cached.disks
+        topProcesses = cached.topProcesses
+        gpuInfos = cached.gpuInfos
+        hasGPU = cached.hasGPU
+        hostname = cached.hostname
+        kernelVersion = cached.kernelVersion
+        uptime = cached.uptime
+        processCount = cached.processCount
+        networkRxRate = cached.networkRxRate
+        networkTxRate = cached.networkTxRate
+        return true
+    }
+
+    /// Switch to a different server: save current data, restore cached data for the new
+    /// server, then start polling. Called from the view on `serviceManager.id` change.
+    func switchServer(to sm: RemoteServiceManager?) {
+        saveToCache()
+        stopMonitoring()
+        clearState()
+        if let sm = sm {
+            serviceManager = sm
+            if sm.isConnected {
+                startMonitoring()
+            }
+        }
+    }
+
     // MARK: - Lifecycle
 
     func resetState() {
+        saveToCache()
         stopMonitoring()
+        clearState()
+    }
+
+    /// Clear all published state without saving to cache.
+    private func clearState() {
         snapshots.removeAll()
         disks.removeAll()
         topProcesses.removeAll()
@@ -108,9 +187,14 @@ class ServerMonitorViewModel: ObservableObject {
     }
 
     func startMonitoring() {
-        resetState()
+        stopMonitoring()
+        clearState()
         guard pollingTimer == nil else { return }
-        isLoading = true
+
+        // Try to restore cached data for this server so the UI is immediately populated
+        let hasCachedData = restoreFromCache()
+        isLoading = !hasCachedData
+
         // Initial full load (tracked task — cancelled on stopMonitoring)
         monitoringTask = Task { [weak self] in
             guard let self else { return }
@@ -142,6 +226,7 @@ class ServerMonitorViewModel: ObservableObject {
     }
 
     func stopMonitoring() {
+        saveToCache()
         monitoringTask?.cancel()
         monitoringTask = nil
         pollingTimer?.invalidate()
@@ -170,7 +255,7 @@ class ServerMonitorViewModel: ObservableObject {
         let cmd = """
         cat /proc/stat | head -1; \
         echo '---MEM---'; \
-        free -m | awk '/Mem:/{print "MEM "$2" "$3" "$4" "$6" "$7} /Swap:/{print "SWAP "$2" "$3}'; \
+        LC_ALL=C free -m | awk '/Mem:/{print "MEM "$2" "$3" "$4" "$6" "$7} /Swap:/{print "SWAP "$2" "$3}'; \
         echo '---LOAD---'; \
         cat /proc/loadavg; \
         echo '---NET---'; \

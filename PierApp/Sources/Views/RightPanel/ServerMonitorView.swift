@@ -51,14 +51,8 @@ struct ServerMonitorView: View {
             }
         }
         .onChange(of: serviceManager?.id) { _, _ in
-            // Different tab selected — reset and restart for the new server
-            viewModel.resetState()
-            if let sm = serviceManager {
-                viewModel.serviceManager = sm
-                if sm.isConnected {
-                    viewModel.startMonitoring()
-                }
-            }
+            // Different tab selected — save cache, restore cached data for new server, start polling
+            viewModel.switchServer(to: serviceManager)
         }
         .onDisappear {
             viewModel.stopMonitoring()
