@@ -497,30 +497,30 @@ struct SidebarModeButton: View {
 struct MarkdownPreviewView: View {
     let filePath: String?
     @State private var markdownContent: String = ""
+    @State private var fileWatcher: DispatchSourceFileSystemObject?
 
     var body: some View {
         if let path = filePath {
-            ScrollView {
-                // Simple markdown rendering using Text with AttributedString
-                VStack(alignment: .leading, spacing: 8) {
-                    if let attributed = try? AttributedString(markdown: markdownContent,
-                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-                        Text(attributed)
-                            .font(.system(.body, design: .default))
-                            .textSelection(.enabled)
-                    } else {
-                        Text(markdownContent)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 0) {
+                // Toolbar with file info
+                markdownToolbar(path: path)
+                Divider()
+
+                // Full Markdown rendering via WKWebView
+                MarkdownWebView(content: markdownContent, fontSize: 14)
             }
-            .onAppear { loadMarkdown(path) }
+            .onAppear {
+                loadMarkdown(path)
+                startWatching(path)
+            }
             .onChange(of: filePath) { _, newPath in
-                if let p = newPath { loadMarkdown(p) }
+                stopWatching()
+                if let p = newPath {
+                    loadMarkdown(p)
+                    startWatching(p)
+                }
             }
+            .onDisappear { stopWatching() }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "doc.text")
@@ -535,12 +535,62 @@ struct MarkdownPreviewView: View {
         }
     }
 
+    private func markdownToolbar(path: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.text.fill")
+                .font(.caption)
+                .foregroundColor(.blue)
+            Text((path as NSString).lastPathComponent)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+            Spacer()
+            Button(action: {
+                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            }) {
+                Image(systemName: "square.and.pencil")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help(LS("files.openInEditor"))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+    }
+
     private func loadMarkdown(_ path: String) {
         do {
             markdownContent = try String(contentsOfFile: path, encoding: .utf8)
         } catch {
             markdownContent = "Error loading file: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - File Watching
+
+    private func startWatching(_ path: String) {
+        stopWatching()
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename],
+            queue: .main
+        )
+        source.setEventHandler { [path] in
+            loadMarkdown(path)
+        }
+        source.setCancelHandler {
+            close(fd)
+        }
+        source.resume()
+        fileWatcher = source
+    }
+
+    private func stopWatching() {
+        fileWatcher?.cancel()
+        fileWatcher = nil
     }
 }
 

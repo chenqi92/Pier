@@ -37,6 +37,7 @@
 "files.copyPath" = "复制路径";
 "files.copyName" = "复制名称";
 "files.previewMarkdown" = "预览 Markdown";
+"files.openInEditor" = "在编辑器中打开";
 "files.delete" = "删除";
 
 /* ═══════════════════════════════════════

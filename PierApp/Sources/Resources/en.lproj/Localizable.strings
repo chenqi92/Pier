@@ -37,6 +37,7 @@
 "files.copyPath" = "Copy Path";
 "files.copyName" = "Copy Name";
 "files.previewMarkdown" = "Preview Markdown";
+"files.openInEditor" = "Open in Editor";
 "files.delete" = "Delete";
 
 /* ═══════════════════════════════════════
