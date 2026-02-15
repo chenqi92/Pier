@@ -123,6 +123,7 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         guard !isConnecting else { return }
 
         isConnecting = true
+        print("[SSH] connect(host:\(host) port:\(port) user:\(username)) starting")
         connectionStatus = String(localized: "ssh.connecting")
         errorMessage = nil
         detectedServices = []
@@ -133,17 +134,25 @@ class RemoteServiceManager: ObservableObject, Identifiable {
             let handle: OpaquePointer? = await withCheckedContinuation { continuation in
                 let guard_ = ContinuationGuard()
 
-                // Fire-and-forget: blocking FFI runs in a fully detached task.
-                Task.detached {
+                // Fire-and-forget: blocking FFI runs on a GCD thread.
+                // Using DispatchQueue instead of Task.detached because Tokio's
+                // reactor thread-local can leak across Swift cooperative threads,
+                // causing "no reactor running" panics on subsequent block_on() calls.
+                DispatchQueue.global(qos: .userInitiated).async {
                     let h = host.withCString { hostC in
                         username.withCString { userC in
                             password.withCString { passC in
-                                pier_ssh_connect(hostC, port, userC, 0, passC)
+                                print("[SSH] calling pier_ssh_connect...")
+                                let result = pier_ssh_connect(hostC, port, userC, 0, passC)
+                                print("[SSH] pier_ssh_connect returned: \(result == nil ? "nil" : "handle")")
+                                return result
                             }
                         }
                     }
-                    if await guard_.tryResume() {
-                        continuation.resume(returning: h)
+                    Task { @MainActor in
+                        if await guard_.tryResume() {
+                            continuation.resume(returning: h)
+                        }
                     }
                 }
 
@@ -157,6 +166,7 @@ class RemoteServiceManager: ObservableObject, Identifiable {
             }
 
             if let handle {
+                print("[SSH] connection succeeded, detecting services...")
                 self.sshHandle = handle
                 self.isConnected = true
                 self.isConnecting = false
@@ -164,6 +174,7 @@ class RemoteServiceManager: ObservableObject, Identifiable {
                 self.connectionStatus = String(localized: "ssh.connected")
                 self.detectServices()
             } else {
+                print("[SSH] connection failed or timed out")
                 self.isConnected = false
                 self.isConnecting = false
                 self.connectionStatus = String(localized: "ssh.disconnected")
@@ -187,7 +198,7 @@ class RemoteServiceManager: ObservableObject, Identifiable {
             let handle: OpaquePointer? = await withCheckedContinuation { continuation in
                 let guard_ = ContinuationGuard()
 
-                Task.detached {
+                DispatchQueue.global(qos: .userInitiated).async {
                     let h = host.withCString { hostC in
                         username.withCString { userC in
                             keyPath.withCString { keyC in
@@ -195,8 +206,10 @@ class RemoteServiceManager: ObservableObject, Identifiable {
                             }
                         }
                     }
-                    if await guard_.tryResume() {
-                        continuation.resume(returning: h)
+                    Task { @MainActor in
+                        if await guard_.tryResume() {
+                            continuation.resume(returning: h)
+                        }
                     }
                 }
 
@@ -240,7 +253,7 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
         // Dispatch blocking FFI call off the main thread.
         // The Rust side has a 5s disconnect timeout, so this won't block forever.
-        Task.detached {
+        DispatchQueue.global(qos: .utility).async {
             pier_ssh_disconnect(handle)
         }
     }
@@ -260,10 +273,12 @@ class RemoteServiceManager: ObservableObject, Identifiable {
             let jsonPtr: UnsafeMutablePointer<CChar>? = await withCheckedContinuation { continuation in
                 let guard_ = ContinuationGuard()
 
-                Task.detached {
+                DispatchQueue.global(qos: .userInitiated).async {
                     let ptr = pier_ssh_detect_services(handle)
-                    if await guard_.tryResume() {
-                        continuation.resume(returning: ptr)
+                    Task { @MainActor in
+                        if await guard_.tryResume() {
+                            continuation.resume(returning: ptr)
+                        }
                     }
                 }
 
@@ -307,22 +322,28 @@ class RemoteServiceManager: ObservableObject, Identifiable {
     /// Auto-establish tunnels for running services that have default port mappings.
     private func autoEstablishTunnels() {
         guard let handle = sshHandle else { return }
+        let services = detectedServices.filter(\.isRunning)
 
-        for service in detectedServices where service.isRunning {
-            guard let mapping = ServiceTunnel.defaultMappings[service.name] else { continue }
+        DispatchQueue.global(qos: .userInitiated).async {
+            var tunnels: [ServiceTunnel] = []
+            for service in services {
+                guard let mapping = ServiceTunnel.defaultMappings[service.name] else { continue }
 
-            let result = "127.0.0.1".withCString { hostC in
-                pier_ssh_forward_port(handle, mapping.localPort, hostC, mapping.remotePort)
+                let result = "127.0.0.1".withCString { hostC in
+                    pier_ssh_forward_port(handle, mapping.localPort, hostC, mapping.remotePort)
+                }
+
+                if result == 0 {
+                    tunnels.append(ServiceTunnel(
+                        serviceName: service.name,
+                        localPort: mapping.localPort,
+                        remoteHost: "127.0.0.1",
+                        remotePort: mapping.remotePort
+                    ))
+                }
             }
-
-            if result == 0 {
-                let tunnel = ServiceTunnel(
-                    serviceName: service.name,
-                    localPort: mapping.localPort,
-                    remoteHost: "127.0.0.1",
-                    remotePort: mapping.remotePort
-                )
-                activeTunnels.append(tunnel)
+            Task { @MainActor [weak self] in
+                self?.activeTunnels.append(contentsOf: tunnels)
             }
         }
     }
@@ -415,14 +436,16 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
             // Fire-and-forget: blocking FFI runs in a fully detached task.
             // If it finishes after the timeout, the result is simply discarded.
-            Task.detached {
+            DispatchQueue.global(qos: .userInitiated).async {
                 let resultPtr = command.withCString { cmdC in
                     pier_ssh_exec(handle, cmdC)
                 }
 
                 guard let resultPtr else {
-                    if await guard_.tryResume() {
-                        continuation.resume(returning: (-1, "Exec failed"))
+                    Task { @MainActor in
+                        if await guard_.tryResume() {
+                            continuation.resume(returning: (-1, "Exec failed"))
+                        }
                     }
                     return
                 }
@@ -444,8 +467,10 @@ class RemoteServiceManager: ObservableObject, Identifiable {
                     parsed = (exitCode, json["stdout"] as? String ?? "")
                 }
 
-                if await guard_.tryResume() {
-                    continuation.resume(returning: parsed)
+                Task { @MainActor in
+                    if await guard_.tryResume() {
+                        continuation.resume(returning: parsed)
+                    }
                 }
             }
 
@@ -485,7 +510,7 @@ class RemoteServiceManager: ObservableObject, Identifiable {
     deinit {
         if let handle = sshHandle {
             // Fire-and-forget: don't block deinit on disconnect
-            Task.detached {
+            DispatchQueue.global(qos: .utility).async {
                 pier_ssh_disconnect(handle)
             }
         }

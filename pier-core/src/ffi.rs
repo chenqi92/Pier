@@ -24,6 +24,36 @@ fn ssh_runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
+/// Run an async future on the global SSH runtime, safely from any thread.
+///
+/// `Runtime::block_on()` panics if called from a thread that already has
+/// a Tokio reactor context (e.g. a Tokio worker thread, or any thread that
+/// previously ran `block_on` and retained the thread-local reactor).
+/// This helper spawns a **dedicated OS thread** via `std::thread::spawn`
+/// so `block_on()` always gets a clean thread-local environment.
+fn ffi_block_on<F, T>(future: F) -> T
+where
+    F: std::future::Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    let rt = ssh_runtime();
+    // Spawn a fresh OS thread to guarantee no Tokio context leaks.
+    let handle = std::thread::spawn(move || rt.block_on(future));
+    handle.join().expect("FFI blocking thread panicked")
+}
+
+/// Wrapper to send raw pointers across thread boundaries.
+/// Safety: the FFI caller guarantees the pointer is valid for the
+/// duration of the call, and `ffi_block_on` joins the thread before returning.
+struct SendPtr<T>(*mut T);
+unsafe impl<T> Send for SendPtr<T> {}
+unsafe impl<T> Sync for SendPtr<T> {}
+
+impl<T> SendPtr<T> {
+    fn as_ref(&self) -> &T { unsafe { &*self.0 } }
+    fn as_mut(&self) -> &mut T { unsafe { &mut *self.0 } }
+}
+
 // ═══════════════════════════════════════════════════════════
 // Terminal FFI
 // ═══════════════════════════════════════════════════════════
@@ -278,11 +308,11 @@ pub extern "C" fn pier_ssh_connect(
 
     let mut session = SshSession::new(config);
 
-    // Block on async connect using the global runtime
-    match ssh_runtime().block_on(session.connect()) {
-        Ok(()) => {
+    // Use ffi_block_on to safely run async connect on a fresh thread
+    match ffi_block_on(async move { session.connect().await.map(|()| session) }) {
+        Ok(connected_session) => {
             log::info!("SSH connected to {}:{}", host_str, port);
-            Box::into_raw(Box::new(session))
+            Box::into_raw(Box::new(connected_session))
         }
         Err(e) => {
             log::error!("SSH connect failed: {}", e);
@@ -299,7 +329,7 @@ pub extern "C" fn pier_ssh_disconnect(handle: PierSshHandle) -> i32 {
     }
 
     let mut session = unsafe { Box::from_raw(handle) };
-    match ssh_runtime().block_on(session.disconnect()) {
+    match ffi_block_on(async move { session.disconnect().await }) {
         Ok(()) => {
             log::info!("SSH disconnected");
             0
@@ -332,16 +362,17 @@ pub extern "C" fn pier_ssh_detect_services(handle: PierSshHandle) -> *mut c_char
         return std::ptr::null_mut();
     }
 
-    let session = unsafe { &*handle };
+    let session_ptr = SendPtr(handle);
 
     // 30-second overall timeout for service detection to prevent blocking
     // when the SSH connection is dead (e.g. network change).
-    let services = match ssh_runtime().block_on(
+    let services = match ffi_block_on(async move {
+        let session = session_ptr.as_ref();
         tokio::time::timeout(
             std::time::Duration::from_secs(30),
             service_detector::detect_all(session),
-        )
-    ) {
+        ).await
+    }) {
         Ok(services) => services,
         Err(_) => {
             log::warn!("Service detection timed out after 30s");
@@ -370,17 +401,19 @@ pub extern "C" fn pier_ssh_exec(
         return std::ptr::null_mut();
     }
 
-    let session = unsafe { &*handle };
     let cmd_str = unsafe { CStr::from_ptr(command).to_str().unwrap_or("") };
+    let session_ptr = SendPtr(handle as *mut SshSession);
+    let cmd_string = cmd_str.to_string();
 
     // 60-second overall timeout to prevent blocking the FFI thread indefinitely
     // when the SSH connection is dead (e.g. network change).
-    match ssh_runtime().block_on(
+    match ffi_block_on(async move {
+        let session = session_ptr.as_ref();
         tokio::time::timeout(
             std::time::Duration::from_secs(60),
-            session.exec_command(cmd_str),
-        )
-    ) {
+            session.exec_command(&cmd_string),
+        ).await
+    }) {
         Ok(Ok((exit_code, stdout))) => {
             let result = serde_json::json!({
                 "exit_code": exit_code,
@@ -427,16 +460,18 @@ pub extern "C" fn pier_ssh_forward_port(
         return -1;
     }
 
-    let session = unsafe { &mut *handle };
     let host_str = unsafe { CStr::from_ptr(remote_host).to_str().unwrap_or("") };
+    let session_ptr = SendPtr(handle);
+    let host_string = host_str.to_string();
 
     // 10-second timeout: TcpListener::bind + SSH channel setup
-    match ssh_runtime().block_on(
+    match ffi_block_on(async move {
+        let session = session_ptr.as_mut();
         tokio::time::timeout(
             std::time::Duration::from_secs(10),
-            session.start_port_forward(local_port, host_str, remote_port),
-        )
-    ) {
+            session.start_port_forward(local_port, &host_string, remote_port),
+        ).await
+    }) {
         Ok(Ok(())) => 0,
         Ok(Err(e)) => {
             log::error!("Port forward failed: {}", e);
