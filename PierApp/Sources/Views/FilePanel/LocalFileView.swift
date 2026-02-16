@@ -1,7 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Left panel: Local file system browser with tree view.
+/// Left panel: Local file system browser with flat directory listing.
+/// Uses a "navigate-into" interaction model — single-click to enter directories.
 struct LocalFileView: View {
     @ObservedObject var viewModel: FileViewModel
     @State private var searchText = ""
@@ -9,20 +10,25 @@ struct LocalFileView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header with current path
+            // Header with navigation controls
             headerBar
+
+            Divider()
+
+            // Clickable breadcrumb path
+            breadcrumbBar
 
             Divider()
 
             // Search field
             searchBar
 
-            // File tree
+            // Flat file list (no tree expand/collapse)
             if viewModel.isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                fileTreeList
+                fileList
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -32,6 +38,15 @@ struct LocalFileView: View {
 
     private var headerBar: some View {
         HStack {
+            // Back / up button
+            Button(action: { viewModel.navigateUp() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .disabled(viewModel.currentPath.path == "/")
+            .help(LS("files.goUp"))
+
             Image(systemName: "folder.fill")
                 .foregroundColor(.accentColor)
                 .font(.system(size: 11))
@@ -66,6 +81,69 @@ struct LocalFileView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
+    // MARK: - Breadcrumb Path
+
+    /// Clickable breadcrumb showing each path component for quick navigation.
+    private var breadcrumbBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                let segments = pathSegments()
+
+                ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                    if index > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 7, weight: .semibold))
+                            .foregroundColor(.secondary.opacity(0.5))
+                    }
+
+                    Button(action: {
+                        viewModel.navigateTo(segment.path)
+                    }) {
+                        Text(segment.name)
+                            .font(.system(size: 10))
+                            .foregroundColor(index == segments.count - 1 ? .primary : .accentColor)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+        }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+    }
+
+    /// Break the current path into (name, fullPath) segments for breadcrumb.
+    private func pathSegments() -> [(name: String, path: String)] {
+        let currentPathStr = viewModel.currentPath.path
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+
+        var segments: [(name: String, path: String)] = []
+
+        // If path is under home, start with "~"
+        if currentPathStr.hasPrefix(home) {
+            segments.append((name: "~", path: home))
+            let relative = String(currentPathStr.dropFirst(home.count))
+            let parts = relative.split(separator: "/", omittingEmptySubsequences: true)
+            var accumulated = home
+            for part in parts {
+                accumulated += "/\(part)"
+                segments.append((name: String(part), path: accumulated))
+            }
+        } else {
+            // Absolute path from root
+            segments.append((name: "/", path: "/"))
+            let parts = currentPathStr.split(separator: "/", omittingEmptySubsequences: true)
+            var accumulated = ""
+            for part in parts {
+                accumulated += "/\(part)"
+                segments.append((name: String(part), path: accumulated))
+            }
+        }
+
+        return segments
+    }
+
     // MARK: - Search
 
     private var searchBar: some View {
@@ -91,20 +169,34 @@ struct LocalFileView: View {
         }
     }
 
-    // MARK: - File Tree
+    // MARK: - Flat File List
 
-    private var fileTreeList: some View {
+    /// Flat list of the current directory contents — no tree expand/collapse.
+    /// Single-click on directory = navigate into it.
+    /// Single-click on file = handle tap (preview, etc.).
+    private var fileList: some View {
         List {
             ForEach(viewModel.displayedFiles) { item in
-                FileTreeNode(item: item, viewModel: viewModel)
+                FileTreeRow(item: item)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if item.isDirectory {
+                            viewModel.navigateTo(item.path)
+                        } else {
+                            viewModel.handleTap(item)
+                        }
+                    }
+                    .contextMenu {
+                        LocalFileView.fileContextMenu(for: item, viewModel: viewModel)
+                    }
+                    .onDrag {
+                        NSItemProvider(contentsOf: URL(fileURLWithPath: item.path))
+                            ?? NSItemProvider()
+                    }
             }
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
-        .transaction { transaction in
-            // Disable the default SwiftUI "drop-in" animation for tree expand/collapse
-            transaction.animation = nil
-        }
     }
 
     // MARK: - Context Menu
@@ -155,61 +247,6 @@ struct LocalFileView: View {
     }
 }
 
-// MARK: - File Tree Node (Recursive DisclosureGroup)
-
-/// A single node in the file tree. Directories use `DisclosureGroup` for
-/// programmatic expand/collapse; files are plain rows.
-struct FileTreeNode: View {
-    @ObservedObject var item: FileItem
-    @ObservedObject var viewModel: FileViewModel
-
-    var body: some View {
-        if item.isDirectory {
-            DisclosureGroup(isExpanded: $item.isExpanded) {
-                if let children = item.children, !children.isEmpty {
-                    ForEach(children) { child in
-                        FileTreeNode(item: child, viewModel: viewModel)
-                    }
-                }
-            } label: {
-                FileTreeRow(item: item)
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) {
-                        // Double-click: toggle expand/collapse
-                        item.isExpanded.toggle()
-                        viewModel.ensureChildrenLoaded(for: item)
-                    }
-                    .onTapGesture(count: 1) {
-                        viewModel.handleTap(item)
-                    }
-            }
-            .onAppear {
-                viewModel.ensureChildrenLoaded(for: item)
-            }
-            .contextMenu {
-                LocalFileView.fileContextMenu(for: item, viewModel: viewModel)
-            }
-            .onDrag {
-                NSItemProvider(contentsOf: URL(fileURLWithPath: item.path))
-                    ?? NSItemProvider()
-            }
-        } else {
-            FileTreeRow(item: item)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    viewModel.handleTap(item)
-                }
-                .contextMenu {
-                    LocalFileView.fileContextMenu(for: item, viewModel: viewModel)
-                }
-                .onDrag {
-                    NSItemProvider(contentsOf: URL(fileURLWithPath: item.path))
-                        ?? NSItemProvider()
-                }
-        }
-    }
-}
-
 // MARK: - File Tree Row
 
 struct FileTreeRow: View {
@@ -228,10 +265,35 @@ struct FileTreeRow: View {
 
             Spacer()
 
-            if !item.isDirectory {
+            // Modified date (relative)
+            if !item.formattedDate.isEmpty {
+                Text(item.formattedDate)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .frame(minWidth: 40, alignment: .trailing)
+            }
+
+            // Size for files, child count for directories
+            if item.isDirectory {
+                if let count = item.childCount {
+                    Text("\(count)")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .frame(width: 30, alignment: .trailing)
+                }
+            } else {
                 Text(item.formattedSize)
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
+                    .frame(minWidth: 35, alignment: .trailing)
+            }
+
+            // Permissions
+            if !item.permissions.isEmpty {
+                Text(item.permissions)
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.6))
+                    .frame(width: 62, alignment: .trailing)
             }
         }
         .padding(.vertical, 1)
@@ -243,4 +305,6 @@ struct FileTreeRow: View {
 extension Notification.Name {
     static let openPathInTerminal = Notification.Name("pier.openPathInTerminal")
     static let previewMarkdown = Notification.Name("pier.previewMarkdown")
+    static let localDirectoryChanged = Notification.Name("pier.localDirectoryChanged")
+    static let requestCurrentDirectory = Notification.Name("pier.requestCurrentDirectory")
 }

@@ -1,8 +1,8 @@
 import SwiftUI
 import Combine
 
-enum GitTab {
-    case changes, history, stash
+enum GitTab: CaseIterable {
+    case changes, history, stash, conflicts
 }
 
 // MARK: - Data Models
@@ -82,6 +82,8 @@ struct BlameLine: Identifiable {
 
 @MainActor
 class GitViewModel: ObservableObject {
+    // MARK: - Published State
+
     @Published var selectedTab: GitTab = .changes
     @Published var isGitRepo = false
     @Published var currentBranch = ""
@@ -92,25 +94,50 @@ class GitViewModel: ObservableObject {
     @Published var commitMessage = ""
     @Published var commitHistory: [GitCommit] = []
     @Published var stashes: [GitStashEntry] = []
-
-    private var repoPath: String = ""
-    private var timer: AnyCancellable?
+    @Published var operationStatus: GitOperationStatus = .idle
+    @Published var repoDisplayPath: String = ""
 
     // Blame
     @Published var blameLines: [BlameLine] = []
     @Published var blameFilePath: String = ""
 
-    // Branch graph
-    @Published var graphEntries: [BranchGraphView.GraphEntry] = []
+    // Unified graph + history
+    @Published var graphNodes: [CommitNode] = []
+    @Published var isLoadingMoreHistory = false
+    @Published var hasMoreHistory = true
+
+    // MARK: - Private
+
+    private(set) var repoPath: String = ""
+    private var timer: AnyCancellable?
+    private let graphPageSize = 50
+    private var graphSkipCount = 0
+    private var laneState = LaneState()
+    private var directoryObserver: AnyCancellable?
+    private var statusDismissTask: Task<Void, Never>?
+
+    // MARK: - Init / Deinit
 
     init() {
-        // Default to home dir, will be updated when folder is selected
-        repoPath = FileManager.default.homeDirectoryForCurrentUser.path
-        checkGitRepo()
+        // Listen for directory changes from the local file browser
+        directoryObserver = NotificationCenter.default
+            .publisher(for: .localDirectoryChanged)
+            .compactMap { $0.object as? String }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] path in
+                self?.setRepoPath(path)
+            }
     }
 
+    deinit {
+        timer?.cancel()
+        directoryObserver?.cancel()
+        statusDismissTask?.cancel()
+    }
+
+    // MARK: - Periodic Refresh
+
     private func startPeriodicRefresh() {
-        // Only poll when in a git repo
         timer?.cancel()
         timer = Timer.publish(every: 5, on: .main, in: .common)
             .autoconnect()
@@ -124,31 +151,40 @@ class GitViewModel: ObservableObject {
         timer = nil
     }
 
+    // MARK: - Repo Path Management
+
+    /// Set the working directory and resolve the git repository root.
+    /// If the directory is inside a git repo, finds the top-level root.
     func setRepoPath(_ path: String) {
-        repoPath = path
-        checkGitRepo()
-    }
-
-    deinit {
-        timer?.cancel()
-    }
-
-    func checkGitRepo() {
         Task {
-            let result = await runGit(["rev-parse", "--is-inside-work-tree"])
-            isGitRepo = result?.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
-            if isGitRepo {
+            // Resolve the git root from the given directory
+            let result = await CommandRunner.shared.run(
+                "git",
+                arguments: ["rev-parse", "--show-toplevel"],
+                currentDirectory: path
+            )
+
+            if result.succeeded, let root = result.output {
+                let resolvedRoot = root.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard resolvedRoot != repoPath else { return }
+                // Clear old state immediately to prevent stale data from previous repo
+                clearState()
+                repoPath = resolvedRoot
+                repoDisplayPath = abbreviatePath(resolvedRoot)
+                isGitRepo = true
                 startPeriodicRefresh()
-                await loadBranch()
-                await loadStatus()
-                await loadHistory()
-                await loadStashes()
+                await loadAll()
             } else {
+                repoPath = path
+                repoDisplayPath = abbreviatePath(path)
+                isGitRepo = false
                 stopPeriodicRefresh()
+                clearState()
             }
         }
     }
 
+    /// Refresh current status (branch + file changes + conflicts).
     func refresh() {
         guard isGitRepo else { return }
         Task {
@@ -157,9 +193,41 @@ class GitViewModel: ObservableObject {
         }
     }
 
+    /// Full reload of all data (branch, status, history, stashes, graph, conflicts).
+    private func loadAll() async {
+        await loadBranch()
+        await loadStatus()
+        await loadHistory()
+        await loadGraphHistory()
+        await loadStashes()
+        detectConflicts()
+    }
+
+    /// Clear all published state when directory is not a git repo.
+    private func clearState() {
+        currentBranch = ""
+        aheadCount = 0
+        behindCount = 0
+        stagedFiles = []
+        unstagedFiles = []
+        commitHistory = []
+        stashes = []
+        graphNodes = []
+        conflictFiles = []
+    }
+
+    /// Abbreviate a path for display, e.g. "/Users/foo/Projects/Bar" → "~/Projects/Bar".
+    private func abbreviatePath(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
+    }
+
     // MARK: - Branch
 
-    private func loadBranch() async {
+    func loadBranch() async {
         if let branch = await runGit(["branch", "--show-current"]) {
             currentBranch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -170,22 +238,27 @@ class GitViewModel: ObservableObject {
                 aheadCount = Int(parts[0]) ?? 0
                 behindCount = Int(parts[1]) ?? 0
             }
+        } else {
+            // No upstream tracking branch — reset counts
+            aheadCount = 0
+            behindCount = 0
         }
     }
 
     // MARK: - Status
 
-    private func loadStatus() async {
+    func loadStatus() async {
         guard let output = await runGit(["status", "--porcelain=v1"]) else { return }
 
         var staged: [GitFileChange] = []
         var unstaged: [GitFileChange] = []
 
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard line.count >= 4 else { continue }
-            let indexStatus = line[line.index(line.startIndex, offsetBy: 0)]
-            let workStatus = line[line.index(line.startIndex, offsetBy: 1)]
-            let filePath = String(line[line.index(line.startIndex, offsetBy: 3)...])
+            let lineStr = String(line)
+            guard lineStr.count >= 4 else { continue }
+            let indexStatus = lineStr[lineStr.startIndex]
+            let workStatus = lineStr[lineStr.index(lineStr.startIndex, offsetBy: 1)]
+            let filePath = String(lineStr[lineStr.index(lineStr.startIndex, offsetBy: 3)...])
 
             if indexStatus != " " && indexStatus != "?" {
                 staged.append(GitFileChange(
@@ -250,78 +323,201 @@ class GitViewModel: ObservableObject {
     func commit() {
         guard !commitMessage.isEmpty else { return }
         Task {
-            _ = await runGit(["commit", "-m", commitMessage])
-            commitMessage = ""
-            await loadStatus()
-            await loadHistory()
+            let result = await runGitFull(["commit", "-m", commitMessage])
+            if result.succeeded {
+                setOperationStatus(.success(message: LS("git.commitSuccess")))
+                commitMessage = ""
+                await loadStatus()
+                await loadHistory()
+            } else {
+                setOperationStatus(.failure(message: LS("git.commitFailed"), detail: result.stderr))
+            }
         }
     }
 
     func pull() {
         Task {
-            _ = await runGit(["pull"])
-            await loadBranch()
-            await loadStatus()
-            await loadHistory()
+            setOperationStatus(.running(description: LS("git.pulling")))
+            let result = await runGitFull(["pull"])
+            if result.succeeded {
+                setOperationStatus(.success(message: LS("git.pullSuccess")))
+                await loadBranch()
+                await loadStatus()
+                await loadHistory()
+            } else {
+                setOperationStatus(.failure(message: LS("git.pullFailed"), detail: result.stderr))
+            }
         }
     }
 
     func push() {
         Task {
-            _ = await runGit(["push"])
-            await loadBranch()
+            setOperationStatus(.running(description: LS("git.pushing")))
+            let result = await runGitFull(["push"])
+            if result.succeeded {
+                setOperationStatus(.success(message: LS("git.pushSuccess")))
+                await loadBranch()
+            } else {
+                setOperationStatus(.failure(message: LS("git.pushFailed"), detail: result.stderr))
+            }
         }
     }
 
     func showDiff(_ path: String) {
         Task {
             if let diff = await runGit(["diff", path]) {
-                NotificationCenter.default.post(name: .gitShowDiff, object: diff)
+                NotificationCenter.default.post(
+                    name: .gitShowDiff,
+                    object: ["diff": diff]
+                )
             }
         }
     }
 
     func initRepo() {
         Task {
-            _ = await runGit(["init"])
-            checkGitRepo()
+            let result = await runGitFull(["init"])
+            if result.succeeded {
+                setOperationStatus(.success(message: LS("git.initSuccess")))
+                setRepoPath(repoPath)
+            } else {
+                setOperationStatus(.failure(message: LS("git.initFailed"), detail: result.stderr))
+            }
         }
     }
 
     func checkout(_ hash: String) {
         Task {
-            _ = await runGit(["checkout", hash])
-            await loadBranch()
-            await loadStatus()
+            let result = await runGitFull(["checkout", hash])
+            if result.succeeded {
+                setOperationStatus(.success(message: String(format: LS("git.checkoutSuccess"), String(hash.prefix(7)))))
+                await loadBranch()
+                await loadStatus()
+            } else {
+                setOperationStatus(.failure(message: LS("git.checkoutFailed"), detail: result.stderr))
+            }
         }
     }
 
     func cherryPick(_ hash: String) {
         Task {
-            _ = await runGit(["cherry-pick", hash])
-            await loadStatus()
-            await loadHistory()
+            let result = await runGitFull(["cherry-pick", hash])
+            if result.succeeded {
+                setOperationStatus(.success(message: String(format: LS("git.cherryPickSuccess"), String(hash.prefix(7)))))
+                await loadStatus()
+                await loadHistory()
+            } else {
+                setOperationStatus(.failure(message: LS("git.cherryPickFailed"), detail: result.stderr))
+            }
         }
     }
 
     // MARK: - History
 
-    private func loadHistory() async {
+    func loadHistory() async {
+        let sep = "<SEP>"
         guard let output = await runGit([
-            "log", "--oneline", "-30",
-            "--format=%H\\t%h\\t%s\\t%an\\t%ar"
+            "log", "-50",
+            "--format=%H" + sep + "%h" + sep + "%s" + sep + "%an" + sep + "%ar"
         ]) else { return }
 
         commitHistory = output.split(separator: "\n").compactMap { line in
-            let parts = line.split(separator: "\t", maxSplits: 4, omittingEmptySubsequences: false)
+            let parts = String(line).components(separatedBy: sep)
             guard parts.count >= 5 else { return nil }
             return GitCommit(
-                hash: String(parts[0]),
-                shortHash: String(parts[1]),
-                message: String(parts[2]),
-                author: String(parts[3]),
+                hash: parts[0],
+                shortHash: parts[1],
+                message: parts[2],
+                author: parts[3],
                 date: nil,
-                relativeDate: String(parts[4])
+                relativeDate: parts[4]
+            )
+        }
+    }
+
+    // MARK: - Unified Graph + History (progressive loading)
+
+    func loadGraphHistory() async {
+        graphSkipCount = 0
+        hasMoreHistory = true
+        laneState = LaneState()
+
+        // Phase 1: Fetch HEAD's first-parent chain (determines which commits stay at lane 0).
+        if let fpOutput = await runGit(["log", "--first-parent", "HEAD", "--format=%H"]) {
+            laneState.mainChain = Set(fpOutput.split(separator: "\n").map(String.init))
+        }
+
+        // Phase 2: Load all commits (all branches, date order).
+        let sep = "<SEP>"
+        guard let output = await runGit([
+            "log", "--all", "--date-order",
+            "-\(graphPageSize)",
+            "--format=%H" + sep + "%P" + sep + "%h" + sep + "%d" + sep + "%s" + sep + "%an" + sep + "%ar"
+        ]) else {
+            graphNodes = []
+            return
+        }
+        var nodes = Self.parseCommitNodes(output)
+        laneState.assignLanes(&nodes)
+        LaneState.computeSegments(&nodes)
+        graphNodes = nodes
+        graphSkipCount = nodes.count
+        hasMoreHistory = nodes.count >= graphPageSize
+    }
+
+    func loadMoreGraphHistory() async {
+        guard hasMoreHistory, !isLoadingMoreHistory else { return }
+        isLoadingMoreHistory = true
+        let sep = "<SEP>"
+        guard let output = await runGit([
+            "log", "--all", "--date-order",
+            "-\(graphPageSize)",
+            "--skip=\(graphSkipCount)",
+            "--format=%H" + sep + "%P" + sep + "%h" + sep + "%d" + sep + "%s" + sep + "%an" + sep + "%ar"
+        ]) else {
+            isLoadingMoreHistory = false
+            return
+        }
+        var nodes = Self.parseCommitNodes(output)
+        laneState.assignLanes(&nodes)
+        var allNodes = graphNodes
+        allNodes.append(contentsOf: nodes)
+        LaneState.computeSegments(&allNodes)
+        graphNodes = allNodes
+        graphSkipCount += nodes.count
+        hasMoreHistory = nodes.count >= graphPageSize
+        isLoadingMoreHistory = false
+    }
+
+    /// Parse git log output into CommitNode array (before lane assignment).
+    private static func parseCommitNodes(_ output: String) -> [CommitNode] {
+        let sep = "<SEP>"
+        return output.components(separatedBy: "\n").compactMap { line -> CommitNode? in
+            guard !line.isEmpty else { return nil }
+            let parts = line.components(separatedBy: sep)
+            guard parts.count >= 7 else { return nil }
+            let hash = parts[0]
+            let parentStr = parts[1]
+            let parents = parentStr.isEmpty ? [] : parentStr.split(separator: " ").map(String.init)
+            let shortHash = parts[2]
+            // Parse decorations
+            var refs: [String] = []
+            let decoRaw = parts[3].trimmingCharacters(in: .whitespaces)
+            if decoRaw.hasPrefix("(") && decoRaw.hasSuffix(")") {
+                let inner = String(decoRaw.dropFirst().dropLast())
+                refs = inner.split(separator: ",").map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                        .replacingOccurrences(of: "HEAD -> ", with: "\u{2192} ")
+                }
+            }
+            return CommitNode(
+                id: hash,
+                shortHash: shortHash,
+                message: parts[4],
+                author: parts[5],
+                relativeDate: parts[6],
+                refs: refs,
+                parents: parents
             )
         }
     }
@@ -329,14 +525,15 @@ class GitViewModel: ObservableObject {
     // MARK: - Stash
 
     private func loadStashes() async {
-        guard let output = await runGit(["stash", "list", "--format=%gd\\t%gs"]) else { return }
+        let sep = "<SEP>"
+        guard let output = await runGit(["stash", "list", "--format=%gd" + sep + "%gs"]) else { return }
 
         stashes = output.split(separator: "\n").enumerated().compactMap { index, line in
-            let parts = line.split(separator: "\t", maxSplits: 1)
+            let parts = String(line).components(separatedBy: sep)
             guard parts.count >= 1 else { return nil }
             return GitStashEntry(
                 index: index,
-                message: parts.count > 1 ? String(parts[1]) : String(parts[0]),
+                message: parts.count > 1 ? parts[1] : parts[0],
                 relativeDate: ""
             )
         }
@@ -422,19 +619,6 @@ class GitViewModel: ObservableObject {
 
     // MARK: - Branch Graph
 
-    /// Load commit graph for all branches.
-    func loadBranchGraph() {
-        Task {
-            guard let output = await runGit([
-                "log", "--all", "--oneline", "--graph", "--decorate",
-                "-n", "100"
-            ]) else {
-                graphEntries = []
-                return
-            }
-            graphEntries = GitViewModel.parseGraphOutput(output)
-        }
-    }
 
     // MARK: - Merge Conflict Resolution
 
@@ -575,7 +759,9 @@ class GitViewModel: ObservableObject {
 
     // MARK: - Git Command Runner
 
-    private func runGit(_ args: [String]) async -> String? {
+    /// Run a git command and return stdout on success, nil on failure.
+    func runGit(_ args: [String]) async -> String? {
+        guard !repoPath.isEmpty else { return nil }
         let result = await CommandRunner.shared.run(
             "git",
             arguments: args,
@@ -583,6 +769,48 @@ class GitViewModel: ObservableObject {
         )
         return result.succeeded ? result.output : nil
     }
+
+
+
+    /// Run a git command and return the full CommandResult (stdout + stderr + exitCode).
+    func runGitFull(_ args: [String]) async -> CommandResult {
+        guard !repoPath.isEmpty else {
+            return CommandResult(stdout: "", stderr: "No repository path set", exitCode: -1)
+        }
+        return await CommandRunner.shared.run(
+            "git",
+            arguments: args,
+            currentDirectory: repoPath
+        )
+    }
+
+    // MARK: - Operation Status
+
+    /// Update operation status and auto-dismiss success/failure after a delay.
+    func setOperationStatus(_ status: GitOperationStatus) {
+        operationStatus = status
+        statusDismissTask?.cancel()
+
+        switch status {
+        case .success, .failure:
+            statusDismissTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 4_000_000_000) // 4 seconds
+                guard !Task.isCancelled else { return }
+                self?.operationStatus = .idle
+            }
+        case .idle, .running:
+            break
+        }
+    }
+}
+
+// MARK: - Operation Status Model
+
+enum GitOperationStatus: Equatable {
+    case idle
+    case running(description: String)
+    case success(message: String)
+    case failure(message: String, detail: String?)
 }
 
 // MARK: - Notifications

@@ -593,3 +593,76 @@
 "terminal.splitHorizontal" = "Split Horizontally";
 "terminal.splitVertical" = "Split Vertically";
 "terminal.closePane" = "Close Pane";
+
+// MARK: - File Browser Extended
+
+"files.goUp" = "Go Up";
+
+// MARK: - Git Operation Feedback
+
+"git.pulling" = "Pulling...";
+"git.pushing" = "Pushing...";
+"git.commitSuccess" = "Committed successfully";
+"git.commitFailed" = "Commit failed";
+"git.pullSuccess" = "Pull completed";
+"git.pullFailed" = "Pull failed";
+"git.pushSuccess" = "Push completed";
+"git.pushFailed" = "Push failed";
+"git.initSuccess" = "Repository initialized";
+"git.initFailed" = "Failed to initialize repository";
+"git.checkoutSuccess" = "Checked out %@";
+"git.checkoutFailed" = "Checkout failed";
+"git.cherryPickSuccess" = "Cherry-picked %@";
+"git.cherryPickFailed" = "Cherry-pick failed";
+
+// MARK: - Git Branch Management
+
+"git.branches" = "Branches";
+"git.newBranch" = "New Branch";
+"git.deleteBranch" = "Delete Branch";
+"git.mergeBranch" = "Merge into Current";
+"git.switchBranch" = "Switch";
+"git.branchName" = "Branch name";
+"git.local" = "Local";
+"git.remote" = "Remote";
+"git.createBranchSuccess" = "Created branch %@";
+"git.deleteBranchSuccess" = "Deleted branch %@";
+"git.switchBranchSuccess" = "Switched to %@";
+"git.mergeBranchSuccess" = "Merged %@";
+"git.branchOperationFailed" = "Branch operation failed";
+
+// MARK: - Git Tag Management
+
+"git.tags" = "Tags";
+"git.newTag" = "New Tag";
+"git.deleteTag" = "Delete Tag";
+"git.pushTag" = "Push Tag";
+"git.tagName" = "Tag name";
+"git.tagMessage" = "Tag message (optional)";
+"git.createTagSuccess" = "Created tag %@";
+"git.deleteTagSuccess" = "Deleted tag %@";
+"git.pushTagSuccess" = "Pushed tag %@";
+"git.tagOperationFailed" = "Tag operation failed";
+
+// MARK: - Git Remote Management
+
+"git.remotes" = "Remotes";
+"git.addRemote" = "Add Remote";
+"git.editRemote" = "Edit Remote";
+"git.removeRemote" = "Remove Remote";
+"git.fetchRemote" = "Fetch";
+"git.remoteName" = "Remote name";
+"git.remoteURL" = "Remote URL";
+"git.addRemoteSuccess" = "Added remote %@";
+"git.removeRemoteSuccess" = "Removed remote %@";
+"git.fetchSuccess" = "Fetch completed";
+"git.remoteOperationFailed" = "Remote operation failed";
+
+// MARK: - Git Extended (Missing)
+
+"git.searchCommits" = "Search commits...";
+"git.changedFiles" = "Changed Files";
+"git.graph" = "Graph";
+"git.conflicts" = "Conflicts";
+"git.loadingMore" = "Loading more...";
+"git.allLoaded" = "All commits loaded";

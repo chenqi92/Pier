@@ -1,11 +1,21 @@
 import SwiftUI
 
 /// Git repository status and operations panel.
+///
+/// Provides five tabs: Changes, History, Graph, Stash, and Conflicts.
+/// Automatically follows the local file browser's current directory via
+/// `.localDirectoryChanged` notification → `GitViewModel.setRepoPath()`.
 struct GitPanelView: View {
     @StateObject private var viewModel = GitViewModel()
     @State private var diffText: String = ""
     @State private var showingDiff = false
     @State private var showingBlame = false
+    @State private var showingBranchManager = false
+    @State private var showingTagManager = false
+    @State private var showingRemoteManager = false
+    @State private var showingRebase = false
+    @State private var showingSubmodule = false
+    @State private var showingConfig = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,6 +23,11 @@ struct GitPanelView: View {
             gitHeader
 
             Divider()
+
+            // Operation status banner
+            if viewModel.operationStatus != .idle {
+                operationStatusBanner
+            }
 
             if !viewModel.isGitRepo {
                 notARepoView
@@ -22,25 +37,21 @@ struct GitPanelView: View {
 
                 Divider()
 
-                // Tab: Changes / History / Stash
-                Picker("", selection: $viewModel.selectedTab) {
-                    Text(LS("git.changes")).tag(GitTab.changes)
-                    Text(LS("git.history")).tag(GitTab.history)
-                    Text(LS("git.stash")).tag(GitTab.stash)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                // 5-tab selector
+                tabBar
 
                 Divider()
 
+                // Tab content
                 switch viewModel.selectedTab {
                 case .changes:
                     changesView
                 case .history:
-                    historyView
+                    BranchGraphView(gitViewModel: viewModel)
                 case .stash:
                     stashView
+                case .conflicts:
+                    MergeConflictView(gitViewModel: viewModel)
                 }
             }
         }
@@ -57,28 +68,74 @@ struct GitPanelView: View {
         .sheet(isPresented: $showingDiff) {
             VStack(spacing: 0) {
                 HStack {
+                    Text(LS("diff.title"))
+                        .font(.system(size: 12, weight: .medium))
                     Spacer()
-                    Button(LS("diff.close")) { showingDiff = false }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .padding(8)
+                    Button(action: { showingDiff = false }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(LS("diff.close"))
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .windowBackgroundColor))
+                Divider()
                 DiffView(diffText: diffText)
             }
-            .frame(minWidth: 600, minHeight: 400)
+            .frame(minWidth: 700, idealWidth: 900, minHeight: 500, idealHeight: 700)
         }
         .sheet(isPresented: $showingBlame) {
             VStack(spacing: 0) {
                 HStack {
+                    Text(LS("git.blame"))
+                        .font(.system(size: 12, weight: .medium))
                     Spacer()
-                    Button(LS("diff.close")) { showingBlame = false }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .padding(8)
+                    Button(action: { showingBlame = false }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(LS("diff.close"))
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .windowBackgroundColor))
+                Divider()
                 BlameView(blameLines: viewModel.blameLines, filePath: viewModel.blameFilePath)
             }
             .frame(minWidth: 700, minHeight: 400)
+        }
+        .popover(isPresented: $showingBranchManager) {
+            GitBranchManagerView(gitViewModel: viewModel)
+                .frame(width: 320, height: 400)
+        }
+        .popover(isPresented: $showingTagManager) {
+            GitTagManagerView(gitViewModel: viewModel)
+                .frame(width: 320, height: 400)
+        }
+        .popover(isPresented: $showingRemoteManager) {
+            GitRemoteManagerView(gitViewModel: viewModel)
+                .frame(width: 360, height: 300)
+        }
+        .popover(isPresented: $showingRebase) {
+            GitRebaseView(gitViewModel: viewModel)
+                .frame(width: 420, height: 450)
+        }
+        .popover(isPresented: $showingSubmodule) {
+            GitSubmoduleView(gitViewModel: viewModel)
+                .frame(width: 380, height: 350)
+        }
+        .popover(isPresented: $showingConfig) {
+            GitConfigView(gitViewModel: viewModel)
+                .frame(width: 400, height: 450)
+        }
+        .onAppear {
+            // Ask FileViewModel to re-broadcast its current directory so we sync on appearance
+            NotificationCenter.default.post(name: .requestCurrentDirectory, object: nil)
         }
     }
 
@@ -92,6 +149,18 @@ struct GitPanelView: View {
             Text(LS("git.title"))
                 .font(.caption)
                 .fontWeight(.medium)
+
+            if !viewModel.repoDisplayPath.isEmpty {
+                Text("·")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+                Text(viewModel.repoDisplayPath)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
             Spacer()
 
             Button(action: { viewModel.refresh() }) {
@@ -102,6 +171,76 @@ struct GitPanelView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    // MARK: - Operation Status Banner
+
+    private var operationStatusBanner: some View {
+        Group {
+            switch viewModel.operationStatus {
+            case .idle:
+                EmptyView()
+            case .running(let description):
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text(description)
+                        .font(.system(size: 10))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.blue.opacity(0.1))
+            case .success(let message):
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.system(size: 10))
+                    Text(message)
+                        .font(.system(size: 10))
+                        .foregroundColor(.green)
+                    Spacer()
+                    Button(action: { viewModel.operationStatus = .idle }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.green.opacity(0.08))
+            case .failure(let message, let detail):
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                            .font(.system(size: 10))
+                        Text(message)
+                            .font(.system(size: 10))
+                            .foregroundColor(.red)
+                        Spacer()
+                        Button(action: { viewModel.operationStatus = .idle }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    if let detail, !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(3)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.red.opacity(0.08))
+            }
+        }
     }
 
     // MARK: - Branch Bar
@@ -138,6 +277,52 @@ struct GitPanelView: View {
 
             Spacer()
 
+            // Manager buttons
+            Button(action: { showingBranchManager.toggle() }) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.borderless)
+            .help(LS("git.branches"))
+
+            Button(action: { showingTagManager.toggle() }) {
+                Image(systemName: "tag")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.borderless)
+            .help(LS("git.tags"))
+
+            Button(action: { showingRemoteManager.toggle() }) {
+                Image(systemName: "network")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.borderless)
+            .help(LS("git.remotes"))
+
+            Button(action: { showingRebase.toggle() }) {
+                Image(systemName: "arrow.triangle.swap")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.borderless)
+            .help("Rebase")
+
+            Button(action: { showingSubmodule.toggle() }) {
+                Image(systemName: "square.stack.3d.up")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.borderless)
+            .help("Submodules")
+
+            Button(action: { showingConfig.toggle() }) {
+                Image(systemName: "gearshape.2")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.borderless)
+            .help("Git Config")
+
+            Divider()
+                .frame(height: 12)
+
             // Quick actions
             Button(action: { viewModel.pull() }) {
                 Image(systemName: "arrow.down.circle")
@@ -156,6 +341,79 @@ struct GitPanelView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+    }
+
+    // MARK: - Tab Bar
+
+    private var tabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(GitTab.allCases, id: \.self) { tab in
+                    tabButton(for: tab)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func tabButton(for tab: GitTab) -> some View {
+        let isSelected = viewModel.selectedTab == tab
+
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                viewModel.selectedTab = tab
+                // Load tab-specific data on demand
+                if tab == .history {
+                    Task { await viewModel.loadGraphHistory() }
+                } else if tab == .conflicts {
+                    viewModel.detectConflicts()
+                }
+            }
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: tabIcon(for: tab))
+                    .font(.system(size: 9))
+                Text(tabTitle(for: tab))
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+
+                // Badge for conflicts
+                if tab == .conflicts, !viewModel.conflictFiles.isEmpty {
+                    Text("\(viewModel.conflictFiles.count)")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.red))
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+            )
+            .foregroundColor(isSelected ? .accentColor : .secondary)
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func tabTitle(for tab: GitTab) -> String {
+        switch tab {
+        case .changes: return LS("git.changes")
+        case .history: return LS("git.history")
+        case .stash: return LS("git.stash")
+        case .conflicts: return LS("git.mergeConflicts")
+        }
+    }
+
+    private func tabIcon(for tab: GitTab) -> String {
+        switch tab {
+        case .changes: return "doc.text.magnifyingglass"
+        case .history: return "point.3.connected.trianglepath.dotted"
+        case .stash: return "tray.full"
+        case .conflicts: return "exclamationmark.triangle"
+        }
     }
 
     // MARK: - Changes
@@ -274,41 +532,6 @@ struct GitPanelView: View {
         .padding(.vertical, 6)
     }
 
-    // MARK: - History
-
-    private var historyView: some View {
-        List(viewModel.commitHistory) { commit in
-            VStack(alignment: .leading, spacing: 3) {
-                Text(commit.message)
-                    .font(.caption)
-                    .lineLimit(2)
-
-                HStack(spacing: 6) {
-                    Text(commit.shortHash)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.blue)
-                    Text(commit.author)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(commit.relativeDate)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.vertical, 2)
-            .contextMenu {
-                Button(LS("git.copyHash")) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(commit.hash, forType: .string)
-                }
-                Button(LS("git.checkout")) { viewModel.checkout(commit.hash) }
-                Button(LS("git.cherryPick")) { viewModel.cherryPick(commit.hash) }
-            }
-        }
-        .listStyle(.plain)
-    }
-
     // MARK: - Stash
 
     private var stashView: some View {
@@ -358,6 +581,11 @@ struct GitPanelView: View {
             Text(LS("git.notARepo"))
                 .font(.title3)
                 .foregroundColor(.secondary)
+            if !viewModel.repoDisplayPath.isEmpty {
+                Text(viewModel.repoDisplayPath)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
             Button(LS("git.initRepo")) { viewModel.initRepo() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)

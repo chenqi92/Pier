@@ -8,18 +8,24 @@ class FileItem: Identifiable, ObservableObject {
     let isDirectory: Bool
     let size: UInt64
     let modifiedDate: Date?
+    let permissions: String
+    let ownerName: String
+    let childCount: Int?
     @Published var children: [FileItem]?
     @Published var isExpanded = false
     var childrenLoaded = false
 
     var isDir: Bool { isDirectory }
 
-    init(name: String, path: String, isDirectory: Bool, size: UInt64 = 0, modifiedDate: Date? = nil, children: [FileItem]? = nil) {
+    init(name: String, path: String, isDirectory: Bool, size: UInt64 = 0, modifiedDate: Date? = nil, permissions: String = "", ownerName: String = "", childCount: Int? = nil, children: [FileItem]? = nil) {
         self.name = name
         self.path = path
         self.isDirectory = isDirectory
         self.size = size
         self.modifiedDate = modifiedDate
+        self.permissions = permissions
+        self.ownerName = ownerName
+        self.childCount = childCount
         self.children = isDirectory ? (children ?? []) : nil
     }
 
@@ -72,8 +78,31 @@ class FileItem: Identifiable, ObservableObject {
         return f
     }()
 
+    /// Shared relative date formatter.
+    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+
     /// Human-readable file size.
     var formattedSize: String {
         Self.sizeFormatter.string(fromByteCount: Int64(size))
+    }
+
+    /// Relative date string (e.g. "2 min ago").
+    var formattedDate: String {
+        guard let date = modifiedDate else { return "" }
+        return Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Format POSIX permissions as Unix-style string (e.g. "rwxr-xr-x").
+    static func formatPermissions(_ posix: UInt16) -> String {
+        let chars: [(UInt16, Character)] = [
+            (0o400, "r"), (0o200, "w"), (0o100, "x"),
+            (0o040, "r"), (0o020, "w"), (0o010, "x"),
+            (0o004, "r"), (0o002, "w"), (0o001, "x")
+        ]
+        return String(chars.map { posix & $0.0 != 0 ? $0.1 : "-" })
     }
 }

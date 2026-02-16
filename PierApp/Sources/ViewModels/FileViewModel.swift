@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 
 /// ViewModel for the local file browser panel.
+@MainActor
 class FileViewModel: ObservableObject {
     @Published var rootFiles: [FileItem] = []
     @Published var displayedFiles: [FileItem] = []
@@ -17,6 +18,23 @@ class FileViewModel: ObservableObject {
         let home = FileManager.default.homeDirectoryForCurrentUser
         self.currentPath = home
         loadDirectory(at: home.path)
+        // Notify GitViewModel of the initial directory so it can detect git repos on startup
+        NotificationCenter.default.post(
+            name: .localDirectoryChanged,
+            object: home.path
+        )
+        // Respond to "request current directory" from GitPanelView by re-broadcasting
+        NotificationCenter.default.addObserver(
+            forName: .requestCurrentDirectory,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            NotificationCenter.default.post(
+                name: .localDirectoryChanged,
+                object: self.currentPath.path
+            )
+        }
     }
 
     // MARK: - Navigation
@@ -24,6 +42,16 @@ class FileViewModel: ObservableObject {
     func navigateTo(_ path: String) {
         currentPath = URL(fileURLWithPath: path)
         loadDirectory(at: path)
+        NotificationCenter.default.post(
+            name: .localDirectoryChanged,
+            object: path
+        )
+    }
+
+    /// Navigate to the parent directory of the current path.
+    func navigateUp() {
+        let parent = currentPath.deletingLastPathComponent()
+        navigateTo(parent.path)
     }
 
     func refresh() {
@@ -152,10 +180,19 @@ class FileViewModel: ObservableObject {
             let attrs = try? fm.attributesOfItem(atPath: fullPath)
             let size = (attrs?[.size] as? UInt64) ?? 0
             let modified = attrs?[.modificationDate] as? Date
+            let posixPerms = attrs?[.posixPermissions] as? UInt16
+            let permString = posixPerms.map { FileItem.formatPermissions($0) } ?? ""
+            let owner = (attrs?[.ownerAccountName] as? String) ?? ""
 
             var children: [FileItem]? = nil
-            if isDir.boolValue && depth < maxDepth {
-                children = buildFileTree(at: fullPath, depth: depth + 1, maxDepth: maxDepth)
+            var childCount: Int? = nil
+            if isDir.boolValue {
+                if depth < maxDepth {
+                    children = buildFileTree(at: fullPath, depth: depth + 1, maxDepth: maxDepth)
+                }
+                // Count visible (non-hidden) items for directory badge
+                childCount = (try? fm.contentsOfDirectory(atPath: fullPath)
+                    .filter { !$0.hasPrefix(".") }.count) ?? 0
             }
 
             let item = FileItem(
@@ -164,6 +201,9 @@ class FileViewModel: ObservableObject {
                 isDirectory: isDir.boolValue,
                 size: size,
                 modifiedDate: modified,
+                permissions: permString,
+                ownerName: owner,
+                childCount: childCount,
                 children: children
             )
 
@@ -211,7 +251,8 @@ class FileViewModel: ObservableObject {
         fileMonitor = nil
     }
 
-    deinit {
-        stopMonitoring()
+    nonisolated deinit {
+        // DispatchSource cancel is thread-safe
+        fileMonitor?.cancel()
     }
 }

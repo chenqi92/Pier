@@ -24,8 +24,8 @@ struct MainView: View {
 
     @State private var showLeftPanel = true
     @State private var showRightPanel = true
-    @State private var leftPanelWidth: CGFloat = 250
-    @State private var rightPanelWidth: CGFloat = 480
+    @State private var leftPanelWidth: CGFloat = 350
+    @State private var rightPanelWidth: CGFloat = 350
     @State private var showNewTabChooser = false
     @State private var showAuthFailedDialog = false
     @State private var retryPassword = ""
@@ -41,8 +41,7 @@ struct MainView: View {
 
             // ── Center Panel: Terminal ──
             TerminalContainerView(viewModel: terminalViewModel)
-                .frame(minWidth: 400)
-                .layoutPriority(1)
+                .frame(minWidth: 300)
                 .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: nil) { providers in
                     handleFileDrop(providers: providers)
                 }

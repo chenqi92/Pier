@@ -593,3 +593,76 @@
 "terminal.splitHorizontal" = "水平分屏";
 "terminal.splitVertical" = "垂直分屏";
 "terminal.closePane" = "关闭面板";
+
+// MARK: - File Browser Extended
+
+"files.goUp" = "返回上级";
+
+// MARK: - Git Operation Feedback
+
+"git.pulling" = "拉取中...";
+"git.pushing" = "推送中...";
+"git.commitSuccess" = "提交成功";
+"git.commitFailed" = "提交失败";
+"git.pullSuccess" = "拉取完成";
+"git.pullFailed" = "拉取失败";
+"git.pushSuccess" = "推送完成";
+"git.pushFailed" = "推送失败";
+"git.initSuccess" = "仓库已初始化";
+"git.initFailed" = "初始化仓库失败";
+"git.checkoutSuccess" = "已检出 %@";
+"git.checkoutFailed" = "检出失败";
+"git.cherryPickSuccess" = "已 Cherry-pick %@";
+"git.cherryPickFailed" = "Cherry-pick 失败";
+
+// MARK: - Git Branch Management
+
+"git.branches" = "分支";
+"git.newBranch" = "新建分支";
+"git.deleteBranch" = "删除分支";
+"git.mergeBranch" = "合并到当前分支";
+"git.switchBranch" = "切换";
+"git.branchName" = "分支名称";
+"git.local" = "本地";
+"git.remote" = "远程";
+"git.createBranchSuccess" = "已创建分支 %@";
+"git.deleteBranchSuccess" = "已删除分支 %@";
+"git.switchBranchSuccess" = "已切换到 %@";
+"git.mergeBranchSuccess" = "已合并 %@";
+"git.branchOperationFailed" = "分支操作失败";
+
+// MARK: - Git Tag Management
+
+"git.tags" = "标签";
+"git.newTag" = "新建标签";
+"git.deleteTag" = "删除标签";
+"git.pushTag" = "推送标签";
+"git.tagName" = "标签名称";
+"git.tagMessage" = "标签信息（可选）";
+"git.createTagSuccess" = "已创建标签 %@";
+"git.deleteTagSuccess" = "已删除标签 %@";
+"git.pushTagSuccess" = "已推送标签 %@";
+"git.tagOperationFailed" = "标签操作失败";
+
+// MARK: - Git Remote Management
+
+"git.remotes" = "远程仓库";
+"git.addRemote" = "添加远程仓库";
+"git.editRemote" = "编辑远程仓库";
+"git.removeRemote" = "删除远程仓库";
+"git.fetchRemote" = "拉取";
+"git.remoteName" = "远程名称";
+"git.remoteURL" = "远程 URL";
+"git.addRemoteSuccess" = "已添加远程仓库 %@";
+"git.removeRemoteSuccess" = "已删除远程仓库 %@";
+"git.fetchSuccess" = "拉取完成";
+"git.remoteOperationFailed" = "远程操作失败";
+
+// MARK: - Git Extended
+
+"git.searchCommits" = "搜索提交...";
+"git.changedFiles" = "变更文件";
+"git.graph" = "分支图";
+"git.conflicts" = "冲突";
+"git.loadingMore" = "加载更多...";
+"git.allLoaded" = "全部提交已加载";
