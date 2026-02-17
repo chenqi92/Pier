@@ -98,18 +98,22 @@ struct LaneState {
         }
 
         // Step 2: Pre-assign columns.
-        // MainChain-exclusive (main branch) → LI=1 (leftmost column, trunk)
-        // Spine (feature branch first-parent) → LI=2 (right of main)
-        // This matches IDEA's layout: main trunk left, feature branches right.
+        // MainChain-exclusive (main only) → LI=1 (leftmost column, trunk)
+        // Spine-exclusive (feature only, not on main) → LI=2 (right of main)
+        // Commits in BOTH spine AND mainChain (common ancestors) → LI=1 (main trunk)
         let mainExclusive = mainChain.subtracting(spineHashes)
-        if !mainExclusive.isEmpty {
+        let spineExclusive = spineHashes.subtracting(mainChain)
+        let commonAncestors = spineHashes.intersection(mainChain)
+        if !mainExclusive.isEmpty || !spineExclusive.isEmpty {
+            // Assign mainChain-exclusive + common ancestors to LI=1 (main trunk left)
             for i in 0..<nodes.count {
-                if mainExclusive.contains(nodes[i].id) {
+                if mainExclusive.contains(nodes[i].id) || commonAncestors.contains(nodes[i].id) {
                     layoutIndex[i] = 1
                 }
             }
+            // Assign spine-exclusive to LI=2 (feature branch right)
             for i in 0..<nodes.count {
-                if spineHashes.contains(nodes[i].id) {
+                if spineExclusive.contains(nodes[i].id) {
                     layoutIndex[i] = 2
                 }
             }
@@ -160,10 +164,10 @@ struct LaneState {
         for i in 0..<nodes.count {
             nodes[i].lane = layoutIndex[i]
         }
-        // Debug: write layoutIndex for first 20 rows to file
+        // Debug: write layoutIndex for all rows to file
         var debugLines: [String] = []
         debugLines.append("heads: \(heads.map { "r\($0)=\(String(nodes[$0].id.prefix(8)))" }) spine=\(spineHashes.count) mainExcl=\(mainExclusive.count)")
-        let debugLimit = min(20, nodes.count)
+        let debugLimit = min(100, nodes.count)
         for i in 0..<debugLimit {
             let onSpine = spineHashes.contains(nodes[i].id)
             let onMain = mainChain.contains(nodes[i].id)
