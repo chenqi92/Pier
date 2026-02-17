@@ -374,6 +374,7 @@
 
 "git.branchGraph" = "Branch Graph";
 "git.noGraph" = "No graph data";
+"git.allBranches" = "All Branches";
 
 // MARK: - Batch 6: PostgreSQL
 

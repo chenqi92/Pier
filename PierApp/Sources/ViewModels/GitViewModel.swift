@@ -87,6 +87,8 @@ class GitViewModel: ObservableObject {
     @Published var selectedTab: GitTab = .changes
     @Published var isGitRepo = false
     @Published var currentBranch = ""
+    @Published var trackingBranch = ""  // e.g. "origin/main"
+    @Published var localBranches: [String] = []
     @Published var aheadCount = 0
     @Published var behindCount = 0
     @Published var stagedFiles: [GitFileChange] = []
@@ -105,6 +107,8 @@ class GitViewModel: ObservableObject {
     @Published var graphNodes: [CommitNode] = []
     @Published var isLoadingMoreHistory = false
     @Published var hasMoreHistory = true
+    @Published var graphBranches: [String] = []
+    @Published var graphFilterBranch: String? = nil  // nil = all branches
 
     // MARK: - Private
 
@@ -230,6 +234,21 @@ class GitViewModel: ObservableObject {
     func loadBranch() async {
         if let branch = await runGit(["branch", "--show-current"]) {
             currentBranch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Fetch tracking remote branch
+        if let tracking = await runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]) {
+            trackingBranch = tracking.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            trackingBranch = ""
+        }
+
+        // Fetch local branch list
+        if let branchOutput = await runGit(["branch", "--format=%(refname:short)"]) {
+            localBranches = branchOutput.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .sorted()
         }
 
         if let revList = await runGit(["rev-list", "--left-right", "--count", "HEAD...@{u}"]) {
@@ -442,19 +461,26 @@ class GitViewModel: ObservableObject {
         hasMoreHistory = true
         laneState = LaneState()
 
+        // Fetch available branches for the filter picker
+        await fetchGraphBranches()
+
         // Phase 1: Detect default branch and fetch its first-parent chain (lane 0).
         let defaultBranch = await detectDefaultBranch()
         if let fpOutput = await runGit(["log", "--first-parent", defaultBranch, "--format=%H"]) {
             laneState.mainChain = Set(fpOutput.split(separator: "\n").map(String.init))
         }
 
-        // Phase 2: Load all commits (all branches, date order).
+        // Phase 2: Load commits (all branches or filtered).
         let sep = "<SEP>"
-        guard let output = await runGit([
-            "log", "--all", "--date-order",
-            "-\(graphPageSize)",
-            "--format=%H" + sep + "%P" + sep + "%h" + sep + "%d" + sep + "%s" + sep + "%an" + sep + "%ar"
-        ]) else {
+        var logArgs = ["log"]
+        if let branch = graphFilterBranch {
+            logArgs.append(branch)
+        } else {
+            logArgs.append("--all")
+        }
+        logArgs += ["--date-order", "-\(graphPageSize)",
+                    "--format=%H" + sep + "%P" + sep + "%h" + sep + "%d" + sep + "%s" + sep + "%an" + sep + "%ar"]
+        guard let output = await runGit(logArgs) else {
             graphNodes = []
             return
         }
@@ -502,12 +528,15 @@ class GitViewModel: ObservableObject {
         guard hasMoreHistory, !isLoadingMoreHistory else { return }
         isLoadingMoreHistory = true
         let sep = "<SEP>"
-        guard let output = await runGit([
-            "log", "--all", "--date-order",
-            "-\(graphPageSize)",
-            "--skip=\(graphSkipCount)",
-            "--format=%H" + sep + "%P" + sep + "%h" + sep + "%d" + sep + "%s" + sep + "%an" + sep + "%ar"
-        ]) else {
+        var logArgs = ["log"]
+        if let branch = graphFilterBranch {
+            logArgs.append(branch)
+        } else {
+            logArgs.append("--all")
+        }
+        logArgs += ["--date-order", "-\(graphPageSize)", "--skip=\(graphSkipCount)",
+                    "--format=%H" + sep + "%P" + sep + "%h" + sep + "%d" + sep + "%s" + sep + "%an" + sep + "%ar"]
+        guard let output = await runGit(logArgs) else {
             isLoadingMoreHistory = false
             return
         }
@@ -519,6 +548,18 @@ class GitViewModel: ObservableObject {
         graphSkipCount += nodes.count
         hasMoreHistory = nodes.count >= graphPageSize
         isLoadingMoreHistory = false
+    }
+
+    /// Fetch all local and remote branch names for the graph filter.
+    private func fetchGraphBranches() async {
+        guard let output = await runGit(["branch", "-a", "--format=%(refname:short)"]) else {
+            graphBranches = []
+            return
+        }
+        graphBranches = output.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .sorted()
     }
 
     /// Parse git log output into CommitNode array (before lane assignment).

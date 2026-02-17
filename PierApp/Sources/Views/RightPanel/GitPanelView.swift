@@ -251,9 +251,50 @@ struct GitPanelView: View {
                 .font(.system(size: 10))
                 .foregroundColor(.green)
 
-            Text(viewModel.currentBranch)
-                .font(.caption)
-                .fontWeight(.medium)
+            // Branch switcher dropdown
+            if viewModel.localBranches.count > 1 {
+                Menu {
+                    ForEach(viewModel.localBranches, id: \.self) { branch in
+                        Button {
+                            if branch != viewModel.currentBranch {
+                                viewModel.checkout(branch)
+                            }
+                        } label: {
+                            HStack {
+                                Text(branch)
+                                if branch == viewModel.currentBranch {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(viewModel.currentBranch)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 7, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            } else {
+                Text(viewModel.currentBranch)
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+
+            // Tracking remote branch
+            if !viewModel.trackingBranch.isEmpty {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 7))
+                    .foregroundColor(.secondary)
+                Text(viewModel.trackingBranch)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
 
             if viewModel.aheadCount > 0 {
                 HStack(spacing: 2) {

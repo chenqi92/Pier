@@ -374,6 +374,7 @@
 
 "git.branchGraph" = "分支图";
 "git.noGraph" = "无图数据";
+"git.allBranches" = "所有分支";
 
 // MARK: - Batch 6: PostgreSQL
 

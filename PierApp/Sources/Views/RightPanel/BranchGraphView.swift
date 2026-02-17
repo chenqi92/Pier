@@ -78,18 +78,48 @@ struct LaneState {
                 heads.append(i)
             }
         }
-        // Main chain head first
-        heads.sort { a, b in
-            let aMain = mainChain.contains(nodes[a].id)
-            let bMain = mainChain.contains(nodes[b].id)
-            if aMain != bMain { return aMain }
-            return a < b
-        }
+        heads.sort { a, b in a < b }
 
         var layoutIndex = Array(repeating: 0, count: nodes.count)
         var currentLI = 1
 
-        // IDEA's stack-based DFS walk (from GraphLayoutBuilder.kt)
+        // Step 1: Walk first-parent chain from row 0 to identify the "spine"
+        // (the primary branch that gets LI=1).
+        var spineHashes = Set<String>()
+        if let firstHead = heads.first {
+            var cur = firstHead
+            while cur < nodes.count {
+                spineHashes.insert(nodes[cur].id)
+                // Follow first parent (pi=0)
+                guard let firstParent = nodes[cur].parents.first,
+                      let pr = hashToRow[firstParent] else { break }
+                cur = pr
+            }
+        }
+
+        // Step 2: Pre-assign columns.
+        // MainChain-exclusive (main branch) → LI=1 (leftmost column, trunk)
+        // Spine (feature branch first-parent) → LI=2 (right of main)
+        // This matches IDEA's layout: main trunk left, feature branches right.
+        let mainExclusive = mainChain.subtracting(spineHashes)
+        if !mainExclusive.isEmpty {
+            for i in 0..<nodes.count {
+                if mainExclusive.contains(nodes[i].id) {
+                    layoutIndex[i] = 1
+                }
+            }
+            for i in 0..<nodes.count {
+                if spineHashes.contains(nodes[i].id) {
+                    layoutIndex[i] = 2
+                }
+            }
+            currentLI = 3  // DFS for remaining branches starts here
+        } else {
+            // No main branch separation needed — just use DFS
+            currentLI = 1
+        }
+
+        // Step 3: DFS from heads (skips pre-assigned commits)
         func dfsWalk(from head: Int) {
             if layoutIndex[head] != 0 { return }
             var stack = [head]
@@ -130,6 +160,16 @@ struct LaneState {
         for i in 0..<nodes.count {
             nodes[i].lane = layoutIndex[i]
         }
+        // Debug: write layoutIndex for first 20 rows to file
+        var debugLines: [String] = []
+        debugLines.append("heads: \(heads.map { "r\($0)=\(String(nodes[$0].id.prefix(8)))" }) spine=\(spineHashes.count) mainExcl=\(mainExclusive.count)")
+        let debugLimit = min(20, nodes.count)
+        for i in 0..<debugLimit {
+            let onSpine = spineHashes.contains(nodes[i].id)
+            let onMain = mainChain.contains(nodes[i].id)
+            debugLines.append("r\(i) \(String(nodes[i].id.prefix(8))) LI=\(layoutIndex[i]) spine=\(onSpine) mc=\(onMain) p=\(nodes[i].parents.map { String($0.prefix(8)) }) \(String(nodes[i].message.prefix(45)))")
+        }
+        try? debugLines.joined(separator: "\n").write(toFile: "/tmp/pier_graph_debug.txt", atomically: true, encoding: .utf8)
     }
 
     // ── Phase 2 & 3: Active edges + dynamic per-row column positions ──
@@ -231,7 +271,7 @@ struct LaneState {
                 if let pr = hashToRow[parentHash] {
                     parentRow = pr
                 } else {
-                    parentRow = nodes.count  // not loaded
+                    continue  // parent not loaded — skip edge (IDEA only processes loaded edges)
                 }
                 if parentRow <= childRow { continue }
 
@@ -444,6 +484,14 @@ struct BranchGraphView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Branch filter bar
+            branchFilterBar
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
             if gitViewModel.graphNodes.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "clock.arrow.circlepath").font(.system(size: 30)).foregroundColor(.secondary)
@@ -452,6 +500,64 @@ struct BranchGraphView: View {
             } else { scrollContent }
         }
         .sheet(isPresented: $showingDiff) { diffSheet }
+    }
+
+    private var branchFilterBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+
+            Menu {
+                Button {
+                    if gitViewModel.graphFilterBranch != nil {
+                        gitViewModel.graphFilterBranch = nil
+                        Task { await gitViewModel.loadGraphHistory() }
+                    }
+                } label: {
+                    HStack {
+                        Text(LS("git.allBranches"))
+                        if gitViewModel.graphFilterBranch == nil {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+
+                Divider()
+
+                ForEach(gitViewModel.graphBranches, id: \.self) { branch in
+                    Button {
+                        if gitViewModel.graphFilterBranch != branch {
+                            gitViewModel.graphFilterBranch = branch
+                            Task { await gitViewModel.loadGraphHistory() }
+                        }
+                    } label: {
+                        HStack {
+                            Text(branch)
+                            if gitViewModel.graphFilterBranch == branch {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(gitViewModel.graphFilterBranch ?? LS("git.allBranches"))
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .controlColor)))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Spacer()
+        }
     }
 
     private var scrollContent: some View {
