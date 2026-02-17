@@ -78,52 +78,16 @@ struct LaneState {
                 heads.append(i)
             }
         }
+        // IDEA: heads sorted by comparator (effectively row order = date order)
         heads.sort { a, b in a < b }
 
         var layoutIndex = Array(repeating: 0, count: nodes.count)
         var currentLI = 1
 
-        // Step 1: Walk first-parent chain from row 0 to identify the "spine"
-        // (the primary branch that gets LI=1).
-        var spineHashes = Set<String>()
-        if let firstHead = heads.first {
-            var cur = firstHead
-            while cur < nodes.count {
-                spineHashes.insert(nodes[cur].id)
-                // Follow first parent (pi=0)
-                guard let firstParent = nodes[cur].parents.first,
-                      let pr = hashToRow[firstParent] else { break }
-                cur = pr
-            }
-        }
-
-        // Step 2: Pre-assign columns.
-        // MainChain-exclusive (main only) → LI=1 (leftmost column, trunk)
-        // Spine-exclusive (feature only, not on main) → LI=2 (right of main)
-        // Commits in BOTH spine AND mainChain (common ancestors) → LI=1 (main trunk)
-        let mainExclusive = mainChain.subtracting(spineHashes)
-        let spineExclusive = spineHashes.subtracting(mainChain)
-        let commonAncestors = spineHashes.intersection(mainChain)
-        if !mainExclusive.isEmpty || !spineExclusive.isEmpty {
-            // Assign mainChain-exclusive + common ancestors to LI=1 (main trunk left)
-            for i in 0..<nodes.count {
-                if mainExclusive.contains(nodes[i].id) || commonAncestors.contains(nodes[i].id) {
-                    layoutIndex[i] = 1
-                }
-            }
-            // Assign spine-exclusive to LI=2 (feature branch right)
-            for i in 0..<nodes.count {
-                if spineExclusive.contains(nodes[i].id) {
-                    layoutIndex[i] = 2
-                }
-            }
-            currentLI = 3  // DFS for remaining branches starts here
-        } else {
-            // No main branch separation needed — just use DFS
-            currentLI = 1
-        }
-
-        // Step 3: DFS from heads (skips pre-assigned commits)
+        // Pure DFS — matching IDEA's GraphLayoutBuilder.build() exactly.
+        // No pre-assignment. The DFS naturally assigns layout indices by
+        // following first-parent chains and backtracking to merge sources.
+        // This produces IDEA's exact column ordering.
         func dfsWalk(from head: Int) {
             if layoutIndex[head] != 0 { return }
             var stack = [head]
@@ -134,15 +98,16 @@ struct LaneState {
                     layoutIndex[cur] = currentLI
                 }
                 // Find first unvisited down-node (parent in git order)
-                var child: Int? = nil
+                // IDEA: getDownNodes().firstOrNull { layoutIndex[it] == 0 }
+                var nextNode: Int? = nil
                 for p in nodes[cur].parents {
                     if let pr = hashToRow[p], layoutIndex[pr] == 0 {
-                        child = pr
+                        nextNode = pr
                         break
                     }
                 }
-                if let c = child {
-                    stack.append(c)
+                if let next = nextNode {
+                    stack.append(next)
                 } else {
                     if firstVisit { currentLI += 1 }
                     stack.removeLast()
@@ -164,14 +129,13 @@ struct LaneState {
         for i in 0..<nodes.count {
             nodes[i].lane = layoutIndex[i]
         }
-        // Debug: write layoutIndex for all rows to file
+        // Debug: write layoutIndex for first 100 rows to file
         var debugLines: [String] = []
-        debugLines.append("heads: \(heads.map { "r\($0)=\(String(nodes[$0].id.prefix(8)))" }) spine=\(spineHashes.count) mainExcl=\(mainExclusive.count)")
-        let debugLimit = min(100, nodes.count)
+        debugLines.append("heads: \(heads.map { "r\($0)=\(String(nodes[$0].id.prefix(8)))" })")
+        let debugLimit = min(500, nodes.count)
         for i in 0..<debugLimit {
-            let onSpine = spineHashes.contains(nodes[i].id)
             let onMain = mainChain.contains(nodes[i].id)
-            debugLines.append("r\(i) \(String(nodes[i].id.prefix(8))) LI=\(layoutIndex[i]) spine=\(onSpine) mc=\(onMain) p=\(nodes[i].parents.map { String($0.prefix(8)) }) \(String(nodes[i].message.prefix(45)))")
+            debugLines.append("r\(i) \(String(nodes[i].id.prefix(8))) LI=\(layoutIndex[i]) mc=\(onMain) p=\(nodes[i].parents.map { String($0.prefix(8)) }) \(String(nodes[i].message.prefix(45)))")
         }
         try? debugLines.joined(separator: "\n").write(toFile: "/tmp/pier_graph_debug.txt", atomically: true, encoding: .utf8)
     }
@@ -240,10 +204,11 @@ struct LaneState {
 
         // Collect ALL edges (child → parent)
         struct EdgeInfo {
-            let childRow: Int
-            let parentRow: Int
+            let childRow: Int     // "up" in IDEA terminology
+            let parentRow: Int    // "down" in IDEA terminology
             let parentIndex: Int  // 0 = first parent, 1+ = merge source
-            let layoutIndex: Int
+            let upLI: Int         // layoutIndex of child node
+            let downLI: Int       // layoutIndex of parent node
             let colorIndex: Int
         }
         var allEdges: [EdgeInfo] = []
@@ -279,12 +244,9 @@ struct LaneState {
                 }
                 if parentRow <= childRow { continue }
 
-                // Edge layoutIndex: determines its position among active elements in each row.
-                // IDEA: first-parent edges are part of the child's chain (use childLI),
-                // merge edges are part of the side branch being merged (use parentLI).
+                // IDEA stores layoutIndex of both endpoints for comparator
                 let childLI = nodes[childRow].lane
                 let parentLI = parentRow < nodes.count ? nodes[parentRow].lane : childLI
-                let edgeLI = (pi == 0) ? childLI : parentLI
                 // Color: first-parent edges inherit child's color;
                 // merge edges (2nd+ parent) use parent's color (side branch color)
                 let ci: Int
@@ -297,7 +259,7 @@ struct LaneState {
                 }
 
                 allEdges.append(EdgeInfo(childRow: childRow, parentRow: parentRow,
-                                        parentIndex: pi, layoutIndex: edgeLI, colorIndex: ci))
+                                        parentIndex: pi, upLI: childLI, downLI: parentLI, colorIndex: ci))
             }
         }
 
@@ -336,40 +298,66 @@ struct LaneState {
                 for ei in newEdges { activeEdgeIndices.insert(ei) }
             }
 
-            // Build sorted elements for this row
-            // IDEA's GraphElementComparatorByLayoutIndex:
-            //   - Different layoutIndex: lower first
-            //   - Same layoutIndex, edge vs node: edge.childRow < node.row → edge first
-            //     (edges that started earlier occupy column, pushing nodes right)
-            struct RowElement: Comparable {
-                let layoutIndex: Int
+            // Build sorted elements for this row.
+            // IDEA's GraphElementComparatorByLayoutIndex (faithful port from Java source).
+            struct RowElement {
                 let isNode: Bool
                 let edgeIndex: Int
-                let childRow: Int  // for edges: the child row; for nodes: current row
+                let upLI: Int      // for edges: child LI; for nodes: node LI
+                let downLI: Int    // for edges: parent LI; for nodes: node LI
+                let upRow: Int     // for edges: childRow; for nodes: row
+                let downRow: Int   // for edges: parentRow; for nodes: row
+            }
 
-                static func < (lhs: RowElement, rhs: RowElement) -> Bool {
-                    if lhs.layoutIndex != rhs.layoutIndex { return lhs.layoutIndex < rhs.layoutIndex }
-                    // Same layoutIndex: IDEA tiebreaker — edges started earlier go first
-                    if lhs.isNode != rhs.isNode {
-                        // edge vs node: compare edge.childRow with node.row
-                        let (edge, node) = lhs.isNode ? (rhs, lhs) : (lhs, rhs)
-                        if edge.childRow < node.childRow { return !lhs.isNode } // edge before node
-                        return lhs.isNode  // node before edge (edge started later)
+            // IDEA's compare2(edge, node): positive means edge goes RIGHT of node
+            func compare2(_ e: RowElement, _ n: RowElement) -> Int {
+                let maxEdgeLI = max(e.upLI, e.downLI)
+                let nodeLI = n.upLI
+                if maxEdgeLI != nodeLI { return maxEdgeLI - nodeLI }
+                return e.upRow - n.upRow
+            }
+
+            func compareElements(_ lhs: RowElement, _ rhs: RowElement) -> Int {
+                if !lhs.isNode && !rhs.isNode {
+                    // Edge vs Edge: reduce to edge-vs-node
+                    if lhs.upRow == rhs.upRow {
+                        if lhs.downRow < rhs.downRow {
+                            let vn = RowElement(isNode: true, edgeIndex: -1, upLI: lhs.downLI,
+                                                downLI: lhs.downLI, upRow: lhs.downRow, downRow: lhs.downRow)
+                            return -compare2(rhs, vn)
+                        } else {
+                            let vn = RowElement(isNode: true, edgeIndex: -1, upLI: rhs.downLI,
+                                                downLI: rhs.downLI, upRow: rhs.downRow, downRow: rhs.downRow)
+                            return compare2(lhs, vn)
+                        }
                     }
-                    return lhs.childRow < rhs.childRow
+                    if lhs.upRow < rhs.upRow {
+                        let vn = RowElement(isNode: true, edgeIndex: -1, upLI: rhs.upLI,
+                                            downLI: rhs.upLI, upRow: rhs.upRow, downRow: rhs.upRow)
+                        return compare2(lhs, vn)
+                    } else {
+                        let vn = RowElement(isNode: true, edgeIndex: -1, upLI: lhs.upLI,
+                                            downLI: lhs.upLI, upRow: lhs.upRow, downRow: lhs.upRow)
+                        return -compare2(rhs, vn)
+                    }
                 }
+                if !lhs.isNode && rhs.isNode { return compare2(lhs, rhs) }
+                if lhs.isNode && !rhs.isNode { return -compare2(rhs, lhs) }
+                return 0
             }
 
             var elements: [RowElement] = []
-            elements.append(RowElement(layoutIndex: nodes[row].lane, isNode: true, edgeIndex: -1, childRow: row))
+            let nodeLI = nodes[row].lane
+            elements.append(RowElement(isNode: true, edgeIndex: -1, upLI: nodeLI,
+                                       downLI: nodeLI, upRow: row, downRow: row))
             for ei in activeEdgeIndices {
-                // IDEA: long edges are hidden in the middle — don't occupy a column
                 let e = allEdges[ei]
                 let clampedPR = min(e.parentRow, nodes.count - 1)
-                guard isEdgeVisibleInRow(childRow: e.childRow, parentRow: clampedPR, row: row) else { continue }
-                elements.append(RowElement(layoutIndex: e.layoutIndex, isNode: false, edgeIndex: ei, childRow: e.childRow))
+                guard Self.isEdgeVisibleInRow(childRow: e.childRow, parentRow: clampedPR, row: row) else { continue }
+                elements.append(RowElement(isNode: false, edgeIndex: ei, upLI: e.upLI,
+                                           downLI: e.downLI, upRow: e.childRow, downRow: e.parentRow))
             }
-            elements.sort()
+            elements.sort { compareElements($0, $1) < 0 }
 
             for (col, elem) in elements.enumerated() {
                 if elem.isNode {
