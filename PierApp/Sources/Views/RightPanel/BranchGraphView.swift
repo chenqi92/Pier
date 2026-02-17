@@ -10,6 +10,14 @@ struct Segment {
     let colorIndex: Int
 }
 
+/// Arrow indicator for long-span branch lines (IDEA-style break).
+struct ArrowIndicator {
+    let x: CGFloat
+    let y: CGFloat
+    let colorIndex: Int
+    let isDown: Bool  // true = ↓ (start break), false = ↑ (resume)
+}
+
 struct CommitNode: Identifiable {
     let id: String          // full hash
     let shortHash: String
@@ -22,236 +30,385 @@ struct CommitNode: Identifiable {
     var lane: Int = 0
     var colorIndex: Int = 0
     var segments: [Segment] = []
+    var arrows: [ArrowIndicator] = []
 }
 
-// MARK: - Lane Assignment (IDEA-style)
+// MARK: - Graph Layout (IDEA-style)
 //
-// Key principle: the HEAD first-parent chain is ALWAYS at lane 0.
-// Side branches spawn to the right and merge back.
-// Algorithm:
-//   1. Pre-identify HEAD's first-parent chain (a Set of hashes).
-//   2. Walk commits top-down (newest first).
-//   3. Maintain a "column reservation" array — each slot holds the hash
-//      of the commit expected to appear next in that lane.
-//   4. When a commit arrives:
-//      a. If it's in mainChain → force it to lane 0 (evicting anything there if needed).
-//      b. Otherwise → find its reserved lane, or allocate a new one.
-//   5. After placing it, reserve lanes for its parents:
-//      - First parent continues on the SAME lane.
-//      - Additional parents get new lanes (to the right).
+// Based on JetBrains IntelliJ IDEA open-source graph rendering:
+//   https://github.com/JetBrains/intellij-community/tree/master/platform/vcs-log/graph
+//
+// Three-phase algorithm:
+//  1. Layout Index: DFS from HEAD, each first-parent chain shares the same layoutIndex.
+//  2. Active Edges: For each row, collect all edges passing through it.
+//  3. Dynamic Position: Sort node + active edges by layoutIndex → position = column.
+//
+// This produces column positions that SHIFT LEFT/RIGHT as branches appear/disappear,
+// matching IDEA's compact visual style.
 
 struct LaneState {
-    /// Column reservation list: index = lane, value = expected commit hash.
-    /// nil = lane is free.
-    var columns: [String?] = []
-    /// Color assigned to each lane.
-    var laneColors: [Int] = []
-    var nextColor: Int = 1  // color 0 reserved for main chain
-
-    /// Set of hashes on HEAD's first-parent chain.
+    /// Set of hashes on default branch's first-parent chain.
     var mainChain: Set<String> = []
 
-    /// Find a free lane (first nil slot), or append a new one.
-    mutating func allocLane() -> Int {
-        if let free = columns.firstIndex(where: { $0 == nil }) { return free }
-        columns.append(nil)
-        // Assign a unique color to the new lane
-        laneColors.append(nextColor)
-        nextColor += 1
-        return columns.count - 1
-    }
+    // ── Phase 1: Layout Index (IDEA's stack-based DFS) ─────────────────
 
-    /// Find which lane a hash is reserved at.
-    func findLane(for hash: String) -> Int? {
-        columns.firstIndex(where: { $0 == hash })
-    }
+    /// Assign layoutIndex to every commit using IDEA's exact DFS algorithm
+    /// from GraphLayoutBuilder.kt:
+    ///   - Stack-based walk from each head
+    ///   - At each node, find first unvisited parent (down-node) and push
+    ///   - When no unvisited parent exists, pop and backtrack
+    ///   - Same first-parent chain shares same layoutIndex
+    ///   - layoutIndex increments when a chain ends
+    /// This depth-first ordering ensures side branches from deeper merges
+    /// get lower layoutIndex values than those from shallower merges.
+    static func assignLayoutIndices(_ nodes: inout [CommitNode], mainChain: Set<String>) {
+        guard !nodes.isEmpty else { return }
 
-    mutating func assignLanes(_ nodes: inout [CommitNode]) {
-        // Ensure lane 0 exists.
-        if columns.isEmpty {
-            columns.append(nil)
-            laneColors.append(0)  // main chain color
-        }
-
-        for i in 0..<nodes.count {
-            let hash = nodes[i].id
-            let isMain = mainChain.contains(hash)
-            let lane: Int
-
-            if isMain {
-                // Main chain commit → ALWAYS lane 0.
-                // If something else reserved lane 0, evict it.
-                if let current = columns[0], current != hash {
-                    // Move whatever was at lane 0 to a new lane.
-                    let newLane = allocLane()
-                    columns[newLane] = current
-                    laneColors[newLane] = laneColors[0]
-                }
-                columns[0] = nil  // will be set by parent reservation below
-                lane = 0
-            } else if let reserved = findLane(for: hash) {
-                // This commit was expected at a specific lane.
-                columns[reserved] = nil
-                lane = reserved
-            } else {
-                // New side-branch commit — allocate a lane.
-                let newLane = allocLane()
-                columns[newLane] = nil
-                lane = newLane
-            }
-
-            // Set commit properties.
-            nodes[i].lane = lane
-            nodes[i].colorIndex = isMain ? 0 : laneColors[lane]
-
-            // Reserve lanes for parents.
-            let parents = nodes[i].parents
-            for (pi, parentHash) in parents.enumerated() {
-                if pi == 0 {
-                    // First parent handling: decide whether to keep or free current lane.
-                    let parentReservedAt = findLane(for: parentHash)
-                    if parentReservedAt != nil {
-                        // Parent already reserved at another lane (another child got there first).
-                        // This branch merges into that lane → FREE current lane.
-                        columns[lane] = nil
-                    } else if mainChain.contains(parentHash) && lane != 0 {
-                        // Parent is main chain (will be at lane 0) → FREE current side lane.
-                        columns[lane] = nil
-                        // Ensure lane 0 has the reservation if it's empty.
-                        if columns[0] == nil {
-                            columns[0] = parentHash
-                        }
-                    } else {
-                        // Normal: continue on same lane.
-                        if columns[lane] == nil {
-                            columns[lane] = parentHash
-                        }
-                    }
-                } else {
-                    // Additional parents (merge sources) → check if already reserved.
-                    if findLane(for: parentHash) != nil {
-                        // Already reserved — the connection will be drawn to that lane.
-                        continue
-                    }
-                    // Allocate a new lane for this parent.
-                    let newLane = allocLane()
-                    columns[newLane] = parentHash
-                    laneColors[newLane] = nextColor
-                    nextColor += 1
-                }
-            }
-
-            // If no parents (root commit), free the lane.
-            if parents.isEmpty {
-                columns[lane] = nil
-            }
-
-            // Clean up: free any lane that's no longer needed.
-            // A lane is "done" if the commit that was expected there has arrived
-            // and has no more children expecting it.
-            // (The freeing happens naturally: columns[reserved] = nil above.)
-        }
-    }
-
-    /// Compute per-row segments for drawing.
-    static func computeSegments(_ nodes: inout [CommitNode]) {
-        let lw: CGFloat = BranchGraphView.laneW
-        let rh: CGFloat = BranchGraphView.rowH
-        func x(_ lane: Int) -> CGFloat { CGFloat(lane) * lw + lw / 2 + 4 }
-
-        for i in 0..<nodes.count { nodes[i].segments = [] }
-
-        // Build hash → row index map.
         var hashToRow: [String: Int] = [:]
         for (i, n) in nodes.enumerated() { hashToRow[n.id] = i }
 
+        // Identify heads: nodes not referenced as parent by any other node
+        var isParentOf = Set<String>()
+        for n in nodes {
+            for p in n.parents { isParentOf.insert(p) }
+        }
+        var heads: [Int] = []
+        for (i, n) in nodes.enumerated() {
+            if !isParentOf.contains(n.id) {
+                heads.append(i)
+            }
+        }
+        // Main chain head first
+        heads.sort { a, b in
+            let aMain = mainChain.contains(nodes[a].id)
+            let bMain = mainChain.contains(nodes[b].id)
+            if aMain != bMain { return aMain }
+            return a < b
+        }
+
+        var layoutIndex = Array(repeating: 0, count: nodes.count)
+        var currentLI = 1
+
+        // IDEA's stack-based DFS walk (from GraphLayoutBuilder.kt)
+        func dfsWalk(from head: Int) {
+            if layoutIndex[head] != 0 { return }
+            var stack = [head]
+            while !stack.isEmpty {
+                let cur = stack.last!
+                let firstVisit = layoutIndex[cur] == 0
+                if firstVisit {
+                    layoutIndex[cur] = currentLI
+                }
+                // Find first unvisited down-node (parent in git order)
+                var child: Int? = nil
+                for p in nodes[cur].parents {
+                    if let pr = hashToRow[p], layoutIndex[pr] == 0 {
+                        child = pr
+                        break
+                    }
+                }
+                if let c = child {
+                    stack.append(c)
+                } else {
+                    if firstVisit { currentLI += 1 }
+                    stack.removeLast()
+                }
+            }
+        }
+
+        for head in heads {
+            dfsWalk(from: head)
+        }
+
+        // Assign any remaining (disconnected) nodes
+        for i in 0..<nodes.count {
+            if layoutIndex[i] == 0 {
+                dfsWalk(from: i)
+            }
+        }
+
+        for i in 0..<nodes.count {
+            nodes[i].lane = layoutIndex[i]
+        }
+    }
+
+    // ── Phase 2 & 3: Active edges + dynamic per-row column positions ──
+
+    /// Represents an edge from child row to parent row, carrying a layoutIndex for sorting
+    struct ActiveEdge: Hashable {
+        let childRow: Int
+        let parentRow: Int
+        let layoutIndex: Int
+        let colorIndex: Int
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(childRow)
+            hasher.combine(parentRow)
+        }
+        static func == (lhs: ActiveEdge, rhs: ActiveEdge) -> Bool {
+            return lhs.childRow == rhs.childRow && lhs.parentRow == rhs.parentRow
+        }
+    }
+
+    /// Compute dynamic column positions for all nodes and generate segments.
+    /// This replaces both `assignLanes` and `computeSegments`.
+    // IDEA's long-edge constants (from PrintElementGeneratorImpl.kt)
+    static let longEdgeSize = 30       // edges >= this span get hidden in the middle
+    static let visiblePartSize = 1     // show this many rows near each endpoint
+
+    /// Whether an edge is visible (occupies a column) at the given row.
+    /// Long edges (span >= longEdgeSize) are hidden in the middle — only visible
+    /// within `visiblePartSize` rows of each endpoint.
+    static func isEdgeVisibleInRow(childRow: Int, parentRow: Int, row: Int) -> Bool {
+        let span = parentRow - childRow
+        if span < longEdgeSize { return true }
+        let upOffset = row - childRow       // distance from child end
+        let downOffset = parentRow - row    // distance from parent end
+        return upOffset <= visiblePartSize || downOffset <= visiblePartSize
+    }
+
+    /// Returns the arrow type at the given row, if any.
+    /// A down-arrow appears at the row where the edge becomes hidden from the child side.
+    /// An up-arrow appears at the row where the edge becomes visible from the parent side.
+    static func arrowType(childRow: Int, parentRow: Int, row: Int) -> Bool? {
+        let span = parentRow - childRow
+        if span < longEdgeSize { return nil }
+        let upOffset = row - childRow
+        let downOffset = parentRow - row
+        if upOffset == visiblePartSize { return true }    // down arrow ↓
+        if downOffset == visiblePartSize { return false } // up arrow ↑
+        return nil
+    }
+
+    static func computeIDEALayout(_ nodes: inout [CommitNode], mainChain: Set<String>) {
+        guard !nodes.isEmpty else { return }
+
+        // Phase 1: Assign layoutIndex
+        assignLayoutIndices(&nodes, mainChain: mainChain)
+
+        let lw: CGFloat = BranchGraphView.laneW
+        let rh: CGFloat = BranchGraphView.rowH
+        func xPos(_ col: Int) -> CGFloat { CGFloat(col) * lw + lw / 2 + 4 }
+
+        // Build hash → row map
+        var hashToRow: [String: Int] = [:]
+        for (i, n) in nodes.enumerated() { hashToRow[n.id] = i }
+
+        // Collect ALL edges (child → parent)
+        struct EdgeInfo {
+            let childRow: Int
+            let parentRow: Int
+            let parentIndex: Int  // 0 = first parent, 1+ = merge source
+            let layoutIndex: Int
+            let colorIndex: Int
+        }
+        var allEdges: [EdgeInfo] = []
+
+        // Color assignment: same layoutIndex = same color
+        // layoutIndex 1 = main chain → color 0
+        // Others get unique colors based on layoutIndex
+        var liToColor: [Int: Int] = [:]
+        var nextColor = 1
+        func colorFor(_ li: Int, isMain: Bool) -> Int {
+            if isMain { return 0 }
+            if let c = liToColor[li] { return c }
+            let c = nextColor
+            nextColor += 1
+            liToColor[li] = c
+            return c
+        }
+
+        // Assign colors to all nodes first
+        for i in 0..<nodes.count {
+            let isMain = mainChain.contains(nodes[i].id)
+            nodes[i].colorIndex = colorFor(nodes[i].lane, isMain: isMain)
+        }
+
+        // Build edge list
         for (childRow, node) in nodes.enumerated() {
             for (pi, parentHash) in node.parents.enumerated() {
                 let parentRow: Int
-                let parentLane: Int
                 if let pr = hashToRow[parentHash] {
                     parentRow = pr
-                    parentLane = nodes[pr].lane
                 } else {
-                    // Parent not loaded yet — extend line to bottom.
-                    parentRow = nodes.count
-                    // Guess the lane: for first parent, same lane; for others, try to find reserved lane.
-                    parentLane = (pi == 0) ? node.lane : (node.lane + pi)
+                    parentRow = nodes.count  // not loaded
+                }
+                if parentRow <= childRow { continue }
+
+                // Edge layoutIndex: determines its position among active elements in each row.
+                // IDEA: first-parent edges are part of the child's chain (use childLI),
+                // merge edges are part of the side branch being merged (use parentLI).
+                let childLI = nodes[childRow].lane
+                let parentLI = parentRow < nodes.count ? nodes[parentRow].lane : childLI
+                let edgeLI = (pi == 0) ? childLI : parentLI
+                // Color: first-parent edges inherit child's color;
+                // merge edges (2nd+ parent) use parent's color (side branch color)
+                let ci: Int
+                if pi == 0 {
+                    ci = nodes[childRow].colorIndex
+                } else if parentRow < nodes.count {
+                    ci = nodes[parentRow].colorIndex
+                } else {
+                    ci = nodes[childRow].colorIndex
                 }
 
-                let span = parentRow - childRow
-                if span <= 0 { continue }
+                allEdges.append(EdgeInfo(childRow: childRow, parentRow: parentRow,
+                                        parentIndex: pi, layoutIndex: edgeLI, colorIndex: ci))
+            }
+        }
 
-                let childLane = node.lane
-                let ci = (pi == 0) ? node.colorIndex : (hashToRow[parentHash].map { nodes[$0].colorIndex } ?? node.colorIndex)
-                let sx = x(childLane)
-                let ex = x(parentLane)
+        // ── Phase 2: Determine column positions per row ──
+        //
+        // IDEA's key insight (from EdgesInRowGenerator.java):
+        // An edge from childRow to parentRow is only "active" (occupies a column)
+        // at STRICTLY INTERMEDIATE rows: childRow < r < parentRow.
+        // At the child and parent rows, the NODE itself handles the connection.
+        //
+        // For each row: sort(node + active_edges) by layoutIndex → position = column.
 
-                if childLane == parentLane {
-                    // Same lane → straight vertical line.
-                    for r in childRow..<min(parentRow + 1, nodes.count) {
-                        let yT: CGFloat = (r == childRow) ? rh / 2 : 0
-                        let yB: CGFloat = (r == parentRow) ? rh / 2 : rh
-                        nodes[r].segments.append(Segment(xTop: sx, yTop: yT, xBottom: sx, yBottom: yB, colorIndex: ci))
+        // Group edges by their first intermediate row for efficient sweep
+        var edgesByStartRow: [Int: [Int]] = [:]
+        for (ei, edge) in allEdges.enumerated() {
+            let firstIntermediate = edge.childRow + 1
+            let lastIntermediate = min(edge.parentRow - 1, nodes.count - 1)
+            if firstIntermediate <= lastIntermediate {
+                edgesByStartRow[firstIntermediate, default: []].append(ei)
+            }
+        }
+
+        var activeEdgeIndices = Set<Int>()
+        var nodeColumns: [Int] = Array(repeating: 0, count: nodes.count)
+        var edgeColumnAtRow: [[Int: Int]] = Array(repeating: [:], count: nodes.count)
+
+        // Clear segments
+        for i in 0..<nodes.count {
+            nodes[i].segments = []
+            nodes[i].arrows = []
+        }
+
+        for row in 0..<nodes.count {
+            // Add edges whose first intermediate row is this row
+            if let newEdges = edgesByStartRow[row] {
+                for ei in newEdges { activeEdgeIndices.insert(ei) }
+            }
+
+            // Build sorted elements for this row
+            // IDEA's GraphElementComparatorByLayoutIndex:
+            //   - Different layoutIndex: lower first
+            //   - Same layoutIndex, edge vs node: edge.childRow < node.row → edge first
+            //     (edges that started earlier occupy column, pushing nodes right)
+            struct RowElement: Comparable {
+                let layoutIndex: Int
+                let isNode: Bool
+                let edgeIndex: Int
+                let childRow: Int  // for edges: the child row; for nodes: current row
+
+                static func < (lhs: RowElement, rhs: RowElement) -> Bool {
+                    if lhs.layoutIndex != rhs.layoutIndex { return lhs.layoutIndex < rhs.layoutIndex }
+                    // Same layoutIndex: IDEA tiebreaker — edges started earlier go first
+                    if lhs.isNode != rhs.isNode {
+                        // edge vs node: compare edge.childRow with node.row
+                        let (edge, node) = lhs.isNode ? (rhs, lhs) : (lhs, rhs)
+                        if edge.childRow < node.childRow { return !lhs.isNode } // edge before node
+                        return lhs.isNode  // node before edge (edge started later)
                     }
-                } else if span == 1 {
-                    // Adjacent rows only: proportional straight diagonal from dot to dot.
-                    let totalH = rh  // center to center for 1 row span
-                    for r in childRow...min(parentRow, nodes.count - 1) {
-                        let yT: CGFloat = (r == childRow) ? rh / 2 : 0
-                        let yB: CGFloat = (r == parentRow) ? rh / 2 : rh
-                        let progT = (CGFloat(r - childRow) * rh + yT - rh / 2) / totalH
-                        let progB = (CGFloat(r - childRow) * rh + yB - rh / 2) / totalH
-                        let xT = sx + (ex - sx) * progT
-                        let xB = sx + (ex - sx) * progB
-                        nodes[r].segments.append(Segment(xTop: xT, yTop: yT, xBottom: xB, yBottom: yB, colorIndex: ci))
-                    }
-                } else if childLane < parentLane {
-                    // BRANCH-OFF (span > 1): proportional diagonal for first row-pair
-                    // (fold at child+1 commit dot), then vertical at target lane.
-                    let diagTotalH = rh
-                    let diagEnd = childRow + 1
-                    // Proportional diagonal: child dot → child+1 dot
-                    for r in childRow...min(diagEnd, nodes.count - 1) {
-                        let yT: CGFloat = (r == childRow) ? rh / 2 : 0
-                        let yB: CGFloat = (r == diagEnd) ? rh / 2 : rh
-                        let progT = (CGFloat(r - childRow) * rh + yT - rh / 2) / diagTotalH
-                        let progB = (CGFloat(r - childRow) * rh + yB - rh / 2) / diagTotalH
-                        let xT = sx + (ex - sx) * progT
-                        let xB = sx + (ex - sx) * progB
-                        nodes[r].segments.append(Segment(xTop: xT, yTop: yT, xBottom: xB, yBottom: yB, colorIndex: ci))
-                    }
-                    // Vertical at target lane from child+1 center to parent dot
-                    if diagEnd < parentRow, diagEnd < nodes.count {
-                        nodes[diagEnd].segments.append(Segment(xTop: ex, yTop: rh / 2, xBottom: ex, yBottom: rh, colorIndex: ci))
-                    }
-                    for r in (diagEnd + 1)..<min(parentRow + 1, nodes.count) {
-                        let yB: CGFloat = (r == parentRow) ? rh / 2 : rh
-                        nodes[r].segments.append(Segment(xTop: ex, yTop: 0, xBottom: ex, yBottom: yB, colorIndex: ci))
-                    }
+                    return lhs.childRow < rhs.childRow
+                }
+            }
+
+            var elements: [RowElement] = []
+            elements.append(RowElement(layoutIndex: nodes[row].lane, isNode: true, edgeIndex: -1, childRow: row))
+            for ei in activeEdgeIndices {
+                // IDEA: long edges are hidden in the middle — don't occupy a column
+                let e = allEdges[ei]
+                let clampedPR = min(e.parentRow, nodes.count - 1)
+                guard isEdgeVisibleInRow(childRow: e.childRow, parentRow: clampedPR, row: row) else { continue }
+                elements.append(RowElement(layoutIndex: e.layoutIndex, isNode: false, edgeIndex: ei, childRow: e.childRow))
+            }
+            elements.sort()
+
+            for (col, elem) in elements.enumerated() {
+                if elem.isNode {
+                    nodeColumns[row] = col
                 } else {
-                    // BRANCH-RETURN (span > 1): vertical at source lane, then
-                    // proportional diagonal for last row-pair (fold at parent-1 commit dot).
-                    let diagStart = parentRow - 1
-                    let diagTotalH = rh
-                    // Vertical at source lane from child dot to diagStart center
-                    nodes[childRow].segments.append(Segment(xTop: sx, yTop: rh / 2, xBottom: sx, yBottom: rh, colorIndex: ci))
-                    for r in (childRow + 1)..<min(diagStart, nodes.count) {
-                        nodes[r].segments.append(Segment(xTop: sx, yTop: 0, xBottom: sx, yBottom: rh, colorIndex: ci))
+                    edgeColumnAtRow[row][elem.edgeIndex] = col
+                }
+            }
+
+            // Remove edges whose last intermediate row is this row
+            activeEdgeIndices = activeEdgeIndices.filter { ei in
+                let lastInterm = min(allEdges[ei].parentRow - 1, nodes.count - 1)
+                return row < lastInterm
+            }
+        }
+
+        // Update node lanes to actual column positions
+        for i in 0..<nodes.count {
+            nodes[i].lane = nodeColumns[i]
+        }
+
+        // ── Phase 3: Generate segments via anchor-based polyline ──
+        //
+        // For each edge, build anchor points at each row's center (rh/2),
+        // then split into per-row half-segments that connect at row boundaries
+        // using midpoint x to ensure continuous lines.
+
+        for (ei, edge) in allEdges.enumerated() {
+            let ci = edge.colorIndex
+            let clampedParent = min(edge.parentRow, nodes.count - 1)
+            let span = clampedParent - edge.childRow
+            if span <= 0 { continue }
+
+            // Build anchor list: (row, xPosition) — only for VISIBLE rows
+            var anchors: [(row: Int, x: CGFloat)] = []
+            // First: child node dot
+            anchors.append((edge.childRow, xPos(nodeColumns[edge.childRow])))
+            // Intermediate: only visible edge column positions
+            for r in (edge.childRow + 1)..<clampedParent {
+                guard r < nodes.count else { break }
+                if !Self.isEdgeVisibleInRow(childRow: edge.childRow, parentRow: clampedParent, row: r) {
+                    continue  // skip hidden middle portion
+                }
+                let col = edgeColumnAtRow[r][ei] ?? nodeColumns[edge.childRow]
+                anchors.append((r, xPos(col)))
+            }
+            // Last: parent node dot (or last loaded row)
+            anchors.append((clampedParent, xPos(nodeColumns[clampedParent])))
+
+            // Generate half-row segments between consecutive anchors
+            for ai in 0..<(anchors.count - 1) {
+                let (rowA, xA) = anchors[ai]
+                let (rowB, xB) = anchors[ai + 1]
+                guard rowA < nodes.count else { continue }
+
+                if rowB == rowA + 1 {
+                    // Adjacent rows — draw connected half-segments
+                    let xMid = (xA + xB) / 2
+                    nodes[rowA].segments.append(Segment(
+                        xTop: xA, yTop: rh / 2, xBottom: xMid, yBottom: rh, colorIndex: ci))
+                    if rowB < nodes.count {
+                        nodes[rowB].segments.append(Segment(
+                            xTop: xMid, yTop: 0, xBottom: xB, yBottom: rh / 2, colorIndex: ci))
                     }
-                    if diagStart > childRow, diagStart < nodes.count {
-                        nodes[diagStart].segments.append(Segment(xTop: sx, yTop: 0, xBottom: sx, yBottom: rh / 2, colorIndex: ci))
-                    }
-                    // Proportional diagonal: diagStart dot → parent dot
-                    for r in max(diagStart, childRow)...min(parentRow, nodes.count - 1) {
-                        let yT: CGFloat = (r == diagStart) ? rh / 2 : 0
-                        let yB: CGFloat = (r == parentRow) ? rh / 2 : rh
-                        let progT = (CGFloat(r - diagStart) * rh + yT - rh / 2) / diagTotalH
-                        let progB = (CGFloat(r - diagStart) * rh + yB - rh / 2) / diagTotalH
-                        let xT = sx + (ex - sx) * progT
-                        let xB = sx + (ex - sx) * progB
-                        nodes[r].segments.append(Segment(xTop: xT, yTop: yT, xBottom: xB, yBottom: yB, colorIndex: ci))
-                    }
+                }
+                // else: gap in visibility (long edge break) — no segments drawn
+            }
+
+            // Add arrow indicators at long-edge break points
+            if span >= Self.longEdgeSize {
+                // Down arrow at child side (where edge disappears going down)
+                let downArrowRow = edge.childRow + Self.visiblePartSize
+                if downArrowRow < nodes.count {
+                    let col = edgeColumnAtRow[downArrowRow][ei] ?? nodeColumns[edge.childRow]
+                    nodes[downArrowRow].arrows.append(ArrowIndicator(
+                        x: xPos(col), y: rh, colorIndex: ci, isDown: true))
+                }
+                // Up arrow at parent side (where edge reappears going up)
+                let upArrowRow = clampedParent - Self.visiblePartSize
+                if upArrowRow >= 0 && upArrowRow < nodes.count {
+                    let col = edgeColumnAtRow[upArrowRow][ei] ?? nodeColumns[clampedParent]
+                    nodes[upArrowRow].arrows.append(ArrowIndicator(
+                        x: xPos(col), y: 0, colorIndex: ci, isDown: false))
                 }
             }
         }
@@ -358,6 +515,27 @@ struct BranchGraphView: View {
             p.move(to: .init(x: seg.xTop, y: seg.yTop))
             p.addLine(to: .init(x: seg.xBottom, y: seg.yBottom))
             ctx.stroke(p, with: .color(col(seg.colorIndex)), lineWidth: 2)
+        }
+        // Draw arrow indicators for long-span breaks
+        for arrow in node.arrows {
+            let color = col(arrow.colorIndex)
+            if arrow.isDown {
+                // Down arrow: ▼
+                var tri = Path()
+                tri.move(to: .init(x: arrow.x, y: arrow.y - 4))
+                tri.addLine(to: .init(x: arrow.x - 3.5, y: arrow.y - 8))
+                tri.addLine(to: .init(x: arrow.x + 3.5, y: arrow.y - 8))
+                tri.closeSubpath()
+                ctx.fill(tri, with: .color(color))
+            } else {
+                // Up arrow (continuation): ▲
+                var tri = Path()
+                tri.move(to: .init(x: arrow.x, y: arrow.y + 4))
+                tri.addLine(to: .init(x: arrow.x - 3.5, y: arrow.y + 8))
+                tri.addLine(to: .init(x: arrow.x + 3.5, y: arrow.y + 8))
+                tri.closeSubpath()
+                ctx.fill(tri, with: .color(color))
+            }
         }
         // Commit dot — all dots same size and color
         let dx = CGFloat(node.lane) * Self.laneW + Self.laneW / 2 + 4

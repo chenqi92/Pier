@@ -442,8 +442,9 @@ class GitViewModel: ObservableObject {
         hasMoreHistory = true
         laneState = LaneState()
 
-        // Phase 1: Fetch HEAD's first-parent chain (determines which commits stay at lane 0).
-        if let fpOutput = await runGit(["log", "--first-parent", "HEAD", "--format=%H"]) {
+        // Phase 1: Detect default branch and fetch its first-parent chain (lane 0).
+        let defaultBranch = await detectDefaultBranch()
+        if let fpOutput = await runGit(["log", "--first-parent", defaultBranch, "--format=%H"]) {
             laneState.mainChain = Set(fpOutput.split(separator: "\n").map(String.init))
         }
 
@@ -458,11 +459,43 @@ class GitViewModel: ObservableObject {
             return
         }
         var nodes = Self.parseCommitNodes(output)
-        laneState.assignLanes(&nodes)
-        LaneState.computeSegments(&nodes)
+        LaneState.computeIDEALayout(&nodes, mainChain: laneState.mainChain)
         graphNodes = nodes
         graphSkipCount = nodes.count
         hasMoreHistory = nodes.count >= graphPageSize
+    }
+
+    /// Detect the default branch ref for correct main-chain identification.
+    /// Returns a ref that is guaranteed to work with `git log --first-parent`.
+    private func detectDefaultBranch() async -> String {
+        // Strategy 1: git symbolic-ref refs/remotes/origin/HEAD → refs/remotes/origin/master
+        // Use the full remote-tracking ref (origin/master) not just the branch name
+        if let symRef = await runGit(["symbolic-ref", "refs/remotes/origin/HEAD"]) {
+            let trimmed = symRef.trimmingCharacters(in: .whitespacesAndNewlines)
+            // e.g. "refs/remotes/origin/master" → use "origin/master"
+            if trimmed.hasPrefix("refs/remotes/") {
+                let shortRef = String(trimmed.dropFirst("refs/remotes/".count))
+                // Validate the ref exists
+                if !shortRef.isEmpty,
+                   let _ = await runGit(["rev-parse", "--verify", shortRef]) {
+                    return shortRef
+                }
+            }
+        }
+        // Strategy 2: Try remote-tracking branches directly
+        for ref in ["origin/master", "origin/main"] {
+            if let _ = await runGit(["rev-parse", "--verify", ref]) {
+                return ref
+            }
+        }
+        // Strategy 3: Try local branches
+        for ref in ["master", "main"] {
+            if let _ = await runGit(["rev-parse", "--verify", ref]) {
+                return ref
+            }
+        }
+        // Fallback: use HEAD
+        return "HEAD"
     }
 
     func loadMoreGraphHistory() async {
@@ -479,10 +512,9 @@ class GitViewModel: ObservableObject {
             return
         }
         var nodes = Self.parseCommitNodes(output)
-        laneState.assignLanes(&nodes)
         var allNodes = graphNodes
         allNodes.append(contentsOf: nodes)
-        LaneState.computeSegments(&allNodes)
+        LaneState.computeIDEALayout(&allNodes, mainChain: laneState.mainChain)
         graphNodes = allNodes
         graphSkipCount += nodes.count
         hasMoreHistory = nodes.count >= graphPageSize
