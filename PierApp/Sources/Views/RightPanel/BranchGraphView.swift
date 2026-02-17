@@ -140,6 +140,25 @@ struct LaneState {
         try? debugLines.joined(separator: "\n").write(toFile: "/tmp/pier_graph_debug.txt", atomically: true, encoding: .utf8)
     }
 
+    /// Write Phase 3 debug info (arrows and long edges) after computation
+    static func writePhase3Debug(_ nodes: [CommitNode], allEdges: [(childRow: Int, parentRow: Int, span: Int, ci: Int)]) {
+        var lines: [String] = ["=== PHASE 3 DEBUG ==="]
+        // Dump all long edges (span >= longEdgeSize)
+        for (i, e) in allEdges.enumerated() {
+            if e.span >= longEdgeSize {
+                lines.append("LONG_EDGE[\(i)] child=r\(e.childRow) parent=r\(e.parentRow) span=\(e.span) ci=\(e.ci)")
+            }
+        }
+        // Dump arrow counts per row (only rows with arrows)
+        for (i, n) in nodes.enumerated() {
+            if !n.arrows.isEmpty {
+                let desc = n.arrows.map { "(\($0.isDown ? "↓" : "↑") x=\(Int($0.x)) ci=\($0.colorIndex))" }.joined(separator: " ")
+                lines.append("ARROWS r\(i) count=\(n.arrows.count) \(desc) \(String(n.message.prefix(40)))")
+            }
+        }
+        try? lines.joined(separator: "\n").write(toFile: "/tmp/pier_arrow_debug.txt", atomically: true, encoding: .utf8)
+    }
+
     // ── Phase 2 & 3: Active edges + dynamic per-row column positions ──
 
     /// Represents an edge from child row to parent row, carrying a layoutIndex for sorting
@@ -444,6 +463,10 @@ struct LaneState {
                 }
             }
         }
+
+        // Debug: write arrow info
+        let edgeDebug = allEdges.map { (childRow: $0.childRow, parentRow: $0.parentRow, span: min($0.parentRow, nodes.count - 1) - $0.childRow, ci: $0.colorIndex) }
+        writePhase3Debug(nodes, allEdges: edgeDebug)
     }
 }
 
