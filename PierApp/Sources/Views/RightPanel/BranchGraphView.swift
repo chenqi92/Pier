@@ -145,7 +145,7 @@ struct LaneState {
         var lines: [String] = ["=== PHASE 3 DEBUG ==="]
         // Dump all long edges (span >= longEdgeSize)
         for (i, e) in allEdges.enumerated() {
-            if e.span >= longEdgeSize {
+            if e.span >= 30 {  // threshold for debug output
                 lines.append("LONG_EDGE[\(i)] child=r\(e.childRow) parent=r\(e.parentRow) span=\(e.span) ci=\(e.ci)")
             }
         }
@@ -179,35 +179,63 @@ struct LaneState {
 
     /// Compute dynamic column positions for all nodes and generate segments.
     /// This replaces both `assignLanes` and `computeSegments`.
+    //
     // IDEA's long-edge constants (from PrintElementGeneratorImpl.kt)
-    static let longEdgeSize = 30       // edges >= this span get hidden in the middle
-    static let visiblePartSize = 1     // show this many rows near each endpoint
+    // Two modes (controlled by showLongEdges):
+    //   showLongEdges=true  → longEdgeSize=1000, visiblePartSize=250, edgeWithArrowSize=30
+    //   showLongEdges=false → longEdgeSize=30,   visiblePartSize=1,   edgeWithArrowSize=MAX
 
     /// Whether an edge is visible (occupies a column) at the given row.
     /// Long edges (span >= longEdgeSize) are hidden in the middle — only visible
     /// within `visiblePartSize` rows of each endpoint.
-    static func isEdgeVisibleInRow(childRow: Int, parentRow: Int, row: Int) -> Bool {
+    /// Edges with arrows (span >= edgeWithArrowSize) are also truncated — only visible
+    /// within 1 row of each endpoint (matching arrow placement).
+    static func isEdgeVisibleInRow(childRow: Int, parentRow: Int, row: Int,
+                                    longEdgeSize: Int, visiblePartSize: Int,
+                                    edgeWithArrowSize: Int) -> Bool {
         let span = parentRow - childRow
-        if span < longEdgeSize { return true }
-        let upOffset = row - childRow       // distance from child end
-        let downOffset = parentRow - row    // distance from parent end
-        return upOffset <= visiblePartSize || downOffset <= visiblePartSize
+        // Rule 1: long-edge truncation
+        if span >= longEdgeSize {
+            let upOffset = row - childRow
+            let downOffset = parentRow - row
+            return upOffset <= visiblePartSize || downOffset <= visiblePartSize
+        }
+        // Rule 2: arrow-edge truncation — edge only visible within 1 row of each endpoint
+        if span >= edgeWithArrowSize {
+            let upOffset = row - childRow
+            let downOffset = parentRow - row
+            return upOffset <= 1 || downOffset <= 1
+        }
+        return true
     }
 
     /// Returns the arrow type at the given row, if any.
-    /// A down-arrow appears at the row where the edge becomes hidden from the child side.
-    /// An up-arrow appears at the row where the edge becomes visible from the parent side.
-    static func arrowType(childRow: Int, parentRow: Int, row: Int) -> Bool? {
+    /// Dual-rule system (IDEA's PrintElementGeneratorImpl.getArrowType):
+    ///  Rule 1: span >= longEdgeSize   → arrows at visiblePartSize offset (break arrows)
+    ///  Rule 2: span >= edgeWithArrowSize → arrows at offset 1 (visible-edge arrows)
+    static func arrowType(childRow: Int, parentRow: Int, row: Int,
+                          longEdgeSize: Int, visiblePartSize: Int, edgeWithArrowSize: Int) -> Bool? {
         let span = parentRow - childRow
-        if span < longEdgeSize { return nil }
         let upOffset = row - childRow
         let downOffset = parentRow - row
-        if upOffset == visiblePartSize { return true }    // down arrow ↓
-        if downOffset == visiblePartSize { return false } // up arrow ↑
+        // Rule 1: long-edge break arrows
+        if span >= longEdgeSize {
+            if upOffset == visiblePartSize { return true }    // down arrow ↓
+            if downOffset == visiblePartSize { return false } // up arrow ↑
+        }
+        // Rule 2: visible-edge arrows (edges spanning ≥ edgeWithArrowSize rows)
+        if span >= edgeWithArrowSize {
+            if upOffset == 1 { return true }    // down arrow ↓ near child
+            if downOffset == 1 { return false } // up arrow ↑ near parent
+        }
         return nil
     }
 
-    static func computeIDEALayout(_ nodes: inout [CommitNode], mainChain: Set<String>) {
+    static func computeIDEALayout(_ nodes: inout [CommitNode], mainChain: Set<String>, showLongEdges: Bool = true) {
+        // Derive mode-specific constants
+        let longEdgeSize = showLongEdges ? 1000 : 30
+        let visiblePartSize = showLongEdges ? 250 : 1
+        let edgeWithArrowSize = showLongEdges ? 30 : Int.max
         guard !nodes.isEmpty else { return }
 
         // Phase 1: Assign layoutIndex
@@ -259,7 +287,7 @@ struct LaneState {
                 if let pr = hashToRow[parentHash] {
                     parentRow = pr
                 } else {
-                    continue  // parent not loaded — skip edge (IDEA only processes loaded edges)
+                    continue  // parent not loaded — skip edge
                 }
                 if parentRow <= childRow { continue }
 
@@ -372,7 +400,9 @@ struct LaneState {
             for ei in activeEdgeIndices {
                 let e = allEdges[ei]
                 let clampedPR = min(e.parentRow, nodes.count - 1)
-                guard Self.isEdgeVisibleInRow(childRow: e.childRow, parentRow: clampedPR, row: row) else { continue }
+                guard Self.isEdgeVisibleInRow(childRow: e.childRow, parentRow: clampedPR, row: row,
+                                              longEdgeSize: longEdgeSize, visiblePartSize: visiblePartSize,
+                                              edgeWithArrowSize: edgeWithArrowSize) else { continue }
                 elements.append(RowElement(isNode: false, edgeIndex: ei, upLI: e.upLI,
                                            downLI: e.downLI, upRow: e.childRow, downRow: e.parentRow))
             }
@@ -417,7 +447,9 @@ struct LaneState {
             // Intermediate: only visible edge column positions
             for r in (edge.childRow + 1)..<clampedParent {
                 guard r < nodes.count else { break }
-                if !Self.isEdgeVisibleInRow(childRow: edge.childRow, parentRow: clampedParent, row: r) {
+                if !Self.isEdgeVisibleInRow(childRow: edge.childRow, parentRow: clampedParent, row: r,
+                                            longEdgeSize: longEdgeSize, visiblePartSize: visiblePartSize,
+                                            edgeWithArrowSize: edgeWithArrowSize) {
                     continue  // skip hidden middle portion
                 }
                 let col = edgeColumnAtRow[r][ei] ?? nodeColumns[edge.childRow]
@@ -445,21 +477,41 @@ struct LaneState {
                 // else: gap in visibility (long edge break) — no segments drawn
             }
 
-            // Add arrow indicators at long-edge break points
-            if span >= Self.longEdgeSize {
-                // Down arrow at child side (where edge disappears going down)
-                let downArrowRow = edge.childRow + Self.visiblePartSize
+            // Add arrow indicators — dual-rule system
+            // Rule 1: Long-edge break arrows (span >= longEdgeSize)
+            if span >= longEdgeSize {
+                let downArrowRow = edge.childRow + visiblePartSize
                 if downArrowRow < nodes.count {
                     let col = edgeColumnAtRow[downArrowRow][ei] ?? nodeColumns[edge.childRow]
                     nodes[downArrowRow].arrows.append(ArrowIndicator(
                         x: xPos(col), y: rh, colorIndex: ci, isDown: true))
                 }
-                // Up arrow at parent side (where edge reappears going up)
-                let upArrowRow = clampedParent - Self.visiblePartSize
+                let upArrowRow = clampedParent - visiblePartSize
                 if upArrowRow >= 0 && upArrowRow < nodes.count {
                     let col = edgeColumnAtRow[upArrowRow][ei] ?? nodeColumns[clampedParent]
                     nodes[upArrowRow].arrows.append(ArrowIndicator(
                         x: xPos(col), y: 0, colorIndex: ci, isDown: false))
+                }
+            }
+            // Rule 2: Visible-edge arrows (edges spanning >= edgeWithArrowSize rows)
+            // Both rules are independent — an edge can have both break and visible arrows
+            if span >= edgeWithArrowSize {
+                // Down arrow at offset 1 from child (on the edge line going down)
+                let downRow = edge.childRow + 1
+                if downRow < nodes.count {
+                    let col = edgeColumnAtRow[downRow][ei] ?? nodeColumns[edge.childRow]
+                    // Place arrow at mid-height of the row, on the edge
+                    nodes[downRow].arrows.append(ArrowIndicator(
+                        x: xPos(col), y: rh / 2, colorIndex: ci, isDown: true))
+                }
+                // Up arrow at offset 1 from parent (only if parent is loaded)
+                if edge.parentRow < nodes.count {
+                    let upRow = clampedParent - 1
+                    if upRow >= 0 && upRow < nodes.count {
+                        let col = edgeColumnAtRow[upRow][ei] ?? nodeColumns[clampedParent]
+                        nodes[upRow].arrows.append(ArrowIndicator(
+                            x: xPos(col), y: rh / 2, colorIndex: ci, isDown: false))
+                    }
                 }
             }
         }
@@ -496,6 +548,8 @@ struct BranchGraphView: View {
     @State private var diffPath = ""
     @State private var diffAdd = 0
     @State private var diffDel = 0
+    @State private var showingPathPicker = false
+    @State private var pathPickerSelection: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -515,15 +569,39 @@ struct BranchGraphView: View {
             } else { scrollContent }
         }
         .sheet(isPresented: $showingDiff) { diffSheet }
+        .sheet(isPresented: $showingPathPicker) { pathPickerSheet }
     }
 
-    private var branchFilterBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
+    // MARK: - IDEA-Style Toolbar
 
-            Menu {
+    private var branchFilterBar: some View {
+        HStack(spacing: 4) {
+            // ── Search field ──
+            HStack(spacing: 3) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                TextField(LS("git.searchPlaceholder"), text: $gitViewModel.graphSearchText)
+                    .font(.system(size: 10))
+                    .textFieldStyle(.plain)
+                    .frame(minWidth: 80, maxWidth: 140)
+                    .onSubmit { Task { await gitViewModel.loadGraphHistory() } }
+                if !gitViewModel.graphSearchText.isEmpty {
+                    Button { gitViewModel.graphSearchText = ""; Task { await gitViewModel.loadGraphHistory() } } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 8)).foregroundColor(.secondary)
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .textBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
+
+            // ── Branch dropdown ──
+            filterDropdown(
+                label: gitViewModel.graphFilterBranch ?? LS("git.allBranches"),
+                icon: "arrow.triangle.branch"
+            ) {
                 Button {
                     if gitViewModel.graphFilterBranch != nil {
                         gitViewModel.graphFilterBranch = nil
@@ -532,14 +610,10 @@ struct BranchGraphView: View {
                 } label: {
                     HStack {
                         Text(LS("git.allBranches"))
-                        if gitViewModel.graphFilterBranch == nil {
-                            Image(systemName: "checkmark")
-                        }
+                        if gitViewModel.graphFilterBranch == nil { Image(systemName: "checkmark") }
                     }
                 }
-
                 Divider()
-
                 ForEach(gitViewModel.graphBranches, id: \.self) { branch in
                     Button {
                         if gitViewModel.graphFilterBranch != branch {
@@ -549,29 +623,240 @@ struct BranchGraphView: View {
                     } label: {
                         HStack {
                             Text(branch)
-                            if gitViewModel.graphFilterBranch == branch {
-                                Image(systemName: "checkmark")
-                            }
+                            if gitViewModel.graphFilterBranch == branch { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            }
+
+            // ── User dropdown ──
+            filterDropdown(
+                label: gitViewModel.graphFilterUser ?? LS("git.user"),
+                icon: "person"
+            ) {
+                Button {
+                    if gitViewModel.graphFilterUser != nil {
+                        gitViewModel.graphFilterUser = nil
+                        Task { await gitViewModel.loadGraphHistory() }
+                    }
+                } label: {
+                    HStack {
+                        Text(LS("git.allUsers"))
+                        if gitViewModel.graphFilterUser == nil { Image(systemName: "checkmark") }
+                    }
+                }
+                Divider()
+                ForEach(gitViewModel.graphAuthors, id: \.self) { author in
+                    Button {
+                        if gitViewModel.graphFilterUser != author {
+                            gitViewModel.graphFilterUser = author
+                            Task { await gitViewModel.loadGraphHistory() }
+                        }
+                    } label: {
+                        HStack {
+                            Text(author)
+                            if gitViewModel.graphFilterUser == author { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            }
+
+            // ── Date dropdown ──
+            filterDropdown(
+                label: dateRangeLabel(gitViewModel.graphFilterDateRange),
+                icon: "calendar"
+            ) {
+                ForEach(GraphDateRange.allCases, id: \.self) { range in
+                    Button {
+                        if gitViewModel.graphFilterDateRange != range {
+                            gitViewModel.graphFilterDateRange = range
+                            Task { await gitViewModel.loadGraphHistory() }
+                        }
+                    } label: {
+                        HStack {
+                            Text(dateRangeLabel(range))
+                            if gitViewModel.graphFilterDateRange == range { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            }
+
+            // ── Path button (opens tree picker sheet) ──
+            Button {
+                Task {
+                    await gitViewModel.fetchRepoFiles()
+                    // Initialize selection from current filter
+                    if let current = gitViewModel.graphFilterPath {
+                        pathPickerSelection = Set(current.components(separatedBy: "\n").filter { !$0.isEmpty })
+                    } else {
+                        pathPickerSelection = []
+                    }
+                    showingPathPicker = true
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 8))
+                        .foregroundColor(.secondary)
+                    Text(gitViewModel.graphFilterPath != nil ? String(gitViewModel.graphFilterPath!.prefix(20)) : LS("git.path"))
+                        .font(.system(size: 10, weight: .medium))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 4).fill(
+                    gitViewModel.graphFilterPath != nil
+                        ? Color.accentColor.opacity(0.15)
+                        : Color(nsColor: .controlColor)
+                ))
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            // Clear path filter button
+            if gitViewModel.graphFilterPath != nil {
+                Button {
+                    gitViewModel.graphFilterPath = nil
+                    Task { await gitViewModel.loadGraphHistory() }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+
+            // ── Settings gear menu ──
+            Menu {
+                // Sort section
+                Section(LS("git.sort")) {
+                    Button {
+                        if !gitViewModel.graphSortByDate {
+                            gitViewModel.graphSortByDate = true
+                            Task { await gitViewModel.loadGraphHistory() }
+                        }
+                    } label: {
+                        HStack {
+                            Text(LS("git.sortByDate"))
+                            if gitViewModel.graphSortByDate { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button {
+                        if gitViewModel.graphSortByDate {
+                            gitViewModel.graphSortByDate = false
+                            Task { await gitViewModel.loadGraphHistory() }
+                        }
+                    } label: {
+                        HStack {
+                            Text(LS("git.sortByTopo"))
+                            if !gitViewModel.graphSortByDate { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Options section
+                Section(LS("git.options")) {
+                    Button {
+                        gitViewModel.graphFirstParentOnly.toggle()
+                        Task { await gitViewModel.loadGraphHistory() }
+                    } label: {
+                        HStack {
+                            Text(LS("git.firstParent"))
+                            if gitViewModel.graphFirstParentOnly { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button {
+                        gitViewModel.graphNoMerges.toggle()
+                        Task { await gitViewModel.loadGraphHistory() }
+                    } label: {
+                        HStack {
+                            Text(LS("git.noMerges"))
+                            if gitViewModel.graphNoMerges { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Branch operations section
+                Section(LS("git.branchOps")) {
+                    Button {
+                        if gitViewModel.showLongEdges {
+                            gitViewModel.showLongEdges = false
+                            Task { await gitViewModel.loadGraphHistory() }
+                        }
+                    } label: {
+                        HStack {
+                            Text(LS("git.collapseLin"))
+                            if !gitViewModel.showLongEdges { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button {
+                        if !gitViewModel.showLongEdges {
+                            gitViewModel.showLongEdges = true
+                            Task { await gitViewModel.loadGraphHistory() }
+                        }
+                    } label: {
+                        HStack {
+                            Text(LS("git.expandLin"))
+                            if gitViewModel.showLongEdges { Image(systemName: "checkmark") }
                         }
                     }
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Text(gitViewModel.graphFilterBranch ?? LS("git.allBranches"))
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(.secondary)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .controlColor)))
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .padding(3)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+        }
+    }
 
-            Spacer()
+    // MARK: - Toolbar Helpers
+
+    /// Reusable dropdown button builder for filter menus.
+    private func filterDropdown<Content: View>(
+        label: String, icon: String, @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        Menu {
+            content()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 8))
+                    .foregroundColor(.secondary)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .controlColor)))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    /// Display label for a date range.
+    private func dateRangeLabel(_ range: GraphDateRange) -> String {
+        switch range {
+        case .all: return LS("git.date")
+        case .today: return LS("git.today")
+        case .lastWeek: return LS("git.lastWeek")
+        case .lastMonth: return LS("git.lastMonth")
+        case .lastYear: return LS("git.lastYear")
         }
     }
 
@@ -637,25 +922,27 @@ struct BranchGraphView: View {
             p.addLine(to: .init(x: seg.xBottom, y: seg.yBottom))
             ctx.stroke(p, with: .color(col(seg.colorIndex)), lineWidth: 2)
         }
-        // Draw arrow indicators for long-span breaks
+        // Draw IDEA-style chevron arrow indicators (open "V" shape)
         for arrow in node.arrows {
             let color = col(arrow.colorIndex)
+            let armLen: CGFloat = 4.5     // arm length of the chevron
+            let halfW: CGFloat = 3.0      // horizontal half-width
             if arrow.isDown {
-                // Down arrow: ▼
-                var tri = Path()
-                tri.move(to: .init(x: arrow.x, y: arrow.y - 4))
-                tri.addLine(to: .init(x: arrow.x - 3.5, y: arrow.y - 8))
-                tri.addLine(to: .init(x: arrow.x + 3.5, y: arrow.y - 8))
-                tri.closeSubpath()
-                ctx.fill(tri, with: .color(color))
+                // Down chevron: ˅ — tip points downward
+                let tipY = arrow.y
+                var chev = Path()
+                chev.move(to: .init(x: arrow.x - halfW, y: tipY - armLen))
+                chev.addLine(to: .init(x: arrow.x, y: tipY))
+                chev.addLine(to: .init(x: arrow.x + halfW, y: tipY - armLen))
+                ctx.stroke(chev, with: .color(color), lineWidth: 1.5)
             } else {
-                // Up arrow (continuation): ▲
-                var tri = Path()
-                tri.move(to: .init(x: arrow.x, y: arrow.y + 4))
-                tri.addLine(to: .init(x: arrow.x - 3.5, y: arrow.y + 8))
-                tri.addLine(to: .init(x: arrow.x + 3.5, y: arrow.y + 8))
-                tri.closeSubpath()
-                ctx.fill(tri, with: .color(color))
+                // Up chevron: ˄ — tip points upward
+                let tipY = arrow.y
+                var chev = Path()
+                chev.move(to: .init(x: arrow.x - halfW, y: tipY + armLen))
+                chev.addLine(to: .init(x: arrow.x, y: tipY))
+                chev.addLine(to: .init(x: arrow.x + halfW, y: tipY + armLen))
+                ctx.stroke(chev, with: .color(color), lineWidth: 1.5)
             }
         }
         // Commit dot — all dots same size and color
@@ -778,5 +1065,199 @@ struct BranchGraphView: View {
         if selectedHash == hash { selectedHash = nil; selectedDetail = nil; return }
         selectedHash = hash
         Task { selectedDetail = await gitViewModel.loadCommitDetail(hash: hash) }
+    }
+
+    // MARK: - Path Picker Sheet (IDEA-Style File Tree)
+
+    private var pathPickerSheet: some View {
+        VStack(spacing: 0) {
+            // Title bar
+            HStack {
+                Text(LS("git.selectPaths"))
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            // Tree content
+            let tree = FileTreeNode.buildTree(from: gitViewModel.graphRepoFiles)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(tree) { node in
+                        fileTreeRow(node: node, depth: 0)
+                    }
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+            }
+            .frame(minHeight: 300, maxHeight: 500)
+            .background(Color(nsColor: .textBackgroundColor))
+
+            Divider()
+
+            // Bottom buttons
+            HStack {
+                Spacer()
+                Button(LS("sftp.cancel")) {
+                    showingPathPicker = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button(LS("git.confirm")) {
+                    if pathPickerSelection.isEmpty {
+                        gitViewModel.graphFilterPath = nil
+                    } else {
+                        gitViewModel.graphFilterPath = pathPickerSelection.sorted().joined(separator: "\n")
+                    }
+                    showingPathPicker = false
+                    Task { await gitViewModel.loadGraphHistory() }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .frame(width: 500, height: 500)
+    }
+
+    private func fileTreeRow(node: FileTreeNode, depth: Int) -> AnyView {
+        if node.children.isEmpty {
+            // Leaf file
+            let isSelected = pathPickerSelection.contains(node.fullPath)
+            return AnyView(
+                Button {
+                    if isSelected {
+                        pathPickerSelection.remove(node.fullPath)
+                    } else {
+                        pathPickerSelection.insert(node.fullPath)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 11))
+                            .foregroundColor(isSelected ? .accentColor : .secondary)
+                        Image(systemName: "doc")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        Text(node.name)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(.leading, CGFloat(depth) * 16 + 4)
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            )
+        } else {
+            // Directory with children
+            let dirSelected = isDirectorySelected(node)
+            let partiallySelected = isDirectoryPartiallySelected(node)
+            return AnyView(
+                DisclosureGroup {
+                    ForEach(node.children) { child in
+                        fileTreeRow(node: child, depth: depth + 1)
+                    }
+                } label: {
+                    Button {
+                        toggleDirectorySelection(node)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: dirSelected ? "checkmark.square.fill" : (partiallySelected ? "minus.square" : "square"))
+                                .font(.system(size: 11))
+                                .foregroundColor(dirSelected || partiallySelected ? .accentColor : .secondary)
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.blue)
+                            Text(node.name)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.leading, CGFloat(depth) * 16)
+            )
+        }
+    }
+
+    private func allLeafPaths(_ node: FileTreeNode) -> [String] {
+        if node.children.isEmpty { return [node.fullPath] }
+        return node.children.flatMap { allLeafPaths($0) }
+    }
+
+    private func isDirectorySelected(_ node: FileTreeNode) -> Bool {
+        let paths = allLeafPaths(node)
+        return !paths.isEmpty && paths.allSatisfy { pathPickerSelection.contains($0) }
+    }
+
+    private func isDirectoryPartiallySelected(_ node: FileTreeNode) -> Bool {
+        let paths = allLeafPaths(node)
+        return paths.contains { pathPickerSelection.contains($0) } && !isDirectorySelected(node)
+    }
+
+    private func toggleDirectorySelection(_ node: FileTreeNode) {
+        let paths = allLeafPaths(node)
+        if isDirectorySelected(node) {
+            for p in paths { pathPickerSelection.remove(p) }
+        } else {
+            for p in paths { pathPickerSelection.insert(p) }
+        }
+    }
+}
+
+// MARK: - File Tree Node
+
+/// Hierarchical tree node built from flat git file paths.
+final class FileTreeNode: Identifiable, ObservableObject {
+    let id = UUID()
+    let name: String
+    let fullPath: String
+    var children: [FileTreeNode] = []
+
+    init(name: String, fullPath: String) {
+        self.name = name
+        self.fullPath = fullPath
+    }
+
+    /// Build a hierarchical tree from a sorted list of relative file paths.
+    static func buildTree(from paths: [String]) -> [FileTreeNode] {
+        let root = FileTreeNode(name: "", fullPath: "")
+        for path in paths {
+            let components = path.split(separator: "/").map(String.init)
+            var current = root
+            var accumulated = ""
+            for (i, comp) in components.enumerated() {
+                accumulated = accumulated.isEmpty ? comp : accumulated + "/" + comp
+                if let existing = current.children.first(where: { $0.name == comp }) {
+                    current = existing
+                } else {
+                    let node = FileTreeNode(name: comp, fullPath: accumulated)
+                    current.children.append(node)
+                    current = node
+                    // Only leaf nodes are files; intermediate are dirs
+                    if i < components.count - 1 {
+                        // This is a directory node — it might get children later
+                    }
+                }
+            }
+        }
+        // Sort: directories first, then files, alphabetically within each group
+        func sortChildren(_ node: FileTreeNode) {
+            node.children.sort { a, b in
+                let aDir = !a.children.isEmpty
+                let bDir = !b.children.isEmpty
+                if aDir != bDir { return aDir }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+            node.children.forEach { sortChildren($0) }
+        }
+        sortChildren(root)
+        return root.children
     }
 }

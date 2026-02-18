@@ -375,6 +375,28 @@
 "git.branchGraph" = "分支图";
 "git.noGraph" = "无图数据";
 "git.allBranches" = "所有分支";
+"git.searchPlaceholder" = "文本或哈希";
+"git.user" = "用户";
+"git.date" = "日期";
+"git.path" = "路径";
+"git.allUsers" = "所有用户";
+"git.allDates" = "所有日期";
+"git.allPaths" = "所有路径";
+"git.today" = "今天";
+"git.lastWeek" = "最近一周";
+"git.lastMonth" = "最近一月";
+"git.lastYear" = "最近一年";
+"git.sort" = "排序";
+"git.sortByDate" = "按提交日期";
+"git.sortByTopo" = "以拓扑方式";
+"git.options" = "选项";
+"git.firstParent" = "第一个父项";
+"git.noMerges" = "无合并";
+"git.branchOps" = "分支操作";
+"git.collapseLin" = "收起线性分支";
+"git.expandLin" = "展开线性分支";
+"git.selectPaths" = "选择要筛选的路径";
+"git.confirm" = "确定";
 
 // MARK: - Batch 6: PostgreSQL
 

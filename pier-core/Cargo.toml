@@ -39,6 +39,9 @@ anyhow = "1"
 # Crypto
 ring = "0.17"
 
+# Git (libgit2)
+git2 = "0.19"
+
 # C FFI
 libc = "0.2"
 

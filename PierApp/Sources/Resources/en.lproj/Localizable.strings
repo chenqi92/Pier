@@ -375,6 +375,28 @@
 "git.branchGraph" = "Branch Graph";
 "git.noGraph" = "No graph data";
 "git.allBranches" = "All Branches";
+"git.searchPlaceholder" = "Text or Hash";
+"git.user" = "User";
+"git.date" = "Date";
+"git.path" = "Path";
+"git.allUsers" = "All Users";
+"git.allDates" = "All Dates";
+"git.allPaths" = "All Paths";
+"git.today" = "Today";
+"git.lastWeek" = "Last Week";
+"git.lastMonth" = "Last Month";
+"git.lastYear" = "Last Year";
+"git.sort" = "Sort";
+"git.sortByDate" = "By Commit Date";
+"git.sortByTopo" = "By Topology";
+"git.options" = "Options";
+"git.firstParent" = "First Parent";
+"git.noMerges" = "No Merges";
+"git.branchOps" = "Branch Operations";
+"git.collapseLin" = "Collapse Linear";
+"git.expandLin" = "Expand Linear";
+"git.selectPaths" = "Select Paths to Filter";
+"git.confirm" = "OK";
 
 // MARK: - Batch 6: PostgreSQL
 

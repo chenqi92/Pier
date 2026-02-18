@@ -520,6 +520,208 @@ pub extern "C" fn pier_ssh_list_forwards(handle: PierSshHandle) -> *mut c_char {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Git Graph FFI — direct .git access via libgit2
+// ═══════════════════════════════════════════════════════════
+
+use crate::git_graph;
+
+/// Load commit graph data. Returns JSON string.
+/// Caller must free with pier_string_free.
+///
+/// Parameters:
+/// - repo_path: path to the Git repository
+/// - limit: max commits to return
+/// - skip: number of commits to skip (for pagination)
+/// - branch: branch name filter (null = all branches)
+/// - author: author name filter (null = no filter)
+/// - search_text: text to grep in commit messages (null = no filter)
+/// - after_timestamp: unix timestamp for date filter (0 = no filter)
+/// - topo_order: true for topological sort
+/// - first_parent: true for first-parent only
+/// - no_merges: true to exclude merge commits
+/// - paths: newline-separated list of paths to filter by (null = no filter)
+#[no_mangle]
+pub extern "C" fn pier_git_graph_log(
+    repo_path: *const c_char,
+    limit: u32,
+    skip: u32,
+    branch: *const c_char,
+    author: *const c_char,
+    search_text: *const c_char,
+    after_timestamp: i64,
+    topo_order: bool,
+    first_parent: bool,
+    no_merges: bool,
+    paths: *const c_char,
+) -> *mut c_char {
+    if repo_path.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let repo_str = unsafe { CStr::from_ptr(repo_path).to_str().unwrap_or("") };
+    let branch_opt = if branch.is_null() { None } else {
+        unsafe { CStr::from_ptr(branch).to_str().ok().map(|s| s.to_string()) }
+    };
+    let author_opt = if author.is_null() { None } else {
+        unsafe { CStr::from_ptr(author).to_str().ok().map(|s| s.to_string()) }
+    };
+    let search_opt = if search_text.is_null() { None } else {
+        unsafe { CStr::from_ptr(search_text).to_str().ok().map(|s| s.to_string()) }
+    };
+    let path_list = if paths.is_null() { Vec::new() } else {
+        unsafe { CStr::from_ptr(paths).to_str().unwrap_or("") }
+            .split('\n')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    let filter = git_graph::GraphFilter {
+        branch: branch_opt,
+        author: author_opt,
+        search_text: search_opt,
+        after_timestamp,
+        topo_order,
+        first_parent_only: first_parent,
+        no_merges,
+        paths: path_list,
+    };
+
+    match git_graph::graph_log(repo_str, limit as usize, skip as usize, &filter) {
+        Ok(commits) => {
+            match serde_json::to_string(&commits) {
+                Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        Err(e) => {
+            log::error!("pier_git_graph_log failed: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Get first-parent chain hashes. Returns JSON array of strings.
+/// Caller must free with pier_string_free.
+#[no_mangle]
+pub extern "C" fn pier_git_first_parent_chain(
+    repo_path: *const c_char,
+    ref_name: *const c_char,
+    limit: u32,
+) -> *mut c_char {
+    if repo_path.is_null() || ref_name.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let repo_str = unsafe { CStr::from_ptr(repo_path).to_str().unwrap_or("") };
+    let ref_str = unsafe { CStr::from_ptr(ref_name).to_str().unwrap_or("HEAD") };
+
+    match git_graph::first_parent_chain(repo_str, ref_str, limit as usize) {
+        Ok(hashes) => {
+            match serde_json::to_string(&hashes) {
+                Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        Err(e) => {
+            log::error!("pier_git_first_parent_chain failed: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// List all branches (local + remote). Returns JSON array of strings.
+/// Caller must free with pier_string_free.
+#[no_mangle]
+pub extern "C" fn pier_git_list_branches(repo_path: *const c_char) -> *mut c_char {
+    if repo_path.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let repo_str = unsafe { CStr::from_ptr(repo_path).to_str().unwrap_or("") };
+
+    match git_graph::list_branches(repo_str) {
+        Ok(branches) => {
+            match serde_json::to_string(&branches) {
+                Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        Err(e) => {
+            log::error!("pier_git_list_branches failed: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// List unique commit authors. Returns JSON array of strings.
+/// Caller must free with pier_string_free.
+#[no_mangle]
+pub extern "C" fn pier_git_list_authors(repo_path: *const c_char, limit: u32) -> *mut c_char {
+    if repo_path.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let repo_str = unsafe { CStr::from_ptr(repo_path).to_str().unwrap_or("") };
+
+    match git_graph::list_authors(repo_str, limit as usize) {
+        Ok(authors) => {
+            match serde_json::to_string(&authors) {
+                Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        Err(e) => {
+            log::error!("pier_git_list_authors failed: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// List tracked files (git ls-files equivalent). Returns JSON array of strings.
+/// Caller must free with pier_string_free.
+#[no_mangle]
+pub extern "C" fn pier_git_list_tracked_files(repo_path: *const c_char) -> *mut c_char {
+    if repo_path.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let repo_str = unsafe { CStr::from_ptr(repo_path).to_str().unwrap_or("") };
+
+    match git_graph::list_tracked_files(repo_str) {
+        Ok(files) => {
+            match serde_json::to_string(&files) {
+                Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        Err(e) => {
+            log::error!("pier_git_list_tracked_files failed: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Detect the default branch (main/master/HEAD). Returns the branch name as a C string.
+/// Caller must free with pier_string_free.
+#[no_mangle]
+pub extern "C" fn pier_git_detect_default_branch(repo_path: *const c_char) -> *mut c_char {
+    if repo_path.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let repo_str = unsafe { CStr::from_ptr(repo_path).to_str().unwrap_or("") };
+
+    match git_graph::detect_default_branch(repo_str) {
+        Ok(branch) => CString::new(branch).unwrap_or_default().into_raw(),
+        Err(e) => {
+            log::error!("pier_git_detect_default_branch failed: {}", e);
+            CString::new("HEAD").unwrap_or_default().into_raw()
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 // Utility FFI
 // ═══════════════════════════════════════════════════════════
 

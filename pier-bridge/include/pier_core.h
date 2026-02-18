@@ -139,6 +139,65 @@ int32_t pier_ssh_stop_forward(PierSshHandle handle, uint16_t local_port);
 char *pier_ssh_list_forwards(PierSshHandle handle);
 
 /**
+ * Load commit graph data. Returns JSON string.
+ * Caller must free with pier_string_free.
+ *
+ * Parameters:
+ * - repo_path: path to the Git repository
+ * - limit: max commits to return
+ * - skip: number of commits to skip (for pagination)
+ * - branch: branch name filter (null = all branches)
+ * - author: author name filter (null = no filter)
+ * - search_text: text to grep in commit messages (null = no filter)
+ * - after_timestamp: unix timestamp for date filter (0 = no filter)
+ * - topo_order: true for topological sort
+ * - first_parent: true for first-parent only
+ * - no_merges: true to exclude merge commits
+ * - paths: newline-separated list of paths to filter by (null = no filter)
+ */
+char *pier_git_graph_log(const char *repo_path,
+                         uint32_t limit,
+                         uint32_t skip,
+                         const char *branch,
+                         const char *author,
+                         const char *search_text,
+                         int64_t after_timestamp,
+                         bool topo_order,
+                         bool first_parent,
+                         bool no_merges,
+                         const char *paths);
+
+/**
+ * Get first-parent chain hashes. Returns JSON array of strings.
+ * Caller must free with pier_string_free.
+ */
+char *pier_git_first_parent_chain(const char *repo_path, const char *ref_name, uint32_t limit);
+
+/**
+ * List all branches (local + remote). Returns JSON array of strings.
+ * Caller must free with pier_string_free.
+ */
+char *pier_git_list_branches(const char *repo_path);
+
+/**
+ * List unique commit authors. Returns JSON array of strings.
+ * Caller must free with pier_string_free.
+ */
+char *pier_git_list_authors(const char *repo_path, uint32_t limit);
+
+/**
+ * List tracked files (git ls-files equivalent). Returns JSON array of strings.
+ * Caller must free with pier_string_free.
+ */
+char *pier_git_list_tracked_files(const char *repo_path);
+
+/**
+ * Detect the default branch (main/master/HEAD). Returns the branch name as a C string.
+ * Caller must free with pier_string_free.
+ */
+char *pier_git_detect_default_branch(const char *repo_path);
+
+/**
  * Free a string allocated by Rust.
  */
 void pier_string_free(char *s);

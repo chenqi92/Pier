@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import CPierCore
 
 enum GitTab: CaseIterable {
     case changes, history, stash, conflicts
@@ -80,6 +81,15 @@ struct BlameLine: Identifiable {
 
 // MARK: - ViewModel
 
+/// Date range presets for graph filtering.
+enum GraphDateRange: String, CaseIterable {
+    case all
+    case today
+    case lastWeek
+    case lastMonth
+    case lastYear
+}
+
 @MainActor
 class GitViewModel: ObservableObject {
     // MARK: - Published State
@@ -109,12 +119,22 @@ class GitViewModel: ObservableObject {
     @Published var hasMoreHistory = true
     @Published var graphBranches: [String] = []
     @Published var graphFilterBranch: String? = nil  // nil = all branches
+    @Published var showLongEdges = true               // edge display mode
+    @Published var graphSearchText = ""                // text/hash search
+    @Published var graphFilterUser: String? = nil      // author filter
+    @Published var graphFilterDateRange: GraphDateRange = .all
+    @Published var graphFilterPath: String? = nil      // path filter
+    @Published var graphSortByDate = true              // sort: date vs topo
+    @Published var graphFirstParentOnly = false        // first-parent option
+    @Published var graphNoMerges = false               // no-merges option
+    @Published var graphAuthors: [String] = []         // available authors
+    @Published var graphRepoFiles: [String] = []        // tracked file paths for tree picker
 
     // MARK: - Private
 
     private(set) var repoPath: String = ""
     private var timer: AnyCancellable?
-    private let graphPageSize = 50
+    private let graphPageSize = 500
     private var graphSkipCount = 0
     private var laneState = LaneState()
     private var directoryObserver: AnyCancellable?
@@ -454,128 +474,168 @@ class GitViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Unified Graph + History (progressive loading)
+    // MARK: - Unified Graph + History (git2 FFI — direct .git access)
+
+    /// Call a pier_git_* FFI function and return the C string as a Swift String.
+    /// Automatically frees the C string after copying.
+    private func callGitFFI(_ cString: UnsafeMutablePointer<CChar>?) -> String? {
+        guard let ptr = cString else { return nil }
+        let result = String(cString: ptr)
+        pier_string_free(ptr)
+        return result
+    }
+
+    /// Compute the Unix timestamp for the date range filter.
+    private func afterTimestamp() -> Int64 {
+        let now = Date()
+        switch graphFilterDateRange {
+        case .all: return 0
+        case .today:
+            return Int64(Calendar.current.startOfDay(for: now).timeIntervalSince1970)
+        case .lastWeek:
+            return Int64((Calendar.current.date(byAdding: .weekOfYear, value: -1, to: now) ?? now).timeIntervalSince1970)
+        case .lastMonth:
+            return Int64((Calendar.current.date(byAdding: .month, value: -1, to: now) ?? now).timeIntervalSince1970)
+        case .lastYear:
+            return Int64((Calendar.current.date(byAdding: .year, value: -1, to: now) ?? now).timeIntervalSince1970)
+        }
+    }
 
     func loadGraphHistory() async {
         graphSkipCount = 0
         hasMoreHistory = true
         laneState = LaneState()
+        guard !repoPath.isEmpty else { graphNodes = []; return }
 
-        // Fetch available branches for the filter picker
-        await fetchGraphBranches()
+        // All FFI calls are in-process (libgit2), no process spawning.
+        // Run branches + authors concurrently for UI pickers.
+        async let branchTask: Void = fetchGraphBranches()
+        async let authorTask: Void = fetchGraphAuthors()
 
-        // Phase 1: Detect default branch and fetch its first-parent chain (lane 0).
-        let defaultBranch = await detectDefaultBranch()
-        if let fpOutput = await runGit(["log", "--first-parent", defaultBranch, "--format=%H"]) {
-            laneState.mainChain = Set(fpOutput.split(separator: "\n").map(String.init))
+        // Detect default branch via FFI
+        let defaultBranch = callGitFFI(pier_git_detect_default_branch(repoPath)) ?? "HEAD"
+
+        // First-parent chain for main-chain identification
+        if let fpJSON = callGitFFI(pier_git_first_parent_chain(repoPath, defaultBranch, UInt32(graphPageSize * 2))) {
+            if let hashes = try? JSONDecoder().decode([String].self, from: Data(fpJSON.utf8)) {
+                laneState.mainChain = Set(hashes)
+            }
         }
 
-        // Phase 2: Load commits (all branches or filtered).
-        let sep = "<SEP>"
-        var logArgs = ["log"]
-        if let branch = graphFilterBranch {
-            logArgs.append(branch)
-        } else {
-            logArgs.append("--all")
-        }
-        logArgs += ["--date-order", "-\(graphPageSize)",
-                    "--format=%H" + sep + "%P" + sep + "%h" + sep + "%d" + sep + "%s" + sep + "%an" + sep + "%ar"]
-        guard let output = await runGit(logArgs) else {
-            graphNodes = []
-            return
-        }
-        var nodes = Self.parseCommitNodes(output)
-        LaneState.computeIDEALayout(&nodes, mainChain: laneState.mainChain)
+        _ = await (branchTask, authorTask)
+
+        // Load commits via FFI
+        let searchText = graphSearchText.trimmingCharacters(in: .whitespaces)
+        let logJSON = callGitFFI(pier_git_graph_log(
+            repoPath,
+            UInt32(graphPageSize),
+            0,
+            graphFilterBranch,           // branch (nil = all)
+            graphFilterUser,             // author
+            searchText.isEmpty ? nil : searchText,  // search
+            afterTimestamp(),             // after_timestamp
+            !graphSortByDate,            // topo_order
+            graphFirstParentOnly,        // first_parent
+            graphNoMerges,               // no_merges
+            graphFilterPath              // paths (newline-separated)
+        ))
+
+        guard let json = logJSON else { graphNodes = []; return }
+        var nodes = Self.parseCommitNodesFromJSON(json)
+        LaneState.computeIDEALayout(&nodes, mainChain: laneState.mainChain, showLongEdges: showLongEdges)
         graphNodes = nodes
         graphSkipCount = nodes.count
         hasMoreHistory = nodes.count >= graphPageSize
     }
 
-    /// Detect the default branch ref for correct main-chain identification.
-    /// Returns a ref that is guaranteed to work with `git log --first-parent`.
-    private func detectDefaultBranch() async -> String {
-        // Strategy 1: git symbolic-ref refs/remotes/origin/HEAD → refs/remotes/origin/master
-        // Use the full remote-tracking ref (origin/master) not just the branch name
-        if let symRef = await runGit(["symbolic-ref", "refs/remotes/origin/HEAD"]) {
-            let trimmed = symRef.trimmingCharacters(in: .whitespacesAndNewlines)
-            // e.g. "refs/remotes/origin/master" → use "origin/master"
-            if trimmed.hasPrefix("refs/remotes/") {
-                let shortRef = String(trimmed.dropFirst("refs/remotes/".count))
-                // Validate the ref exists
-                if !shortRef.isEmpty,
-                   let _ = await runGit(["rev-parse", "--verify", shortRef]) {
-                    return shortRef
-                }
-            }
-        }
-        // Strategy 2: Try remote-tracking branches directly
-        for ref in ["origin/master", "origin/main"] {
-            if let _ = await runGit(["rev-parse", "--verify", ref]) {
-                return ref
-            }
-        }
-        // Strategy 3: Try local branches
-        for ref in ["master", "main"] {
-            if let _ = await runGit(["rev-parse", "--verify", ref]) {
-                return ref
-            }
-        }
-        // Fallback: use HEAD
-        return "HEAD"
-    }
-
     func loadMoreGraphHistory() async {
-        guard hasMoreHistory, !isLoadingMoreHistory else { return }
+        guard hasMoreHistory, !isLoadingMoreHistory, !repoPath.isEmpty else { return }
         isLoadingMoreHistory = true
-        let sep = "<SEP>"
-        var logArgs = ["log"]
-        if let branch = graphFilterBranch {
-            logArgs.append(branch)
-        } else {
-            logArgs.append("--all")
-        }
-        logArgs += ["--date-order", "-\(graphPageSize)", "--skip=\(graphSkipCount)",
-                    "--format=%H" + sep + "%P" + sep + "%h" + sep + "%d" + sep + "%s" + sep + "%an" + sep + "%ar"]
-        guard let output = await runGit(logArgs) else {
+
+        let searchText = graphSearchText.trimmingCharacters(in: .whitespaces)
+        let logJSON = callGitFFI(pier_git_graph_log(
+            repoPath,
+            UInt32(graphPageSize),
+            UInt32(graphSkipCount),
+            graphFilterBranch,
+            graphFilterUser,
+            searchText.isEmpty ? nil : searchText,
+            afterTimestamp(),
+            !graphSortByDate,
+            graphFirstParentOnly,
+            graphNoMerges,
+            graphFilterPath
+        ))
+
+        guard let json = logJSON else {
             isLoadingMoreHistory = false
             return
         }
-        var nodes = Self.parseCommitNodes(output)
+        let newNodes = Self.parseCommitNodesFromJSON(json)
         var allNodes = graphNodes
-        allNodes.append(contentsOf: nodes)
-        LaneState.computeIDEALayout(&allNodes, mainChain: laneState.mainChain)
+        allNodes.append(contentsOf: newNodes)
+        LaneState.computeIDEALayout(&allNodes, mainChain: laneState.mainChain, showLongEdges: showLongEdges)
         graphNodes = allNodes
-        graphSkipCount += nodes.count
-        hasMoreHistory = nodes.count >= graphPageSize
+        graphSkipCount += newNodes.count
+        hasMoreHistory = newNodes.count >= graphPageSize
         isLoadingMoreHistory = false
     }
 
-    /// Fetch all local and remote branch names for the graph filter.
+    /// Fetch all local and remote branch names via FFI.
     private func fetchGraphBranches() async {
-        guard let output = await runGit(["branch", "-a", "--format=%(refname:short)"]) else {
-            graphBranches = []
-            return
+        guard !repoPath.isEmpty else { graphBranches = []; return }
+        if let json = callGitFFI(pier_git_list_branches(repoPath)) {
+            if let branches = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) {
+                graphBranches = branches
+                return
+            }
         }
-        graphBranches = output.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .sorted()
+        graphBranches = []
     }
 
-    /// Parse git log output into CommitNode array (before lane assignment).
-    private static func parseCommitNodes(_ output: String) -> [CommitNode] {
-        let sep = "<SEP>"
-        return output.components(separatedBy: "\n").compactMap { line -> CommitNode? in
-            guard !line.isEmpty else { return nil }
-            let parts = line.components(separatedBy: sep)
-            guard parts.count >= 7 else { return nil }
-            let hash = parts[0]
-            let parentStr = parts[1]
-            let parents = parentStr.isEmpty ? [] : parentStr.split(separator: " ").map(String.init)
-            let shortHash = parts[2]
-            // Parse decorations
+    /// Fetch unique commit authors via FFI.
+    private func fetchGraphAuthors() async {
+        guard !repoPath.isEmpty else { graphAuthors = []; return }
+        if let json = callGitFFI(pier_git_list_authors(repoPath, 500)) {
+            if let authors = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) {
+                graphAuthors = authors
+                return
+            }
+        }
+        graphAuthors = []
+    }
+
+    /// Fetch tracked files via FFI.
+    func fetchRepoFiles() async {
+        guard !repoPath.isEmpty else { graphRepoFiles = []; return }
+        if let json = callGitFFI(pier_git_list_tracked_files(repoPath)) {
+            if let files = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) {
+                graphRepoFiles = files
+                return
+            }
+        }
+        graphRepoFiles = []
+    }
+
+    /// Parse commit nodes from JSON returned by pier_git_graph_log FFI.
+    private static func parseCommitNodesFromJSON(_ json: String) -> [CommitNode] {
+        struct FFICommit: Decodable {
+            let hash: String
+            let parents: String
+            let short_hash: String
+            let refs: String
+            let message: String
+            let author: String
+            let date_relative: String
+        }
+        guard let data = json.data(using: .utf8),
+              let commits = try? JSONDecoder().decode([FFICommit].self, from: data) else {
+            return []
+        }
+        return commits.map { c in
+            let parents = c.parents.isEmpty ? [] : c.parents.split(separator: " ").map(String.init)
             var refs: [String] = []
-            let decoRaw = parts[3].trimmingCharacters(in: .whitespaces)
+            let decoRaw = c.refs.trimmingCharacters(in: .whitespaces)
             if decoRaw.hasPrefix("(") && decoRaw.hasSuffix(")") {
                 let inner = String(decoRaw.dropFirst().dropLast())
                 refs = inner.split(separator: ",").map {
@@ -584,11 +644,11 @@ class GitViewModel: ObservableObject {
                 }
             }
             return CommitNode(
-                id: hash,
-                shortHash: shortHash,
-                message: parts[4],
-                author: parts[5],
-                relativeDate: parts[6],
+                id: c.hash,
+                shortHash: c.short_hash,
+                message: c.message,
+                author: c.author,
+                relativeDate: c.date_relative,
                 refs: refs,
                 parents: parents
             )
