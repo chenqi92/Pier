@@ -2,7 +2,7 @@
 //!
 //! Replaces process-spawned `git log`, `git branch`, etc. with in-process reads.
 
-use git2::{BranchType, Repository, Sort, Time};
+use git2::{BranchType, Repository, Sort};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::Path;
@@ -31,49 +31,10 @@ pub struct CommitEntry {
     pub refs: String,
     pub message: String,
     pub author: String,
-    pub date_relative: String,
+    pub date_timestamp: i64,
 }
 
-// ═══════════════════════════════════════════════════════════
-// Helper: relative date formatting
-// ═══════════════════════════════════════════════════════════
 
-fn format_relative_time(commit_time: &Time) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let diff = now - commit_time.seconds();
-    if diff < 0 {
-        return "in the future".to_string();
-    }
-    let diff = diff as u64;
-    if diff < 60 {
-        return format!("{} seconds ago", diff);
-    }
-    let minutes = diff / 60;
-    if minutes < 60 {
-        return format!("{} minute{} ago", minutes, if minutes == 1 { "" } else { "s" });
-    }
-    let hours = diff / 3600;
-    if hours < 24 {
-        return format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" });
-    }
-    let days = diff / 86400;
-    if days < 7 {
-        return format!("{} day{} ago", days, if days == 1 { "" } else { "s" });
-    }
-    let weeks = days / 7;
-    if weeks < 5 {
-        return format!("{} week{} ago", weeks, if weeks == 1 { "" } else { "s" });
-    }
-    let months = days / 30;
-    if months < 12 {
-        return format!("{} month{} ago", months, if months == 1 { "" } else { "s" });
-    }
-    let years = days / 365;
-    format!("{} year{} ago", years, if years == 1 { "" } else { "s" })
-}
 
 // ═══════════════════════════════════════════════════════════
 // Helper: build ref decoration string for a commit
@@ -266,7 +227,7 @@ pub fn graph_log(
         let refs_str = build_ref_decoration(&repo, oid);
         let message = commit.summary().unwrap_or("").to_string();
         let author = commit.author().name().unwrap_or("").to_string();
-        let date_relative = format_relative_time(&commit.time());
+        let date_timestamp = commit.time().seconds();
 
         results.push(CommitEntry {
             hash,
@@ -275,7 +236,7 @@ pub fn graph_log(
             refs: refs_str,
             message,
             author,
-            date_relative,
+            date_timestamp,
         });
 
         if results.len() >= limit {

@@ -458,20 +458,63 @@ struct LaneState {
             // Last: parent node dot (or last loaded row)
             anchors.append((clampedParent, xPos(nodeColumns[clampedParent])))
 
+            // Pre-compute arrow rows for this edge so we can adjust segments
+            var downArrowRows: Set<Int> = []
+            var upArrowRows: Set<Int> = []
+            if span >= longEdgeSize {
+                downArrowRows.insert(edge.childRow + visiblePartSize)
+                upArrowRows.insert(clampedParent - visiblePartSize)
+            }
+            if span >= edgeWithArrowSize {
+                downArrowRows.insert(edge.childRow + 1)
+                upArrowRows.insert(clampedParent - 1)
+            }
+
             // Generate half-row segments between consecutive anchors
+            // When a segment approaches an arrow diagonally, split it into
+            // diagonal + short vertical approach so the chevron is clearly visible.
+            let approachLen: CGFloat = 8.0  // vertical approach length before arrow
             for ai in 0..<(anchors.count - 1) {
                 let (rowA, xA) = anchors[ai]
                 let (rowB, xB) = anchors[ai + 1]
                 guard rowA < nodes.count else { continue }
 
                 if rowB == rowA + 1 {
-                    // Adjacent rows — draw connected half-segments
                     let xMid = (xA + xB) / 2
-                    nodes[rowA].segments.append(Segment(
-                        xTop: xA, yTop: rh / 2, xBottom: xMid, yBottom: rh, colorIndex: ci))
+                    let isDiagonal = abs(xA - xB) > 0.5
+
+                    // Bottom half of rowA
+                    if upArrowRows.contains(rowA) && isDiagonal {
+                        // Up arrow at rowA: vertical departure then diagonal
+                        nodes[rowA].segments.append(Segment(
+                            xTop: xA, yTop: 0, xBottom: xA, yBottom: approachLen, colorIndex: ci))
+                        nodes[rowA].segments.append(Segment(
+                            xTop: xA, yTop: approachLen, xBottom: xMid, yBottom: rh, colorIndex: ci))
+                    } else if upArrowRows.contains(rowA) {
+                        // Up arrow at rowA (straight): extend from top
+                        nodes[rowA].segments.append(Segment(
+                            xTop: xA, yTop: 0, xBottom: xMid, yBottom: rh, colorIndex: ci))
+                    } else {
+                        nodes[rowA].segments.append(Segment(
+                            xTop: xA, yTop: rh / 2, xBottom: xMid, yBottom: rh, colorIndex: ci))
+                    }
+
+                    // Top half of rowB
                     if rowB < nodes.count {
-                        nodes[rowB].segments.append(Segment(
-                            xTop: xMid, yTop: 0, xBottom: xB, yBottom: rh / 2, colorIndex: ci))
+                        if downArrowRows.contains(rowB) && isDiagonal {
+                            // Down arrow at rowB: diagonal then vertical approach to bottom
+                            nodes[rowB].segments.append(Segment(
+                                xTop: xMid, yTop: 0, xBottom: xB, yBottom: rh - approachLen, colorIndex: ci))
+                            nodes[rowB].segments.append(Segment(
+                                xTop: xB, yTop: rh - approachLen, xBottom: xB, yBottom: rh, colorIndex: ci))
+                        } else if downArrowRows.contains(rowB) {
+                            // Down arrow at rowB (straight): extend to bottom
+                            nodes[rowB].segments.append(Segment(
+                                xTop: xMid, yTop: 0, xBottom: xB, yBottom: rh, colorIndex: ci))
+                        } else {
+                            nodes[rowB].segments.append(Segment(
+                                xTop: xMid, yTop: 0, xBottom: xB, yBottom: rh / 2, colorIndex: ci))
+                        }
                     }
                 }
                 // else: gap in visibility (long edge break) — no segments drawn
@@ -494,23 +537,19 @@ struct LaneState {
                 }
             }
             // Rule 2: Visible-edge arrows (edges spanning >= edgeWithArrowSize rows)
-            // Both rules are independent — an edge can have both break and visible arrows
             if span >= edgeWithArrowSize {
-                // Down arrow at offset 1 from child (on the edge line going down)
                 let downRow = edge.childRow + 1
                 if downRow < nodes.count {
                     let col = edgeColumnAtRow[downRow][ei] ?? nodeColumns[edge.childRow]
-                    // Place arrow at mid-height of the row, on the edge
                     nodes[downRow].arrows.append(ArrowIndicator(
-                        x: xPos(col), y: rh / 2, colorIndex: ci, isDown: true))
+                        x: xPos(col), y: rh, colorIndex: ci, isDown: true))
                 }
-                // Up arrow at offset 1 from parent (only if parent is loaded)
                 if edge.parentRow < nodes.count {
                     let upRow = clampedParent - 1
                     if upRow >= 0 && upRow < nodes.count {
                         let col = edgeColumnAtRow[upRow][ei] ?? nodeColumns[clampedParent]
                         nodes[upRow].arrows.append(ArrowIndicator(
-                            x: xPos(col), y: rh / 2, colorIndex: ci, isDown: false))
+                            x: xPos(col), y: 0, colorIndex: ci, isDown: false))
                     }
                 }
             }
@@ -862,8 +901,16 @@ struct BranchGraphView: View {
 
     private var scrollContent: some View {
         let nodes = gitViewModel.graphNodes
-        let maxLane = nodes.map(\.lane).max() ?? 0
-        let gw = max(CGFloat(maxLane + 2) * Self.laneW + 8, 60)
+        // Compute graph width from the widest element (node or edge segment)
+        var maxX: CGFloat = 0
+        for n in nodes {
+            let nodeDx = CGFloat(n.lane) * Self.laneW + Self.laneW / 2 + 4
+            maxX = max(maxX, nodeDx)
+            for s in n.segments {
+                maxX = max(maxX, s.xTop, s.xBottom)
+            }
+        }
+        let gw = max(maxX + Self.laneW, 60)
 
         return ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -907,7 +954,7 @@ struct BranchGraphView: View {
             }
             if !n.relativeDate.isEmpty {
                 Text(n.relativeDate).font(.system(size: 9)).foregroundColor(.secondary.opacity(0.6))
-                    .lineLimit(1).frame(width: 80, alignment: .trailing)
+                    .lineLimit(1).frame(width: 100, alignment: .trailing)
             }
         }.padding(.leading, 4).padding(.trailing, 8)
     }
@@ -927,46 +974,24 @@ struct BranchGraphView: View {
             ctx.stroke(p, with: .color(col(seg.colorIndex)), lineWidth: 1.5)
         }
 
-        // Draw IDEA-style arrows with vertical stem for diagonal clarity
+        // Draw IDEA-style chevron arrows (clean V shape — vertical approach is in the segment)
         for arrow in node.arrows {
             let color = col(arrow.colorIndex)
-            let armLen: CGFloat = 5.5     // arm length of chevron
+            let armLen: CGFloat = 5.0     // arm length of chevron
             let halfW: CGFloat = 4.0      // horizontal half-width
-            let stemLen: CGFloat = 4.0    // straight vertical stem before the chevron
-
+            var chev = Path()
             if arrow.isDown {
-                // Down arrow ˅ — stem goes down, then chevron tip at bottom
-                let stemTopY = arrow.y - stemLen - armLen
-                let stemBottomY = arrow.y - armLen
-                let tipY = arrow.y
-                // Vertical stem
-                var stem = Path()
-                stem.move(to: .init(x: arrow.x, y: stemTopY))
-                stem.addLine(to: .init(x: arrow.x, y: stemBottomY))
-                ctx.stroke(stem, with: .color(color), lineWidth: 1.5)
-                // Chevron
-                var chev = Path()
-                chev.move(to: .init(x: arrow.x - halfW, y: stemBottomY))
-                chev.addLine(to: .init(x: arrow.x, y: tipY))
-                chev.addLine(to: .init(x: arrow.x + halfW, y: stemBottomY))
-                ctx.stroke(chev, with: .color(color), lineWidth: 1.5)
+                // Down chevron ˅
+                chev.move(to: .init(x: arrow.x - halfW, y: arrow.y - armLen))
+                chev.addLine(to: .init(x: arrow.x, y: arrow.y))
+                chev.addLine(to: .init(x: arrow.x + halfW, y: arrow.y - armLen))
             } else {
-                // Up arrow ˄ — stem goes up, then chevron tip at top
-                let stemBottomY = arrow.y + stemLen + armLen
-                let stemTopY = arrow.y + armLen
-                let tipY = arrow.y
-                // Vertical stem
-                var stem = Path()
-                stem.move(to: .init(x: arrow.x, y: stemBottomY))
-                stem.addLine(to: .init(x: arrow.x, y: stemTopY))
-                ctx.stroke(stem, with: .color(color), lineWidth: 1.5)
-                // Chevron
-                var chev = Path()
-                chev.move(to: .init(x: arrow.x - halfW, y: stemTopY))
-                chev.addLine(to: .init(x: arrow.x, y: tipY))
-                chev.addLine(to: .init(x: arrow.x + halfW, y: stemTopY))
-                ctx.stroke(chev, with: .color(color), lineWidth: 1.5)
+                // Up chevron ˄
+                chev.move(to: .init(x: arrow.x - halfW, y: arrow.y + armLen))
+                chev.addLine(to: .init(x: arrow.x, y: arrow.y))
+                chev.addLine(to: .init(x: arrow.x + halfW, y: arrow.y + armLen))
             }
+            ctx.stroke(chev, with: .color(color), lineWidth: 2.0)
         }
 
         // Commit dot
