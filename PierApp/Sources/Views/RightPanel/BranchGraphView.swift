@@ -538,8 +538,8 @@ struct BranchGraphView: View {
         Color(red: 0.85, green: 0.35, blue: 0.60),   // pink
     ]
     static let laneW: CGFloat = 14
-    static let rowH: CGFloat = 28
-    static let dotR: CGFloat = 4
+    static let rowH: CGFloat = 22
+    static let dotR: CGFloat = 3.5
 
     @State private var selectedHash: String?
     @State private var selectedDetail: GitCommitDetail?
@@ -863,9 +863,9 @@ struct BranchGraphView: View {
     private var scrollContent: some View {
         let nodes = gitViewModel.graphNodes
         let maxLane = nodes.map(\.lane).max() ?? 0
-        let gw = CGFloat(maxLane + 2) * Self.laneW + 8
+        let gw = max(CGFloat(maxLane + 2) * Self.laneW + 8, 60)
 
-        return ScrollView(.vertical) {
+        return ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(nodes) { node in
                     VStack(spacing: 0) {
@@ -916,38 +916,61 @@ struct BranchGraphView: View {
 
     private func drawRow(_ ctx: GraphicsContext, node: CommitNode, size: CGSize) {
         func col(_ ci: Int) -> Color { Self.palette[ci % Self.palette.count] }
+        let rh = Self.rowH
+        let cy = rh / 2
+
+        // Draw segments
         for seg in node.segments {
             var p = Path()
             p.move(to: .init(x: seg.xTop, y: seg.yTop))
             p.addLine(to: .init(x: seg.xBottom, y: seg.yBottom))
-            ctx.stroke(p, with: .color(col(seg.colorIndex)), lineWidth: 2)
+            ctx.stroke(p, with: .color(col(seg.colorIndex)), lineWidth: 1.5)
         }
-        // Draw IDEA-style chevron arrow indicators (open "V" shape)
+
+        // Draw IDEA-style arrows with vertical stem for diagonal clarity
         for arrow in node.arrows {
             let color = col(arrow.colorIndex)
-            let armLen: CGFloat = 4.5     // arm length of the chevron
-            let halfW: CGFloat = 3.0      // horizontal half-width
+            let armLen: CGFloat = 5.5     // arm length of chevron
+            let halfW: CGFloat = 4.0      // horizontal half-width
+            let stemLen: CGFloat = 4.0    // straight vertical stem before the chevron
+
             if arrow.isDown {
-                // Down chevron: ˅ — tip points downward
+                // Down arrow ˅ — stem goes down, then chevron tip at bottom
+                let stemTopY = arrow.y - stemLen - armLen
+                let stemBottomY = arrow.y - armLen
                 let tipY = arrow.y
+                // Vertical stem
+                var stem = Path()
+                stem.move(to: .init(x: arrow.x, y: stemTopY))
+                stem.addLine(to: .init(x: arrow.x, y: stemBottomY))
+                ctx.stroke(stem, with: .color(color), lineWidth: 1.5)
+                // Chevron
                 var chev = Path()
-                chev.move(to: .init(x: arrow.x - halfW, y: tipY - armLen))
+                chev.move(to: .init(x: arrow.x - halfW, y: stemBottomY))
                 chev.addLine(to: .init(x: arrow.x, y: tipY))
-                chev.addLine(to: .init(x: arrow.x + halfW, y: tipY - armLen))
+                chev.addLine(to: .init(x: arrow.x + halfW, y: stemBottomY))
                 ctx.stroke(chev, with: .color(color), lineWidth: 1.5)
             } else {
-                // Up chevron: ˄ — tip points upward
+                // Up arrow ˄ — stem goes up, then chevron tip at top
+                let stemBottomY = arrow.y + stemLen + armLen
+                let stemTopY = arrow.y + armLen
                 let tipY = arrow.y
+                // Vertical stem
+                var stem = Path()
+                stem.move(to: .init(x: arrow.x, y: stemBottomY))
+                stem.addLine(to: .init(x: arrow.x, y: stemTopY))
+                ctx.stroke(stem, with: .color(color), lineWidth: 1.5)
+                // Chevron
                 var chev = Path()
-                chev.move(to: .init(x: arrow.x - halfW, y: tipY + armLen))
+                chev.move(to: .init(x: arrow.x - halfW, y: stemTopY))
                 chev.addLine(to: .init(x: arrow.x, y: tipY))
-                chev.addLine(to: .init(x: arrow.x + halfW, y: tipY + armLen))
+                chev.addLine(to: .init(x: arrow.x + halfW, y: stemTopY))
                 ctx.stroke(chev, with: .color(color), lineWidth: 1.5)
             }
         }
-        // Commit dot — all dots same size and color
+
+        // Commit dot
         let dx = CGFloat(node.lane) * Self.laneW + Self.laneW / 2 + 4
-        let cy = size.height / 2
         let r = Self.dotR
         ctx.fill(Path(ellipseIn: CGRect(x: dx - r, y: cy - r, width: r * 2, height: r * 2)),
                  with: .color(col(node.colorIndex)))
