@@ -2,10 +2,20 @@ import SwiftUI
 import AppKit
 import CPierCore
 
-/// Terminal view using NSViewRepresentable to bridge AppKit rendering.
-/// Renders terminal cell grid using Core Text for maximum performance.
+/// Terminal view using NSViewRepresentable with KVO-based resize detection.
+/// A Coordinator observes the scroll view's frame changes via KVO — the most
+/// fundamental AppKit mechanism, guaranteed to fire when SwiftUI resizes the view.
 struct TerminalView: NSViewRepresentable {
     let session: TerminalSessionInfo?
+
+    class Coordinator: NSObject {
+        var frameObservation: NSKeyValueObservation?
+        var lastSize: NSSize = .zero
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
     func makeNSView(context: Context) -> TerminalScrollView {
         let scrollView = TerminalScrollView()
@@ -18,11 +28,18 @@ struct TerminalView: NSViewRepresentable {
         let terminalView = TerminalNSView()
         scrollView.documentView = terminalView
 
-        // Set initial frame so document view matches visible area
-        DispatchQueue.main.async {
-            let visibleSize = scrollView.contentView.bounds.size
-            if visibleSize.width > 1 && visibleSize.height > 1 {
-                terminalView.frame = CGRect(origin: .zero, size: visibleSize)
+        // KVO: observe scroll view frame changes — fires when SwiftUI resizes the view
+        context.coordinator.frameObservation = scrollView.observe(\.frame, options: [.new, .old]) { [weak terminalView] sv, change in
+            guard let tv = terminalView else { return }
+            let newFrame = sv.frame
+            let newSize = newFrame.size
+            // Only trigger on actual size changes, not position changes
+            guard abs(newSize.width - context.coordinator.lastSize.width) > 0.5 ||
+                  abs(newSize.height - context.coordinator.lastSize.height) > 0.5 else { return }
+            context.coordinator.lastSize = newSize
+            
+            if newSize.width > 1 && newSize.height > 1 {
+                tv.handleViewportSizeChanged(newSize)
             }
         }
 
@@ -37,52 +54,8 @@ struct TerminalView: NSViewRepresentable {
 
 /// Custom NSScrollView that forwards keyboard events to the terminal document view
 /// instead of consuming them for scroll behavior.
-/// Also observes viewport size changes to trigger PTY resize when panels are dragged.
+/// PTY resize is handled via KVO on scroll view frame in the Coordinator.
 class TerminalScrollView: NSScrollView {
-
-    /// Last known viewport size to avoid redundant resizes (scrolling etc.)
-    private var lastViewportSize: NSSize = .zero
-    /// Re-entrance guard: prevent handleViewportResize → setFrameSize → resizeSubviews → handleViewportResize loop
-    private var isHandlingResize = false
-    /// Throttle timer for resize events during continuous drag
-    private var resizeThrottleTimer: Timer?
-
-    /// When the scroll view itself is resized (HSplitView divider dragged),
-    /// update the document view to match the new visible area.
-    override func resizeSubviews(withOldSize oldSize: NSSize) {
-        super.resizeSubviews(withOldSize: oldSize)
-        scheduleViewportResize()
-    }
-
-    /// Throttle resize to coalesce rapid events during drag.
-    /// Without this, each pixel of divider drag sends SIGWINCH → shell redraws.
-    private func scheduleViewportResize() {
-        // Skip if we're already inside a resize handler (prevents recursion)
-        guard !isHandlingResize else { return }
-
-        let visibleSize = contentView.bounds.size
-        // Skip if size hasn't actually changed (e.g., scroll-only bounds change)
-        guard visibleSize.width > 1 && visibleSize.height > 1 else { return }
-        guard abs(visibleSize.width - lastViewportSize.width) > 0.5 ||
-              abs(visibleSize.height - lastViewportSize.height) > 0.5 else { return }
-
-        resizeThrottleTimer?.invalidate()
-        resizeThrottleTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
-            self?.performViewportResize()
-        }
-    }
-
-    private func performViewportResize() {
-        guard !isHandlingResize else { return }
-        guard let terminalView = documentView as? TerminalNSView else { return }
-        let visibleSize = contentView.bounds.size
-        guard visibleSize.width > 1 && visibleSize.height > 1 else { return }
-
-        lastViewportSize = visibleSize
-        isHandlingResize = true
-        terminalView.handleViewportSizeChanged(visibleSize)
-        isHandlingResize = false
-    }
 
     override func keyDown(with event: NSEvent) {
         // Forward all keyboard events to the terminal view
@@ -170,6 +143,8 @@ class TerminalNSView: NSView {
         let handle: OpaquePointer
         var screen: [[TerminalCell]]
         var scrollback: [[TerminalCell]]
+        var screenLineWrapped: [Bool]
+        var scrollbackLineWrapped: [Bool]
         var cursorX: Int
         var cursorY: Int
         var ptyCols: Int
@@ -203,6 +178,10 @@ class TerminalNSView: NSView {
 
     // Screen buffer (visible area) — unified character + attribute per cell
     private var screen: [[TerminalCell]] = []
+    /// Tracks whether each screen row is a continuation (soft-wrapped from previous row).
+    /// `true` = soft wrap (line overflow), `false` = hard wrap (real newline or first line).
+    private var screenLineWrapped: [Bool] = []
+    private var scrollbackLineWrapped: [Bool] = []
     private var cursorX: Int = 0
     private var cursorY: Int = 0
 
@@ -519,6 +498,8 @@ class TerminalNSView: NSView {
             terminalHandle = cached.handle
             screen = cached.screen
             scrollback = cached.scrollback
+            screenLineWrapped = cached.screenLineWrapped
+            scrollbackLineWrapped = cached.scrollbackLineWrapped
             cursorX = cached.cursorX
             cursorY = cached.cursorY
             ptyCols = cached.ptyCols
@@ -558,6 +539,8 @@ class TerminalNSView: NSView {
             handle: handle,
             screen: screen,
             scrollback: scrollback,
+            screenLineWrapped: screenLineWrapped,
+            scrollbackLineWrapped: scrollbackLineWrapped,
             cursorX: cursorX,
             cursorY: cursorY,
             ptyCols: ptyCols,
@@ -646,6 +629,8 @@ class TerminalNSView: NSView {
         if terminalHandle != nil {
             // Initialize screen buffer to match PTY size
             screen = Array(repeating: Array(repeating: .blank, count: cols), count: rows)
+            screenLineWrapped = Array(repeating: false, count: rows)
+            scrollbackLineWrapped = []
             currentAttr = .default
             startReadLoop()
         }
@@ -680,6 +665,8 @@ class TerminalNSView: NSView {
 
         if terminalHandle != nil {
             screen = Array(repeating: Array(repeating: .blank, count: cols), count: rows)
+            screenLineWrapped = Array(repeating: false, count: rows)
+            scrollbackLineWrapped = []
             currentAttr = .default
             startReadLoop()
         }
@@ -926,12 +913,19 @@ class TerminalNSView: NSView {
             if cursorY >= visibleRows {
                 if !screen.isEmpty {
                     scrollback.append(screen.removeFirst())
+                    scrollbackLineWrapped.append(screenLineWrapped.isEmpty ? false : screenLineWrapped.removeFirst())
                 }
                 screen.append(Array(repeating: .blank, count: cols))
+                screenLineWrapped.append(true)  // soft wrap: continuation of previous line
                 cursorY = visibleRows - 1
             }
             while cursorY >= screen.count {
                 screen.append(Array(repeating: .blank, count: cols))
+                screenLineWrapped.append(true)  // soft wrap
+            }
+            // Mark this new row as soft-wrapped continuation
+            if cursorY < screenLineWrapped.count {
+                screenLineWrapped[cursorY] = true
             }
         }
 
@@ -1022,16 +1016,20 @@ class TerminalNSView: NSView {
                     // Scroll: move top line to scrollback
                     if !screen.isEmpty {
                         scrollback.append(screen.removeFirst())
+                        scrollbackLineWrapped.append(screenLineWrapped.isEmpty ? false : screenLineWrapped.removeFirst())
                     }
                     screen.append(Array(repeating: .blank, count: cols))
+                    screenLineWrapped.append(false)  // hard wrap (LF)
                     cursorY = visibleRows - 1
                     if scrollback.count > maxScrollback {
                         scrollback.removeFirst(scrollback.count - maxScrollback)
+                        if !scrollbackLineWrapped.isEmpty { scrollbackLineWrapped.removeFirst() }
                     }
                 }
                 // Ensure screen has enough rows
                 while cursorY >= screen.count {
                     screen.append(Array(repeating: .blank, count: cols))
+                    screenLineWrapped.append(false)  // hard wrap (LF)
                 }
             case 0x0D: // CR (\r)
                 cursorX = 0
@@ -1119,6 +1117,7 @@ class TerminalNSView: NSView {
         let cols = max(1, visibleCols)
         while screen.count <= row {
             screen.append(Array(repeating: .blank, count: cols))
+            screenLineWrapped.append(false)
         }
         if screen[row].count < cols {
             screen[row].append(contentsOf: Array(repeating: TerminalCell.blank, count: cols - screen[row].count))
@@ -1432,8 +1431,15 @@ class TerminalNSView: NSView {
         let totalLines = scrollback.count + screen.count
         let visibleHeight = enclosingScrollView?.contentView.bounds.height ?? bounds.height
         let requiredHeight = max(visibleHeight, CGFloat(totalLines) * cellHeight)
-        let width = enclosingScrollView?.contentView.bounds.width ?? bounds.width
-        setFrameSize(NSSize(width: width, height: requiredHeight))
+
+        // Use ptyCols * cellWidth as authoritative width — do NOT read from
+        // contentView.bounds.width which may be stale when SwiftUI resizes
+        // the hosting view via HSplitView.
+        let width = CGFloat(ptyCols) * cellWidth
+
+        // Use super.setFrameSize to avoid triggering the override which would
+        // re-calculate ptyCols from the frame width (undoing notification-based resize).
+        super.setFrameSize(NSSize(width: width, height: requiredHeight))
 
         // Auto-scroll to bottom (isFlipped=true: origin at top, scroll down)
         if let scrollView = enclosingScrollView {
@@ -2036,21 +2042,9 @@ class TerminalNSView: NSView {
     }
 
     // MARK: - Resize
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        if let handle = terminalHandle {
-            let newCols = max(1, Int(newSize.width / cellWidth))
-            let newRows = max(1, Int((enclosingScrollView?.contentView.bounds.height ?? newSize.height) / cellHeight))
-            if newCols != ptyCols || newRows != ptyRows {
-                ptyCols = newCols
-                ptyRows = newRows
-                pier_terminal_resize(handle, UInt16(newCols), UInt16(newRows))
-
-                resizeScreenBuffer()
-            }
-        }
-    }
+    // NOTE: setFrameSize override REMOVED — it was reading stale contentView.bounds
+    // and overriding the correct ptyCols set by the notification handler.
+    // PTY resize is now handled exclusively via handleViewportSizeChanged.
 
     /// Called by TerminalScrollView when the viewport size changes
     /// (e.g., HSplitView divider dragged, window resized).
@@ -2071,26 +2065,116 @@ class TerminalNSView: NSView {
         let totalLines = scrollback.count + screen.count
         let requiredHeight = max(visibleSize.height, CGFloat(totalLines) * cellHeight)
         super.setFrameSize(NSSize(width: visibleSize.width, height: requiredHeight))
+
+        // Scroll to bottom to keep cursor/latest content visible after resize
+        if let scrollView = enclosingScrollView {
+            let maxScrollY = max(0, requiredHeight - visibleSize.height)
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: maxScrollY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+
         needsDisplay = true
     }
 
     /// Resize the screen buffer to match current ptyCols/ptyRows.
+    /// Only adjusts row count — does NOT reflow or truncate line content.
+    /// The shell receives SIGWINCH and re-renders future output at the new width.
     private func resizeScreenBuffer() {
-        // Resize screen buffer to match new dimensions
-        while screen.count < ptyRows {
-            screen.append(Array(repeating: .blank, count: ptyCols))
-        }
-        while screen.count > ptyRows {
-            let overflow = screen.removeFirst()
-            scrollback.append(overflow)
-        }
-        for i in 0..<screen.count {
-            if screen[i].count < ptyCols {
-                screen[i].append(contentsOf: Array(repeating: TerminalCell.blank, count: ptyCols - screen[i].count))
-            } else if screen[i].count > ptyCols {
-                screen[i] = Array(screen[i].prefix(ptyCols))
+        let oldCols = screen.first?.count ?? ptyCols
+
+        // ── Step 1: Combine all rows (scrollback + screen) into logical lines ──
+        // A "logical line" is a sequence of physical rows connected by soft wraps.
+        let allRows: [[TerminalCell]] = scrollback + screen
+        var allWrapped: [Bool] = scrollbackLineWrapped + screenLineWrapped
+
+        // Ensure arrays match
+        while allWrapped.count < allRows.count { allWrapped.append(false) }
+        while allWrapped.count > allRows.count { allWrapped.removeLast() }
+
+        // Build logical lines: each is a flat array of TerminalCell
+        // A logical line starts where wrapped[i] == false (hard break or first line)
+        var logicalLines: [[TerminalCell]] = []
+        var currentLogical: [TerminalCell] = []
+
+        for i in 0..<allRows.count {
+            if i == 0 || !allWrapped[i] {
+                // Start of a new logical line
+                if i > 0 {
+                    logicalLines.append(currentLogical)
+                }
+                currentLogical = allRows[i]
+            } else {
+                // Continuation (soft wrap) — append to current logical line
+                currentLogical.append(contentsOf: allRows[i])
             }
         }
+        if !currentLogical.isEmpty || !allRows.isEmpty {
+            logicalLines.append(currentLogical)
+        }
+
+        // ── Step 2: Strip trailing blanks from each logical line ──
+        for i in 0..<logicalLines.count {
+            while logicalLines[i].count > 0 && logicalLines[i].last?.character == " " && logicalLines[i].last?.attr == .default {
+                logicalLines[i].removeLast()
+            }
+        }
+
+        // ── Step 3: Re-wrap each logical line at new ptyCols ──
+        var newRows: [[TerminalCell]] = []
+        var newWrapped: [Bool] = []
+
+        for logicalLine in logicalLines {
+            if logicalLine.isEmpty {
+                // Empty line (just a newline) → single blank row
+                newRows.append(Array(repeating: .blank, count: ptyCols))
+                newWrapped.append(false)
+            } else {
+                // Split into chunks of ptyCols
+                var offset = 0
+                var isFirst = true
+                while offset < logicalLine.count {
+                    let end = min(offset + ptyCols, logicalLine.count)
+                    var row = Array(logicalLine[offset..<end])
+                    // Pad to ptyCols
+                    if row.count < ptyCols {
+                        row.append(contentsOf: Array(repeating: TerminalCell.blank, count: ptyCols - row.count))
+                    }
+                    newRows.append(row)
+                    newWrapped.append(isFirst ? false : true)  // first chunk = hard, rest = soft
+                    isFirst = false
+                    offset = end
+                }
+            }
+        }
+
+        // ── Step 4: Split into scrollback and screen ──
+        if newRows.count <= ptyRows {
+            // Everything fits on screen
+            scrollback = []
+            scrollbackLineWrapped = []
+            screen = newRows
+            screenLineWrapped = newWrapped
+            // Pad to ptyRows
+            while screen.count < ptyRows {
+                screen.append(Array(repeating: .blank, count: ptyCols))
+                screenLineWrapped.append(false)
+            }
+        } else {
+            // Split: last ptyRows rows are screen, rest is scrollback
+            let splitPoint = newRows.count - ptyRows
+            scrollback = Array(newRows[0..<splitPoint])
+            scrollbackLineWrapped = Array(newWrapped[0..<splitPoint])
+            screen = Array(newRows[splitPoint...])
+            screenLineWrapped = Array(newWrapped[splitPoint...])
+        }
+
+        // Trim scrollback to max limit
+        if scrollback.count > maxScrollback {
+            let excess = scrollback.count - maxScrollback
+            scrollback.removeFirst(excess)
+            scrollbackLineWrapped.removeFirst(min(excess, scrollbackLineWrapped.count))
+        }
+
         cursorX = min(cursorX, ptyCols - 1)
         cursorY = min(cursorY, ptyRows - 1)
     }
@@ -2107,6 +2191,8 @@ class TerminalNSView: NSView {
                 handle: handle,
                 screen: screen,
                 scrollback: scrollback,
+                screenLineWrapped: screenLineWrapped,
+                scrollbackLineWrapped: scrollbackLineWrapped,
                 cursorX: cursorX,
                 cursorY: cursorY,
                 ptyCols: ptyCols,

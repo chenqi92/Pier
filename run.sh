@@ -124,12 +124,14 @@ else
         echo "📂 资源 bundle: $RESOURCES_BUNDLE"
     fi
 
-    # 使用 nohup 后台启动，关闭终端后应用继续运行
-    nohup "$BINARY" > /dev/null 2>&1 &
+    # 使用 nohup 后台启动，日志输出到项目根目录
+    LOG_FILE="$SCRIPT_DIR/pier_debug.log"
+    nohup "$BINARY" > "$LOG_FILE" 2>&1 &
     LAUNCHED_PID=$!
     disown $LAUNCHED_PID
 
     echo ""
     echo "✅ PierApp 已在后台启动 (PID: $LAUNCHED_PID)"
+    echo "   日志文件: $LOG_FILE"
     echo "   关闭此终端窗口不会影响应用运行"
 fi

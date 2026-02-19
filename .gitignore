@@ -21,3 +21,4 @@ pier-core/target/
 
 ## Derived
 DerivedData/
+*.log
