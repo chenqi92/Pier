@@ -121,8 +121,8 @@ class TerminalNSView: NSView {
     // PTY handle from Rust
     private var terminalHandle: OpaquePointer?
     private var readTimer: Timer?
-    /// Debounce timer for PTY resize — avoids flooding the shell with SIGWINCH during drag.
-    private var resizeDebounceTimer: Timer?
+    /// Debounce work item for PTY resize — avoids flooding the shell with SIGWINCH during drag.
+    private var resizeWorkItem: DispatchWorkItem?
     private var blinkTimer: Timer?
     private var currentSessionId: UUID?
     /// Weak reference to current session for SSH password auto-input
@@ -2067,12 +2067,14 @@ class TerminalNSView: NSView {
         // Debounce the actual PTY resize (ioctl → SIGWINCH).
         // During drag, KVO fires every ~8ms. Rapid SIGWINCH interrupts running
         // commands (eza, etc.) and causes shell to reprint prompt repeatedly.
-        // Only send SIGWINCH after drag settles (150ms idle).
-        resizeDebounceTimer?.invalidate()
-        resizeDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+        // Only send SIGWINCH after drag settles (300ms idle).
+        resizeWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
             guard let self = self, let handle = self.terminalHandle else { return }
             pier_terminal_resize(handle, UInt16(self.ptyCols), UInt16(self.ptyRows))
         }
+        resizeWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
 
         // Update document frame to fill visible area (use super to avoid re-triggering our setFrameSize override)
         let totalLines = scrollback.count + screen.count
@@ -2226,7 +2228,7 @@ class TerminalNSView: NSView {
     deinit {
         readTimer?.invalidate()
         blinkTimer?.invalidate()
-        resizeDebounceTimer?.invalidate()
+        resizeWorkItem?.cancel()
         // Save PTY to cache instead of destroying — the session survives
         // NSView deallocation (e.g. tab switch). Only handleTabClosed destroys PTYs.
         if let sessionId = currentSessionId, let handle = terminalHandle {
