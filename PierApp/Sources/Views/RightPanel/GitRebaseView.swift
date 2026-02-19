@@ -15,18 +15,18 @@ struct GitRebaseView: View {
                 Image(systemName: "arrow.triangle.swap")
                     .foregroundColor(.purple)
                     .font(.caption)
-                Text("Interactive Rebase")
+                Text(LS("git.interactiveRebase"))
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
 
                 if rebaseInProgress {
-                    Button("Abort") { gitViewModel.abortRebase() }
+                    Button(LS("git.rebaseAbort")) { gitViewModel.abortRebase() }
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
                         .foregroundColor(.red)
 
-                    Button("Continue") { gitViewModel.continueRebase() }
+                    Button(LS("git.rebaseContinue")) { gitViewModel.continueRebase() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.mini)
                 }
@@ -48,7 +48,7 @@ struct GitRebaseView: View {
                 VStack(spacing: 0) {
                     // Controls
                     HStack {
-                        Picker("Commits:", selection: $commitCount) {
+                        Picker(LS("git.rebaseCommits"), selection: $commitCount) {
                             Text("10").tag(10)
                             Text("20").tag(20)
                             Text("50").tag(50)
@@ -59,7 +59,7 @@ struct GitRebaseView: View {
 
                         Spacer()
 
-                        Button("Execute Rebase") {
+                        Button(LS("git.executeRebase")) {
                             executeRebase()
                         }
                         .buttonStyle(.borderedProminent)
@@ -153,7 +153,7 @@ struct GitRebaseView: View {
             Image(systemName: "arrow.triangle.swap")
                 .font(.system(size: 30))
                 .foregroundColor(.secondary)
-            Text("No commits to rebase")
+            Text(LS("git.noRebaseCommits"))
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -165,10 +165,10 @@ struct GitRebaseView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 30))
                 .foregroundColor(.orange)
-            Text("Rebase in progress")
+            Text(LS("git.rebaseInProgress"))
                 .font(.caption)
                 .fontWeight(.medium)
-            Text("Resolve conflicts and continue, or abort the rebase.")
+            Text(LS("git.rebaseResolveHint"))
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

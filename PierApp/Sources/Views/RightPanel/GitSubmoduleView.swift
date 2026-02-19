@@ -13,27 +13,27 @@ struct GitSubmoduleView: View {
                 Image(systemName: "square.stack.3d.up")
                     .foregroundColor(.cyan)
                     .font(.caption)
-                Text("Submodules")
+                Text(LS("git.submodules"))
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
 
                 Button(action: { gitViewModel.initSubmodules() }) {
-                    Text("Init")
+                    Text(LS("git.submoduleInit"))
                         .font(.system(size: 9))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
 
                 Button(action: { gitViewModel.updateSubmodules() }) {
-                    Text("Update")
+                    Text(LS("git.submoduleUpdate"))
                         .font(.system(size: 9))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
 
                 Button(action: { gitViewModel.syncSubmodules() }) {
-                    Text("Sync")
+                    Text(LS("git.submoduleSync"))
                         .font(.system(size: 9))
                 }
                 .buttonStyle(.bordered)
@@ -58,7 +58,7 @@ struct GitSubmoduleView: View {
                     Image(systemName: "square.stack.3d.up")
                         .font(.system(size: 30))
                         .foregroundColor(.secondary)
-                    Text("No submodules")
+                    Text(LS("git.noSubmodules"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -103,12 +103,12 @@ struct GitSubmoduleView: View {
         }
         .padding(.vertical, 2)
         .contextMenu {
-            Button("Copy Path") {
+            Button(LS("git.copyPath")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(submodule.path, forType: .string)
             }
             if !submodule.url.isEmpty {
-                Button("Copy URL") {
+                Button(LS("git.copyURL")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(submodule.url, forType: .string)
                 }

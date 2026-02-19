@@ -692,3 +692,28 @@
 "git.conflicts" = "Conflicts";
 "git.loadingMore" = "Loading more...";
 "git.allLoaded" = "All commits loaded";
+
+// MARK: - Git Submodules
+
+"git.submodules" = "Submodules";
+"git.submoduleInit" = "Init";
+"git.submoduleUpdate" = "Update";
+"git.submoduleSync" = "Sync";
+"git.noSubmodules" = "No submodules";
+"git.copyPath" = "Copy Path";
+"git.copyURL" = "Copy URL";
+
+// MARK: - Git Interactive Rebase
+
+"git.interactiveRebase" = "Interactive Rebase";
+"git.rebaseAbort" = "Abort";
+"git.rebaseContinue" = "Continue";
+"git.rebaseCommits" = "Commits:";
+"git.executeRebase" = "Execute Rebase";
+"git.noRebaseCommits" = "No commits to rebase";
+"git.rebaseInProgress" = "Rebase in progress";
+"git.rebaseResolveHint" = "Resolve conflicts and continue, or abort the rebase.";
+
+// MARK: - Git Config
+
+"git.config" = "Git Config";

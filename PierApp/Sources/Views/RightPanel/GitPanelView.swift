@@ -320,21 +320,21 @@ struct GitPanelView: View {
                     .font(.system(size: 9))
             }
             .buttonStyle(.borderless)
-            .help("Rebase")
+            .help(LS("git.interactiveRebase"))
 
             Button(action: { showingSubmodule.toggle() }) {
                 Image(systemName: "square.stack.3d.up")
                     .font(.system(size: 9))
             }
             .buttonStyle(.borderless)
-            .help("Submodules")
+            .help(LS("git.submodules"))
 
             Button(action: { showingConfig.toggle() }) {
                 Image(systemName: "gearshape.2")
                     .font(.system(size: 9))
             }
             .buttonStyle(.borderless)
-            .help("Git Config")
+            .help(LS("git.config"))
 
             Divider()
                 .frame(height: 12)
@@ -615,12 +615,20 @@ struct GitPanelView: View {
 
                     Spacer()
 
-                    // Commit button with dropdown for Commit & Push
+                    // Unified split button: [Commit | ▾]
+                    let isDisabled = viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty
                     HStack(spacing: 0) {
-                        Button(LS("git.commit")) { viewModel.commit() }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .disabled(viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty)
+                        Button(action: { viewModel.commit() }) {
+                            Text(LS("git.commit"))
+                                .font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isDisabled)
+
+                        Divider()
+                            .frame(height: 14)
 
                         Menu {
                             Button(action: { viewModel.commit() }) {
@@ -632,12 +640,19 @@ struct GitPanelView: View {
                         } label: {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 8, weight: .bold))
-                                .frame(width: 16, height: 20)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
                         }
                         .menuStyle(.borderlessButton)
-                        .frame(width: 16)
-                        .disabled(viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .disabled(isDisabled)
                     }
+                    .foregroundColor(isDisabled ? .white.opacity(0.5) : .white)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(isDisabled ? Color.accentColor.opacity(0.4) : Color.accentColor)
+                    )
                 }
             }
             .padding(.horizontal, 8)

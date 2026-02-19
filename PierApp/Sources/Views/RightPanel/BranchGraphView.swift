@@ -582,11 +582,6 @@ struct BranchGraphView: View {
 
     @State private var selectedHash: String?
     @State private var selectedDetail: GitCommitDetail?
-    @State private var showingDiff = false
-    @State private var diffText = ""
-    @State private var diffPath = ""
-    @State private var diffAdd = 0
-    @State private var diffDel = 0
     @State private var showingPathPicker = false
     @State private var pathPickerSelection: Set<String> = []
 
@@ -607,7 +602,7 @@ struct BranchGraphView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else { scrollContent }
         }
-        .sheet(isPresented: $showingDiff) { diffSheet }
+
         .sheet(isPresented: $showingPathPicker) { pathPickerSheet }
     }
 
@@ -1051,60 +1046,12 @@ struct BranchGraphView: View {
         }.padding(.vertical, 2).background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
     }
 
-    private var diffSheet: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text.fill").font(.system(size: 11)).foregroundColor(.secondary)
-                Text(diffPath).font(.system(size: 11, weight: .medium, design: .monospaced)).lineLimit(1)
-                HStack(spacing: 4) {
-                    Text("+\(diffAdd)").font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(.green)
-                    Text("-\(diffDel)").font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(.red)
-                }.padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .controlBackgroundColor)))
-                Spacer()
-                Button(action: { showingDiff = false }) {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundColor(.secondary)
-                }.buttonStyle(.plain)
-            }.padding(.horizontal, 12).padding(.vertical, 8).background(Color(nsColor: .windowBackgroundColor))
-            Divider()
-            GeometryReader { geo in
-                ScrollView([.horizontal, .vertical]) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(diffText.components(separatedBy: "\n").enumerated()), id: \.offset) { i, line in
-                            diffLine(line, i + 1)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    .frame(minWidth: geo.size.width, minHeight: geo.size.height, alignment: .topLeading)
-                }
-            }
-            .background(Color(nsColor: .textBackgroundColor))
-        }.frame(minWidth: 700, idealWidth: 900, minHeight: 500, idealHeight: 700)
-    }
-
-    private func diffLine(_ line: String, _ num: Int) -> some View {
-        let (bg, fg): (Color, Color) = {
-            if line.hasPrefix("+++") || line.hasPrefix("---") { return (.blue.opacity(0.05), .secondary) }
-            if line.hasPrefix("@@") { return (.purple.opacity(0.08), .purple) }
-            if line.hasPrefix("+") { return (.green.opacity(0.1), Color(nsColor: .systemGreen)) }
-            if line.hasPrefix("-") { return (.red.opacity(0.1), Color(nsColor: .systemRed)) }
-            return (.clear, .primary)
-        }()
-        return HStack(spacing: 0) {
-            Text("\(num)").font(.system(size: 10, design: .monospaced)).foregroundColor(.secondary.opacity(0.5))
-                .frame(width: 40, alignment: .trailing).padding(.trailing, 6).background(bg.opacity(0.3))
-            Text(line.isEmpty ? " " : line).font(.system(size: 11, design: .monospaced)).foregroundColor(fg).textSelection(.enabled)
-            Spacer(minLength: 0)
-        }.background(bg)
-    }
-
     private func showFileDiff(_ hash: String, _ path: String, _ add: Int, _ del: Int) {
-        diffAdd = add; diffDel = del
         Task {
             if let d = await gitViewModel.runGit(["diff", "\(hash)~1", hash, "--", path]) {
-                diffText = d; diffPath = path; showingDiff = true
+                DiffWindowController.show(diffText: d)
             } else if let d = await gitViewModel.runGit(["show", hash, "--", path]) {
-                diffText = d; diffPath = path; showingDiff = true
+                DiffWindowController.show(diffText: d)
             }
         }
     }

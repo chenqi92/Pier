@@ -692,3 +692,28 @@
 "git.conflicts" = "冲突";
 "git.loadingMore" = "加载更多...";
 "git.allLoaded" = "全部提交已加载";
+
+// MARK: - Git Submodules
+
+"git.submodules" = "子模块";
+"git.submoduleInit" = "初始化";
+"git.submoduleUpdate" = "更新";
+"git.submoduleSync" = "同步";
+"git.noSubmodules" = "无子模块";
+"git.copyPath" = "复制路径";
+"git.copyURL" = "复制 URL";
+
+// MARK: - Git Interactive Rebase
+
+"git.interactiveRebase" = "交互式变基";
+"git.rebaseAbort" = "中止";
+"git.rebaseContinue" = "继续";
+"git.rebaseCommits" = "提交数:";
+"git.executeRebase" = "执行变基";
+"git.noRebaseCommits" = "无可变基的提交";
+"git.rebaseInProgress" = "变基进行中";
+"git.rebaseResolveHint" = "请解决冲突后继续，或中止变基。";
+
+// MARK: - Git Config
+
+"git.config" = "Git 配置";
