@@ -268,7 +268,8 @@ struct ProfileEditorView: View {
                     }
                 }
             }
-            .padding()
+            .padding(.horizontal)
+            .padding(.vertical, 8)
 
             Divider()
 
@@ -283,6 +284,7 @@ struct ProfileEditorView: View {
             }
             .padding()
         }
-        .frame(width: 420, height: 520)
+        .frame(width: 420)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

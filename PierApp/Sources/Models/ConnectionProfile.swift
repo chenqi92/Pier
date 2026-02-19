@@ -20,8 +20,8 @@ struct ConnectionProfile: Codable, Identifiable, Hashable {
 
         var displayName: String {
             switch self {
-            case .password: return String(localized: "conn.authPassword")
-            case .keyFile:  return String(localized: "conn.authKeyFile")
+            case .password: return LS("conn.authPassword")
+            case .keyFile:  return LS("conn.authKeyFile")
             }
         }
     }
