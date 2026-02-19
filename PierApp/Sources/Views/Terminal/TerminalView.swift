@@ -121,6 +121,8 @@ class TerminalNSView: NSView {
     // PTY handle from Rust
     private var terminalHandle: OpaquePointer?
     private var readTimer: Timer?
+    /// Debounce timer for PTY resize — avoids flooding the shell with SIGWINCH during drag.
+    private var resizeDebounceTimer: Timer?
     private var blinkTimer: Timer?
     private var currentSessionId: UUID?
     /// Weak reference to current session for SSH password auto-input
@@ -2058,8 +2060,19 @@ class TerminalNSView: NSView {
 
         ptyCols = newCols
         ptyRows = newRows
-        pier_terminal_resize(handle, UInt16(newCols), UInt16(newRows))
+
+        // Reflow screen buffer immediately for visual responsiveness
         resizeScreenBuffer()
+
+        // Debounce the actual PTY resize (ioctl → SIGWINCH).
+        // During drag, KVO fires every ~8ms. Rapid SIGWINCH interrupts running
+        // commands (eza, etc.) and causes shell to reprint prompt repeatedly.
+        // Only send SIGWINCH after drag settles (150ms idle).
+        resizeDebounceTimer?.invalidate()
+        resizeDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+            guard let self = self, let handle = self.terminalHandle else { return }
+            pier_terminal_resize(handle, UInt16(self.ptyCols), UInt16(self.ptyRows))
+        }
 
         // Update document frame to fill visible area (use super to avoid re-triggering our setFrameSize override)
         let totalLines = scrollback.count + screen.count
@@ -2082,29 +2095,43 @@ class TerminalNSView: NSView {
     private func resizeScreenBuffer() {
         let oldCols = screen.first?.count ?? ptyCols
 
-        // ── Step 1: Combine all rows (scrollback + screen) into logical lines ──
-        // A "logical line" is a sequence of physical rows connected by soft wraps.
-        let allRows: [[TerminalCell]] = scrollback + screen
-        var allWrapped: [Bool] = scrollbackLineWrapped + screenLineWrapped
+        NSLog("[Reflow] START: oldCols=%d newCols=%d, screen=%d rows, scrollback=%d rows, cursor=(%d,%d)",
+              oldCols, ptyCols, screen.count, scrollback.count, cursorX, cursorY)
 
-        // Ensure arrays match
+        // ── Step 0: Strip trailing blank padding rows from screen ──
+        var trimmedScreen = screen
+        var trimmedScreenWrapped = screenLineWrapped
+        while !trimmedScreen.isEmpty {
+            let lastRow = trimmedScreen.last!
+            let lastWrapped = trimmedScreenWrapped.last ?? false
+            let isBlank = !lastWrapped && lastRow.allSatisfy { $0.character == " " && $0.attr == .default }
+            if isBlank {
+                trimmedScreen.removeLast()
+                if !trimmedScreenWrapped.isEmpty { trimmedScreenWrapped.removeLast() }
+            } else {
+                break
+            }
+        }
+
+        NSLog("[Reflow] After trim: trimmedScreen=%d rows (stripped %d blank)", trimmedScreen.count, screen.count - trimmedScreen.count)
+
+        // ── Step 1: Combine all rows (scrollback + screen) into logical lines ──
+        let allRows: [[TerminalCell]] = scrollback + trimmedScreen
+        var allWrapped: [Bool] = scrollbackLineWrapped + trimmedScreenWrapped
+
         while allWrapped.count < allRows.count { allWrapped.append(false) }
         while allWrapped.count > allRows.count { allWrapped.removeLast() }
 
-        // Build logical lines: each is a flat array of TerminalCell
-        // A logical line starts where wrapped[i] == false (hard break or first line)
         var logicalLines: [[TerminalCell]] = []
         var currentLogical: [TerminalCell] = []
 
         for i in 0..<allRows.count {
             if i == 0 || !allWrapped[i] {
-                // Start of a new logical line
                 if i > 0 {
                     logicalLines.append(currentLogical)
                 }
                 currentLogical = allRows[i]
             } else {
-                // Continuation (soft wrap) — append to current logical line
                 currentLogical.append(contentsOf: allRows[i])
             }
         }
@@ -2112,10 +2139,20 @@ class TerminalNSView: NSView {
             logicalLines.append(currentLogical)
         }
 
+        // Log logical lines content (first 20 chars of each)
+        for (idx, ll) in logicalLines.enumerated() {
+            let preview = String(ll.prefix(30).map { $0.character })
+            NSLog("[Reflow] LogicalLine[%d]: len=%d preview=\"%@\"", idx, ll.count, preview)
+        }
+
         // ── Step 2: Strip trailing blanks from each logical line ──
         for i in 0..<logicalLines.count {
+            let beforeLen = logicalLines[i].count
             while logicalLines[i].count > 0 && logicalLines[i].last?.character == " " && logicalLines[i].last?.attr == .default {
                 logicalLines[i].removeLast()
+            }
+            if logicalLines[i].count != beforeLen {
+                NSLog("[Reflow] LogicalLine[%d] trimmed: %d -> %d chars", i, beforeLen, logicalLines[i].count)
             }
         }
 
@@ -2125,50 +2162,53 @@ class TerminalNSView: NSView {
 
         for logicalLine in logicalLines {
             if logicalLine.isEmpty {
-                // Empty line (just a newline) → single blank row
                 newRows.append(Array(repeating: .blank, count: ptyCols))
                 newWrapped.append(false)
             } else {
-                // Split into chunks of ptyCols
                 var offset = 0
                 var isFirst = true
                 while offset < logicalLine.count {
                     let end = min(offset + ptyCols, logicalLine.count)
                     var row = Array(logicalLine[offset..<end])
-                    // Pad to ptyCols
                     if row.count < ptyCols {
                         row.append(contentsOf: Array(repeating: TerminalCell.blank, count: ptyCols - row.count))
                     }
                     newRows.append(row)
-                    newWrapped.append(isFirst ? false : true)  // first chunk = hard, rest = soft
+                    newWrapped.append(isFirst ? false : true)
                     isFirst = false
                     offset = end
                 }
             }
         }
 
+        NSLog("[Reflow] Re-wrapped: %d logical lines -> %d physical rows (ptyRows=%d)", logicalLines.count, newRows.count, ptyRows)
+
         // ── Step 4: Split into scrollback and screen ──
+        // Track cursor: the cursor was at a specific content position.
+        // After reflow, map it to the last content row in the new screen.
+        let contentRowCount = newRows.count  // total content rows after reflow
+
         if newRows.count <= ptyRows {
-            // Everything fits on screen
             scrollback = []
             scrollbackLineWrapped = []
             screen = newRows
             screenLineWrapped = newWrapped
-            // Pad to ptyRows
             while screen.count < ptyRows {
                 screen.append(Array(repeating: .blank, count: ptyCols))
                 screenLineWrapped.append(false)
             }
+            // Cursor: place at last content row
+            cursorY = min(max(0, contentRowCount - 1), ptyRows - 1)
         } else {
-            // Split: last ptyRows rows are screen, rest is scrollback
             let splitPoint = newRows.count - ptyRows
             scrollback = Array(newRows[0..<splitPoint])
             scrollbackLineWrapped = Array(newWrapped[0..<splitPoint])
             screen = Array(newRows[splitPoint...])
             screenLineWrapped = Array(newWrapped[splitPoint...])
+            // Cursor: at last content row (which is the last row on screen)
+            cursorY = ptyRows - 1
         }
 
-        // Trim scrollback to max limit
         if scrollback.count > maxScrollback {
             let excess = scrollback.count - maxScrollback
             scrollback.removeFirst(excess)
@@ -2176,7 +2216,9 @@ class TerminalNSView: NSView {
         }
 
         cursorX = min(cursorX, ptyCols - 1)
-        cursorY = min(cursorY, ptyRows - 1)
+
+        NSLog("[Reflow] END: screen=%d rows, scrollback=%d rows, cursor=(%d,%d)",
+              screen.count, scrollback.count, cursorX, cursorY)
     }
 
     // MARK: - Cleanup
@@ -2184,6 +2226,7 @@ class TerminalNSView: NSView {
     deinit {
         readTimer?.invalidate()
         blinkTimer?.invalidate()
+        resizeDebounceTimer?.invalidate()
         // Save PTY to cache instead of destroying — the session survives
         // NSView deallocation (e.g. tab switch). Only handleTabClosed destroys PTYs.
         if let sessionId = currentSessionId, let handle = terminalHandle {
