@@ -628,6 +628,8 @@
 "git.pushing" = "Pushing...";
 "git.commitSuccess" = "Committed successfully";
 "git.commitFailed" = "Commit failed";
+"git.commitAndPush" = "Commit and Push";
+"git.commitAndPushSuccess" = "Committed and pushed successfully";
 "git.pullSuccess" = "Pull completed";
 "git.pullFailed" = "Pull failed";
 "git.pushSuccess" = "Push completed";

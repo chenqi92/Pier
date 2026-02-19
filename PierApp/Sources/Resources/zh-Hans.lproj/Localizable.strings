@@ -628,6 +628,8 @@
 "git.pushing" = "推送中...";
 "git.commitSuccess" = "提交成功";
 "git.commitFailed" = "提交失败";
+"git.commitAndPush" = "提交并推送";
+"git.commitAndPushSuccess" = "提交并推送成功";
 "git.pullSuccess" = "拉取完成";
 "git.pullFailed" = "拉取失败";
 "git.pushSuccess" = "推送完成";

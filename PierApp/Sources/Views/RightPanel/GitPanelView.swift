@@ -615,10 +615,29 @@ struct GitPanelView: View {
 
                     Spacer()
 
-                    Button(LS("git.commit")) { viewModel.commit() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                    // Commit button with dropdown for Commit & Push
+                    HStack(spacing: 0) {
+                        Button(LS("git.commit")) { viewModel.commit() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty)
+
+                        Menu {
+                            Button(action: { viewModel.commit() }) {
+                                Label(LS("git.commit"), systemImage: "checkmark.circle")
+                            }
+                            Button(action: { viewModel.commitAndPush() }) {
+                                Label(LS("git.commitAndPush"), systemImage: "arrow.up.circle")
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                                .frame(width: 16, height: 20)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .frame(width: 16)
                         .disabled(viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty)
+                    }
                 }
             }
             .padding(.horizontal, 8)

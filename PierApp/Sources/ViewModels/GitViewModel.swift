@@ -293,7 +293,9 @@ class GitViewModel: ObservableObject {
     // MARK: - Status
 
     func loadStatus() async {
-        guard let output = await runGit(["status", "--porcelain=v1"]) else { return }
+        let result = await runGitFull(["status", "--porcelain=v1"])
+        // Even if output is empty (clean tree), we must clear the lists
+        let output = result.stdout
 
         var staged: [GitFileChange] = []
         var unstaged: [GitFileChange] = []
@@ -381,8 +383,31 @@ class GitViewModel: ObservableObject {
                 commitMessage = ""
                 await loadStatus()
                 await loadHistory()
+                await loadBranch()
             } else {
                 setOperationStatus(.failure(message: LS("git.commitFailed"), detail: result.stderr))
+            }
+        }
+    }
+
+    func commitAndPush() {
+        guard !commitMessage.isEmpty else { return }
+        Task {
+            let commitResult = await runGitFull(["commit", "-m", commitMessage])
+            if commitResult.succeeded {
+                commitMessage = ""
+                setOperationStatus(.running(description: LS("git.pushing")))
+                let pushResult = await runGitFull(["push"])
+                if pushResult.succeeded {
+                    setOperationStatus(.success(message: LS("git.commitAndPushSuccess")))
+                } else {
+                    setOperationStatus(.failure(message: LS("git.pushFailed"), detail: pushResult.stderr))
+                }
+                await loadStatus()
+                await loadHistory()
+                await loadBranch()
+            } else {
+                setOperationStatus(.failure(message: LS("git.commitFailed"), detail: commitResult.stderr))
             }
         }
     }
