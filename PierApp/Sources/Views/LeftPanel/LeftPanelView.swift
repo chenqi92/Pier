@@ -89,6 +89,7 @@ struct ServerListPanelView: View {
     @State private var renamingGroup: ServerGroup?
     @State private var renameGroupName = ""
     @State private var searchText = ""
+    @State private var selectedServerId: UUID?
 
     /// Drag state: the profile being dragged
     @State private var draggingProfileId: UUID?
@@ -398,12 +399,14 @@ struct ServerListPanelView: View {
             isConnected: isProfileConnected(profile),
             isConnecting: serviceManager.isConnecting,
             anyConnected: serviceManager.isConnected,
+            isSelected: selectedServerId == profile.id,
             groups: serviceManager.savedGroups,
             onConnect: { connectProfile(profile) },
             onDisconnect: { serviceManager.disconnect() },
             onEdit: { editProfile(profile) },
             onDelete: { serviceManager.deleteProfile(profile) },
-            onMoveToGroup: { groupId in serviceManager.moveProfile(profile, toGroup: groupId) }
+            onMoveToGroup: { groupId in serviceManager.moveProfile(profile, toGroup: groupId) },
+            onSelect: { selectedServerId = profile.id }
         )
         .padding(.leading, indented ? 12 : 0)
         .onDrag {
@@ -518,14 +521,27 @@ struct ServerRowView: View {
     let isConnected: Bool
     let isConnecting: Bool
     let anyConnected: Bool
+    let isSelected: Bool
     let groups: [ServerGroup]
     let onConnect: () -> Void
     let onDisconnect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onMoveToGroup: (UUID?) -> Void
+    let onSelect: () -> Void
 
     @State private var isHovered = false
+
+    private var rowBackground: Color {
+        if isSelected {
+            return Color.accentColor.opacity(0.15)
+        } else if isConnected {
+            return Color.green.opacity(0.06)
+        } else if isHovered {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.6)
+        }
+        return Color.clear
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -537,8 +553,8 @@ struct ServerRowView: View {
             // Server info
             VStack(alignment: .leading, spacing: 1) {
                 Text(profile.name.isEmpty ? profile.host : profile.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isConnected ? .primary : .secondary)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundColor(isSelected || isConnected ? .primary : .secondary)
                     .lineLimit(1)
                 Text("\(profile.username)@\(profile.host):\(profile.port)")
                     .font(.system(size: 9, design: .monospaced))
@@ -548,8 +564,8 @@ struct ServerRowView: View {
 
             Spacer()
 
-            // Action buttons (visible on hover or when connected)
-            if isHovered || isConnected {
+            // Action buttons (visible on hover, selected, or when connected)
+            if isHovered || isSelected || isConnected {
                 if isConnected {
                     Button(action: onDisconnect) {
                         Image(systemName: "bolt.horizontal.circle.fill")
@@ -574,14 +590,24 @@ struct ServerRowView: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isConnected
-                    ? Color.green.opacity(0.06)
-                    : (isHovered ? Color(nsColor: .controlBackgroundColor).opacity(0.6) : Color.clear))
+                .fill(rowBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1)
         )
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
+        }
+        .onTapGesture(count: 2) {
+            if !isConnected && !isConnecting && !anyConnected {
+                onConnect()
+            }
+        }
+        .onTapGesture(count: 1) {
+            onSelect()
         }
         .contextMenu {
             Button(action: onConnect) {
@@ -612,11 +638,6 @@ struct ServerRowView: View {
 
             Button(role: .destructive, action: onDelete) {
                 Label(LS("conn.deleteServer"), systemImage: "trash")
-            }
-        }
-        .onTapGesture(count: 2) {
-            if !isConnected && !isConnecting && !anyConnected {
-                onConnect()
             }
         }
     }

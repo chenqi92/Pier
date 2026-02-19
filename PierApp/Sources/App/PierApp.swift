@@ -88,4 +88,8 @@ extension Notification.Name {
     static let newTerminalTab = Notification.Name("pier.newTerminalTab")
     static let newSSHConnection = Notification.Name("pier.newSSHConnection")
     static let showNewTabChooser = Notification.Name("pier.showNewTabChooser")
+    // Terminal pane split/close (from NSView right-click menu)
+    static let terminalSplitH = Notification.Name("pier.terminalSplitH")
+    static let terminalSplitV = Notification.Name("pier.terminalSplitV")
+    static let terminalClosePane = Notification.Name("pier.terminalClosePane")
 }

@@ -51,6 +51,8 @@ impl PtyProcess {
                     .collect();
 
                 // Set environment for proper terminal behavior
+                // IMPORTANT: putenv() stores a POINTER to the CString buffer.
+                // All CStrings must live until execvp() replaces the process.
                 let term = std::ffi::CString::new("TERM=xterm-256color").unwrap();
                 libc::putenv(term.as_ptr() as *mut _);
 
@@ -59,6 +61,46 @@ impl PtyProcess {
                 libc::putenv(lang.as_ptr() as *mut _);
                 let lc_all = std::ffi::CString::new("LC_ALL=en_US.UTF-8").unwrap();
                 libc::putenv(lc_all.as_ptr() as *mut _);
+
+                // Use ZDOTDIR to inject a custom prompt AFTER /etc/zshrc.
+                // /etc/zshrc sets PS1="%n@%m %1~ %# " which overrides env PROMPT.
+                // ZDOTDIR's .zshrc runs after /etc/zshrc, so our PS1 takes effect.
+                // The custom .zshrc sources the user's real ~/.zshrc to preserve aliases.
+                let pid = libc::getpid();
+                let zdot_dir = format!("/tmp/.pier_zsh_{}", pid);
+                let zdot_zshrc = format!("{}/{}", zdot_dir, ".zshrc");
+                // Create temp dir
+                let zdot_dir_c = std::ffi::CString::new(zdot_dir.as_str()).unwrap();
+                libc::mkdir(zdot_dir_c.as_ptr(), 0o700);
+
+                // Declare zdotdir_env in OUTER scope so it lives until execvp.
+                // putenv stores a raw pointer — the CString must NOT be dropped.
+                let zdotdir_env;
+
+                // Write custom .zshrc
+                if let Ok(home) = std::env::var("HOME") {
+                    let content = format!(
+                        "# Pier Terminal — auto-generated, sources real ~/.zshrc\n\
+                         [ -f \"{home}/.zshrc\" ] && source \"{home}/.zshrc\"\n\
+                         # Short prompt: ~/dir %  (cyan directory name)\n\
+                         PS1='%F{{cyan}}%1~%f %# '\n\
+                         # Clean up temp dir on exit\n\
+                         trap 'rm -rf {zdot_dir}' EXIT\n",
+                        home = home,
+                        zdot_dir = zdot_dir
+                    );
+                    if let Ok(()) = std::fs::write(&zdot_zshrc, content) {
+                        zdotdir_env = std::ffi::CString::new(format!("ZDOTDIR={}", zdot_dir)).unwrap();
+                        libc::putenv(zdotdir_env.as_ptr() as *mut _);
+                    }
+                }
+
+                // Change to user's home directory (default working directory)
+                // Without this, the terminal inherits the CWD of the launching process.
+                if let Ok(home) = std::env::var("HOME") {
+                    let home_c = std::ffi::CString::new(home.as_str()).unwrap();
+                    libc::chdir(home_c.as_ptr());
+                }
 
                 libc::execvp(program_c.as_ptr(), args_ptrs.as_ptr());
                 // If exec fails, exit

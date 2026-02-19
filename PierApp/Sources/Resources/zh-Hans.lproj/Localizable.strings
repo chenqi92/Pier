@@ -617,6 +617,10 @@
 "terminal.splitHorizontal" = "水平分屏";
 "terminal.splitVertical" = "垂直分屏";
 "terminal.closePane" = "关闭面板";
+"terminal.copy" = "复制";
+"terminal.paste" = "粘贴";
+"terminal.selectAll" = "全选";
+"terminal.clear" = "清屏";
 
 // MARK: - File Browser Extended
 

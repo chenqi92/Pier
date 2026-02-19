@@ -68,6 +68,28 @@ class TerminalViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Listen for split/close from NSView right-click menu
+        NotificationCenter.default.publisher(for: .terminalSplitH)
+            .sink { [weak self] notification in
+                guard let self = self, let sessionId = notification.object as? UUID else { return }
+                self.splitBySessionId(sessionId, direction: .horizontal)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .terminalSplitV)
+            .sink { [weak self] notification in
+                guard let self = self, let sessionId = notification.object as? UUID else { return }
+                self.splitBySessionId(sessionId, direction: .vertical)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .terminalClosePane)
+            .sink { [weak self] notification in
+                guard let self = self, let sessionId = notification.object as? UUID else { return }
+                self.closePaneBySessionId(sessionId)
+            }
+            .store(in: &cancellables)
+
         // Start with one default tab
         addNewTab()
     }
@@ -85,7 +107,7 @@ class TerminalViewModel: ObservableObject {
 
     // MARK: - Tab Management
 
-    func addNewTab(title: String = "Terminal", shell: String = "/bin/zsh", isSSH: Bool = false, profile: ConnectionProfile? = nil, preloadedPassword: String? = nil, sshProgram: String? = nil, sshArgs: [String]? = nil) {
+    func addNewTab(title: String = "Terminal", shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh", isSSH: Bool = false, profile: ConnectionProfile? = nil, preloadedPassword: String? = nil, sshProgram: String? = nil, sshArgs: [String]? = nil) {
         let tab = TerminalTab(title: title, isSSH: isSSH, shellPath: shell)
         let session = TerminalSessionInfo(shellPath: shell, isSSH: isSSH, title: title)
         session.sshProgram = sshProgram
@@ -197,7 +219,7 @@ class TerminalViewModel: ObservableObject {
         // Find the target node in the tree
         guard let target = findNode(nodeId, in: root) else { return }
         // Create a new session for the new pane
-        let newSession = TerminalSessionInfo(shellPath: "/bin/zsh", isSSH: false, title: "Terminal")
+        let newSession = TerminalSessionInfo(isSSH: false, title: "Terminal")
         let sm = RemoteServiceManager()
         newSession.remoteServiceManager = sm
         target.split(direction: direction, newSession: newSession)
@@ -225,6 +247,37 @@ class TerminalViewModel: ObservableObject {
             }
         }
         return nil
+    }
+
+    /// Find a SplitNode that contains the given session ID.
+    private func findNodeBySession(_ sessionId: UUID, in node: SplitNode) -> SplitNode? {
+        if case .leaf(let s) = node.content, s.id == sessionId { return node }
+        if case .branch(_, let children) = node.content {
+            for child in children {
+                if let found = findNodeBySession(sessionId, in: child) { return found }
+            }
+        }
+        return nil
+    }
+
+    /// Split by session ID (from NSView right-click menu notification).
+    func splitBySessionId(_ sessionId: UUID, direction: SplitDirection) {
+        for (tabId, root) in splitNodes {
+            if let node = findNodeBySession(sessionId, in: root) {
+                performSplit(tabId: tabId, nodeId: node.id, direction: direction)
+                return
+            }
+        }
+    }
+
+    /// Close pane by session ID (from NSView right-click menu notification).
+    func closePaneBySessionId(_ sessionId: UUID) {
+        for (tabId, root) in splitNodes {
+            if let node = findNodeBySession(sessionId, in: root) {
+                closePane(tabId: tabId, nodeId: node.id)
+                return
+            }
+        }
     }
 
     // MARK: - Terminal Input

@@ -23,7 +23,7 @@ struct TerminalTab: Identifiable {
     var title: String
     var isSSH: Bool = false
     var serverProfile: ServerProfile? = nil
-    var shellPath: String = "/bin/zsh"
+    var shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
     /// Per-tab color label (auto-assigned for SSH, user-customizable)
     var colorTag: Int? = nil  // nil=none, 0-7 = palette index
 
@@ -51,7 +51,7 @@ class TerminalSessionInfo: Identifiable, ObservableObject {
     /// Password to auto-type when SSH prompts for it. Consumed once used.
     var pendingSSHPassword: String?
 
-    init(shellPath: String = "/bin/zsh", isSSH: Bool = false, title: String = "Local") {
+    init(shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh", isSSH: Bool = false, title: String = "Local") {
         self.shellPath = shellPath
         self.isSSH = isSSH
         self.title = title

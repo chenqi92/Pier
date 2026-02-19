@@ -27,6 +27,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize Rust core exactly once (fixes B1: was in onAppear, could fire multiple times)
         pier_init()
 
+        // Register bundled Nerd Font for terminal icon support (eza --icons, etc.)
+        registerBundledFonts()
+
         // Configure app appearance (use stored preference, not hardcoded dark)
         AppThemeManager.shared.applyAppearance()
 
@@ -53,6 +56,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         // Global key handling (if needed beyond SwiftUI)
         return event
+    }
+}
+
+/// Register bundled fonts (Nerd Font Symbols) so the terminal can render icon characters.
+private func registerBundledFonts() {
+    let fontFileName = "SymbolsNerdFontMono-Regular"
+    // Try Bundle.module first (SPM resources), then Bundle.main
+    let fontURL = Bundle.module.url(forResource: fontFileName, withExtension: "ttf")
+        ?? Bundle.main.url(forResource: fontFileName, withExtension: "ttf")
+    guard let url = fontURL else {
+        return
+    }
+    var errorRef: Unmanaged<CFError>?
+    if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &errorRef) {
+        if let error = errorRef?.takeRetainedValue() {
+            // Font already registered is fine — ignore that error
+            let nsError = error as Error as NSError
+            if nsError.code != 105 { // kCTFontManagerErrorAlreadyRegistered
+                NSLog("Failed to register Nerd Font: \(error)")
+            }
+        }
     }
 }
 

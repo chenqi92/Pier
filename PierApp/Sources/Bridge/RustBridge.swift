@@ -15,7 +15,7 @@ enum PierBridge {
     // MARK: - Terminal
 
     /// Create a new terminal session.
-    static func createTerminal(cols: UInt16, rows: UInt16, shell: String = "/bin/zsh") -> OpaquePointer? {
+    static func createTerminal(cols: UInt16, rows: UInt16, shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh") -> OpaquePointer? {
         return shell.withCString { shellPtr in
             pier_terminal_create(cols, rows, shellPtr)
         }

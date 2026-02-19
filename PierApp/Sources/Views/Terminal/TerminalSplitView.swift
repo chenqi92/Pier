@@ -90,18 +90,6 @@ struct TerminalSplitView: View {
         switch node.content {
         case .leaf(let session):
             TerminalView(session: session)
-                .contextMenu {
-                    Button(LS("terminal.splitHorizontal")) {
-                        onSplitH?(node.id)
-                    }
-                    Button(LS("terminal.splitVertical")) {
-                        onSplitV?(node.id)
-                    }
-                    Divider()
-                    Button(LS("terminal.closePane")) {
-                        onClosePane?(node.id)
-                    }
-                }
 
         case .branch(let direction, let children):
             if direction == .horizontal {

@@ -444,12 +444,25 @@ class TerminalNSView: NSView {
             ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         cachedFallbackFont = NSFont.systemFont(ofSize: fontSize)
 
-        // Try to find a Powerline-compatible font for special symbols
+        // Try to find a Powerline/Nerd Font for special symbols.
+        // Register the bundled Nerd Font first (once) — must happen before font search.
+        // Cannot rely on AppDelegate because SwiftUI creates views before applicationDidFinishLaunching.
+        struct FontRegistration {
+            static var done = false
+        }
+        if !FontRegistration.done {
+            FontRegistration.done = true
+            if let fontURL = Bundle.module.url(forResource: "SymbolsNerdFontMono-Regular", withExtension: "ttf")
+                ?? Bundle.main.url(forResource: "SymbolsNerdFontMono-Regular", withExtension: "ttf") {
+                CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, nil)
+            }
+        }
+
         let powerlineFontNames = [
             fontFamily,  // User's font may already have Powerline glyphs
+            "Symbols Nerd Font Mono",  // Bundled Nerd Font
             "MesloLGS NF",
             "MesloLGS Nerd Font Mono",
-            "Symbols Nerd Font Mono",
             "Hack Nerd Font Mono",
             "JetBrainsMono Nerd Font Mono",
             "FiraCode Nerd Font Mono",
@@ -616,7 +629,7 @@ class TerminalNSView: NSView {
         cursorY = 0
     }
 
-    func startTerminal(shell: String = "/bin/zsh") {
+    func startTerminal(shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh") {
         // Use the scroll view's visible area for size, not document view bounds
         let visibleSize = enclosingScrollView?.contentView.bounds.size ?? bounds.size
         let cols = max(Int(80), Int(visibleSize.width / cellWidth))
@@ -1574,13 +1587,38 @@ class TerminalNSView: NSView {
 
                 // Build font with bold/italic traits + Powerline fallback
                 let isASCII = char.asciiValue != nil
-                let isPowerline = char.unicodeScalars.first.map {
-                    (0xE0A0...0xE0D4).contains(Int($0.value)) ||
-                    (0xE200...0xE2FF).contains(Int($0.value)) ||
-                    (0xF000...0xF8FF).contains(Int($0.value))
+                let isPowerlineOrNerdFont = char.unicodeScalars.first.map {
+                    let v = Int($0.value)
+                    // Powerline symbols
+                    return (0xE0A0...0xE0D4).contains(v) ||
+                    // Seti-UI + Custom
+                    (0xE5FA...0xE6B5).contains(v) ||
+                    // Devicons
+                    (0xE700...0xE7C5).contains(v) ||
+                    // Font Awesome
+                    (0xF000...0xF2E0).contains(v) ||
+                    // Font Awesome Extension
+                    (0xE200...0xE2A9).contains(v) ||
+                    // Material Design Icons
+                    (0xF0001...0xF1AF0).contains(v) ||
+                    // Weather Icons
+                    (0xE300...0xE3E3).contains(v) ||
+                    // Octicons
+                    (0xF400...0xF532).contains(v) ||
+                    (0x2665...0x2665).contains(v) || // ♥
+                    (0x26A1...0x26A1).contains(v) || // ⚡
+                    // IEC Power Symbols
+                    (0x23FB...0x23FE).contains(v) ||
+                    (0x2B58...0x2B58).contains(v) ||
+                    // Font Logos
+                    (0xF300...0xF375).contains(v) ||
+                    // Pomicons
+                    (0xE000...0xE00A).contains(v) ||
+                    // Codicons
+                    (0xEA60...0xEBEB).contains(v)
                 } ?? false
                 let baseFont: NSFont
-                if isPowerline, let plFont = cachedPowerlineFont {
+                if isPowerlineOrNerdFont, let plFont = cachedPowerlineFont {
                     baseFont = plFont
                 } else if isASCII {
                     baseFont = cachedMonoFont
@@ -1608,7 +1646,14 @@ class TerminalNSView: NSView {
                 }
 
                 let str = NSAttributedString(string: String(char), attributes: attrs)
-                str.draw(at: NSPoint(x: CGFloat(col) * cellWidth + 2, y: y))
+                // Adjust vertical position for Nerd Font symbols to align with text baseline
+                var drawY = y
+                if isPowerlineOrNerdFont, let plFont = cachedPowerlineFont {
+                    let mainAscent = cachedMonoFont.ascender
+                    let symbolAscent = plFont.ascender
+                    drawY += (mainAscent - symbolAscent)
+                }
+                str.draw(at: NSPoint(x: CGFloat(col) * cellWidth + 2, y: drawY))
             }
         }
 
@@ -1668,7 +1713,20 @@ class TerminalNSView: NSView {
             }
         }
 
-        selectionStart = cellPosition(for: point)
+        let pos = cellPosition(for: point)
+
+        if event.clickCount == 2 {
+            // Double-click: select word at cursor position
+            selectWord(at: pos)
+            return
+        } else if event.clickCount == 3 {
+            // Triple-click: select entire line
+            selectLine(at: pos.row)
+            return
+        }
+
+        // Single click: start drag selection
+        selectionStart = pos
         selectionEnd = selectionStart
         isSelecting = true
         needsDisplay = true
@@ -1683,6 +1741,137 @@ class TerminalNSView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         isSelecting = false
+    }
+
+    // MARK: - Word & Line Selection
+
+    /// Select the word at the given cell position (for double-click).
+    private func selectWord(at pos: (row: Int, col: Int)) {
+        guard let line = cellLineAtRow(pos.row) else { return }
+        let col = min(pos.col, line.count - 1)
+        guard col >= 0 else { return }
+
+        // Define word characters (alphanumeric + underscore + common path chars)
+        func isWordChar(_ c: Character) -> Bool {
+            c.isLetter || c.isNumber || c == "_" || c == "-" || c == "." || c == "/" || c == "~"
+        }
+
+        // Find word start
+        var startCol = col
+        while startCol > 0 && isWordChar(line[startCol - 1].character) {
+            startCol -= 1
+        }
+        // Find word end
+        var endCol = col
+        while endCol < line.count - 1 && isWordChar(line[endCol + 1].character) {
+            endCol += 1
+        }
+
+        selectionStart = (row: pos.row, col: startCol)
+        selectionEnd = (row: pos.row, col: endCol + 1)
+        isSelecting = false
+        needsDisplay = true
+    }
+
+    /// Select an entire line (for triple-click).
+    private func selectLine(at row: Int) {
+        guard let line = cellLineAtRow(row) else { return }
+        selectionStart = (row: row, col: 0)
+        selectionEnd = (row: row, col: line.count)
+        isSelecting = false
+        needsDisplay = true
+    }
+
+    // MARK: - Context Menu (Right-Click)
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+
+        let copyItem = NSMenuItem(title: LS("terminal.copy"), action: #selector(copySelection), keyEquivalent: "c")
+        copyItem.keyEquivalentModifierMask = .command
+        copyItem.isEnabled = selectedText() != nil
+        menu.addItem(copyItem)
+
+        let pasteItem = NSMenuItem(title: LS("terminal.paste"), action: #selector(pasteClipboard), keyEquivalent: "v")
+        pasteItem.keyEquivalentModifierMask = .command
+        menu.addItem(pasteItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let selectAllItem = NSMenuItem(title: LS("terminal.selectAll"), action: #selector(selectAllText), keyEquivalent: "a")
+        selectAllItem.keyEquivalentModifierMask = .command
+        menu.addItem(selectAllItem)
+
+        let clearItem = NSMenuItem(title: LS("terminal.clear"), action: #selector(clearTerminal), keyEquivalent: "k")
+        clearItem.keyEquivalentModifierMask = .command
+        menu.addItem(clearItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let splitHItem = NSMenuItem(title: LS("terminal.splitHorizontal"), action: #selector(splitHorizontally), keyEquivalent: "")
+        menu.addItem(splitHItem)
+
+        let splitVItem = NSMenuItem(title: LS("terminal.splitVertical"), action: #selector(splitVertically), keyEquivalent: "")
+        menu.addItem(splitVItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let closeItem = NSMenuItem(title: LS("terminal.closePane"), action: #selector(closePane), keyEquivalent: "")
+        menu.addItem(closeItem)
+
+        return menu
+    }
+
+    @objc private func copySelection() {
+        if let text = selectedText() {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    @objc private func pasteClipboard() {
+        if let text = NSPasteboard.general.string(forType: .string) {
+            let bytes = Array(text.utf8)
+            if let handle = terminalHandle, !bytes.isEmpty {
+                pier_terminal_write(handle, bytes, UInt(bytes.count))
+            }
+        }
+    }
+
+    @objc private func selectAllText() {
+        let totalLines = scrollback.count + screen.count
+        guard totalLines > 0 else { return }
+        selectionStart = (row: 0, col: 0)
+        if let lastLine = cellLineAtRow(totalLines - 1) {
+            selectionEnd = (row: totalLines - 1, col: lastLine.count)
+        }
+        needsDisplay = true
+    }
+
+    @objc private func clearTerminal() {
+        scrollback.removeAll()
+        for row in 0..<screen.count {
+            screen[row] = Array(repeating: TerminalCell(), count: ptyCols)
+        }
+        cursorX = 0
+        cursorY = 0
+        updateDocumentSize()
+        needsDisplay = true
+    }
+
+    @objc private func splitHorizontally() {
+        guard let sessionId = currentSessionId else { return }
+        NotificationCenter.default.post(name: .terminalSplitH, object: sessionId)
+    }
+
+    @objc private func splitVertically() {
+        guard let sessionId = currentSessionId else { return }
+        NotificationCenter.default.post(name: .terminalSplitV, object: sessionId)
+    }
+
+    @objc private func closePane() {
+        guard let sessionId = currentSessionId else { return }
+        NotificationCenter.default.post(name: .terminalClosePane, object: sessionId)
     }
 
     /// Get the selected text as a string.

@@ -617,6 +617,10 @@
 "terminal.splitHorizontal" = "Split Horizontally";
 "terminal.splitVertical" = "Split Vertically";
 "terminal.closePane" = "Close Pane";
+"terminal.copy" = "Copy";
+"terminal.paste" = "Paste";
+"terminal.selectAll" = "Select All";
+"terminal.clear" = "Clear";
 
 // MARK: - File Browser Extended
 

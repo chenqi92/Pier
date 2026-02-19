@@ -483,7 +483,7 @@ struct StatusBarView: View {
                 Circle()
                     .fill(Color.green)
                     .frame(width: 5, height: 5)
-                Text(session.shellPath)
+                Text(session.isSSH ? session.title : (session.shellPath as NSString).lastPathComponent)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)
             }
