@@ -7,8 +7,6 @@ import SwiftUI
 /// `.localDirectoryChanged` notification → `GitViewModel.setRepoPath()`.
 struct GitPanelView: View {
     @StateObject private var viewModel = GitViewModel()
-    @State private var diffText: String = ""
-    @State private var showingDiff = false
     @State private var showingBlame = false
     @State private var showingBranchManager = false
     @State private var showingTagManager = false
@@ -58,34 +56,11 @@ struct GitPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .gitShowDiff)) { notification in
             if let info = notification.object as? [String: String],
                let diff = info["diff"] {
-                diffText = diff
-                showingDiff = true
+                DiffWindowController.show(diffText: diff)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gitShowBlame)) { _ in
             showingBlame = true
-        }
-        .sheet(isPresented: $showingDiff) {
-            VStack(spacing: 0) {
-                HStack {
-                    Text(LS("diff.title"))
-                        .font(.system(size: 12, weight: .medium))
-                    Spacer()
-                    Button(action: { showingDiff = false }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(LS("diff.close"))
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color(nsColor: .windowBackgroundColor))
-                Divider()
-                DiffView(diffText: diffText)
-            }
-            .frame(minWidth: 700, idealWidth: 900, minHeight: 500, idealHeight: 700)
         }
         .sheet(isPresented: $showingBlame) {
             VStack(spacing: 0) {
@@ -459,11 +434,18 @@ struct GitPanelView: View {
 
     // MARK: - Changes
 
+    @State private var commitAreaHeight: CGFloat = 120
+
     private var changesView: some View {
         VStack(spacing: 0) {
             // Staged section
             if !viewModel.stagedFiles.isEmpty {
-                sectionHeader(String(format: LS("git.staged"), viewModel.stagedFiles.count), color: .green)
+                sectionHeader(
+                    String(format: LS("git.staged"), viewModel.stagedFiles.count),
+                    color: .green,
+                    actionLabel: LS("git.unstageAll"),
+                    action: { viewModel.unstageAll() }
+                )
                 List(viewModel.stagedFiles) { file in
                     gitFileRow(file: file, staged: true)
                 }
@@ -472,7 +454,13 @@ struct GitPanelView: View {
             }
 
             // Unstaged section
-            sectionHeader(String(format: LS("git.unstaged"), viewModel.unstagedFiles.count), color: .orange)
+            sectionHeader(
+                String(format: LS("git.unstaged"), viewModel.unstagedFiles.count),
+                color: .orange,
+                actionLabel: LS("git.stageAll"),
+                action: { viewModel.stageAll() },
+                showAction: !viewModel.unstagedFiles.isEmpty
+            )
             List(viewModel.unstagedFiles) { file in
                 gitFileRow(file: file, staged: false)
             }
@@ -480,12 +468,14 @@ struct GitPanelView: View {
 
             Divider()
 
-            // Commit area
-            commitArea
+            // Resizable commit area with drag handle
+            commitAreaResizable
         }
     }
 
-    private func sectionHeader(_ title: String, color: Color) -> some View {
+    private func sectionHeader(_ title: String, color: Color,
+                               actionLabel: String = "", action: (() -> Void)? = nil,
+                               showAction: Bool = true) -> some View {
         HStack {
             Circle()
                 .fill(color)
@@ -494,6 +484,14 @@ struct GitPanelView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.secondary)
             Spacer()
+            if showAction, let action {
+                Button(action: action) {
+                    Text(actionLabel)
+                        .font(.system(size: 9))
+                        .foregroundColor(color)
+                }
+                .buttonStyle(.borderless)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 3)
@@ -511,6 +509,13 @@ struct GitPanelView: View {
             Text(file.fileName)
                 .font(.caption)
                 .lineLimit(1)
+
+            if !file.parentPath.isEmpty {
+                Text(file.parentPath)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
 
             Spacer()
 
@@ -533,8 +538,19 @@ struct GitPanelView: View {
             }
         }
         .padding(.vertical, 1)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            if staged {
+                viewModel.showDiffStaged(file.path)
+            } else {
+                viewModel.showDiff(file.path)
+            }
+        }
         .contextMenu {
-            Button(LS("git.showDiff")) { viewModel.showDiff(file.path) }
+            Button(LS("git.showDiff")) {
+                if staged { viewModel.showDiffStaged(file.path) }
+                else { viewModel.showDiff(file.path) }
+            }
             Button(LS("git.blame")) { viewModel.blameFile(file.path) }
             Divider()
             if staged {
@@ -546,31 +562,68 @@ struct GitPanelView: View {
         }
     }
 
-    private var commitArea: some View {
-        VStack(spacing: 6) {
-            TextField(LS("git.commitPlaceholder"), text: $viewModel.commitMessage, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.caption)
-                .lineLimit(3...5)
-                .padding(6)
+    // MARK: - Resizable Commit Area
+
+    private var commitAreaResizable: some View {
+        VStack(spacing: 0) {
+            // Divider with drag gesture for resizing
+            Divider()
+                .overlay(
+                    Color.clear
+                        .frame(height: 8)
+                        .contentShape(Rectangle())
+                )
+                .onHover { inside in
+                    if inside { NSCursor.resizeUpDown.push() }
+                    else { NSCursor.pop() }
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            let newH = commitAreaHeight - value.translation.height
+                            commitAreaHeight = max(60, min(300, newH))
+                        }
+                )
+
+            VStack(spacing: 6) {
+                // Scrollable commit message
+                ScrollView {
+                    TextEditor(text: $viewModel.commitMessage)
+                        .font(.caption)
+                        .frame(minHeight: commitAreaHeight - 50, alignment: .topLeading)
+                }
+                .frame(height: commitAreaHeight - 40)
                 .background(Color(nsColor: .textBackgroundColor))
                 .cornerRadius(4)
+                .overlay(
+                    Group {
+                        if viewModel.commitMessage.isEmpty {
+                            Text(LS("git.commitPlaceholder"))
+                                .font(.caption)
+                                .foregroundColor(.secondary.opacity(0.5))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 6)
+                                .allowsHitTesting(false)
+                        }
+                    }, alignment: .topLeading
+                )
 
-            HStack {
-                Button(LS("git.stageAll")) { viewModel.stageAll() }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
+                HStack {
+                    Button(LS("git.stageAll")) { viewModel.stageAll() }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
 
-                Spacer()
+                    Spacer()
 
-                Button(LS("git.commit")) { viewModel.commit() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty)
+                    Button(LS("git.commit")) { viewModel.commit() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(viewModel.commitMessage.isEmpty || viewModel.stagedFiles.isEmpty)
+                }
             }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 6)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
     }
 
     // MARK: - Stash

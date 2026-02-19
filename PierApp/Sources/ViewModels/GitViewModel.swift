@@ -40,12 +40,18 @@ enum GitFileStatus: String {
 }
 
 struct GitFileChange: Identifiable {
-    var id: String { path }
+    var id: String { path + ":" + status.badge }
     let path: String
     let status: GitFileStatus
 
     var fileName: String {
         (path as NSString).lastPathComponent
+    }
+
+    /// Directory portion of path for gray-text display (e.g. "PierApp/Sources/ViewModels")
+    var parentPath: String {
+        let dir = (path as NSString).deletingLastPathComponent
+        return dir.isEmpty ? "" : dir
     }
 }
 
@@ -352,6 +358,13 @@ class GitViewModel: ObservableObject {
         }
     }
 
+    func unstageAll() {
+        Task {
+            _ = await runGit(["reset", "HEAD"])
+            await loadStatus()
+        }
+    }
+
     func discardChanges(_ path: String) {
         Task {
             _ = await runGit(["checkout", "--", path])
@@ -405,6 +418,17 @@ class GitViewModel: ObservableObject {
     func showDiff(_ path: String) {
         Task {
             if let diff = await runGit(["diff", path]) {
+                NotificationCenter.default.post(
+                    name: .gitShowDiff,
+                    object: ["diff": diff]
+                )
+            }
+        }
+    }
+
+    func showDiffStaged(_ path: String) {
+        Task {
+            if let diff = await runGit(["diff", "--cached", path]) {
                 NotificationCenter.default.post(
                     name: .gitShowDiff,
                     object: ["diff": diff]
@@ -626,12 +650,21 @@ class GitViewModel: ObservableObject {
             let refs: String
             let message: String
             let author: String
-            let date_relative: String
+            let date_timestamp: Int64
         }
         guard let data = json.data(using: .utf8),
               let commits = try? JSONDecoder().decode([FFICommit].self, from: data) else {
             return []
         }
+        let cal = Calendar.current
+        let now = Date()
+        let todayStart = cal.startOfDay(for: now)
+        let yesterdayStart = cal.date(byAdding: .day, value: -1, to: todayStart)!
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm"
+        let fullFmt = DateFormatter()
+        fullFmt.dateFormat = "yyyy/M/d HH:mm"
+
         return commits.map { c in
             let parents = c.parents.isEmpty ? [] : c.parents.split(separator: " ").map(String.init)
             var refs: [String] = []
@@ -643,12 +676,22 @@ class GitViewModel: ObservableObject {
                         .replacingOccurrences(of: "HEAD -> ", with: "\u{2192} ")
                 }
             }
+            // Format date IDEA-style: 今天/昨天 HH:mm or yyyy/M/d HH:mm
+            let commitDate = Date(timeIntervalSince1970: TimeInterval(c.date_timestamp))
+            let dateStr: String
+            if commitDate >= todayStart {
+                dateStr = "今天 \(timeFmt.string(from: commitDate))"
+            } else if commitDate >= yesterdayStart {
+                dateStr = "昨天 \(timeFmt.string(from: commitDate))"
+            } else {
+                dateStr = fullFmt.string(from: commitDate)
+            }
             return CommitNode(
                 id: c.hash,
                 shortHash: c.short_hash,
                 message: c.message,
                 author: c.author,
-                relativeDate: c.date_relative,
+                relativeDate: dateStr,
                 refs: refs,
                 parents: parents
             )

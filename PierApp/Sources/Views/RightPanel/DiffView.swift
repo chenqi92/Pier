@@ -22,6 +22,32 @@ enum DiffDisplayMode {
     case sideBySide
 }
 
+// MARK: - Diff Window Controller
+
+/// Opens a resizable native macOS window for diff viewing.
+final class DiffWindowController {
+    private static var currentWindow: NSWindow?
+
+    static func show(diffText: String) {
+        currentWindow?.close()
+
+        let contentView = NSHostingView(rootView: DiffView(diffText: diffText))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = contentView
+        window.minSize = NSSize(width: 600, height: 400)
+        window.title = LS("diff.title")
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        window.isReleasedWhenClosed = false
+        currentWindow = window
+    }
+}
+
 // MARK: - Diff View
 
 /// Unified diff visualization with inline and side-by-side modes.
@@ -33,12 +59,9 @@ struct DiffView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             diffHeader
-
             Divider()
 
-            // Content
             if parsedLines.isEmpty {
                 emptyState
             } else {
@@ -46,7 +69,7 @@ struct DiffView: View {
                 case .inline:
                     inlineDiffView
                 case .sideBySide:
-                    sideBySideDiffView
+                    SyncedSideBySideDiffView(parsedLines: parsedLines)
                 }
             }
         }
@@ -74,7 +97,6 @@ struct DiffView: View {
 
             Spacer()
 
-            // Stats
             let additions = parsedLines.filter { $0.type == .addition }.count
             let deletions = parsedLines.filter { $0.type == .deletion }.count
             if additions + deletions > 0 {
@@ -86,7 +108,6 @@ struct DiffView: View {
                     .foregroundColor(.red)
             }
 
-            // Toggle mode
             Picker("", selection: $displayMode) {
                 Image(systemName: "list.bullet").tag(DiffDisplayMode.inline)
                 Image(systemName: "rectangle.split.2x1").tag(DiffDisplayMode.sideBySide)
@@ -101,11 +122,14 @@ struct DiffView: View {
     // MARK: - Inline Diff
 
     private var inlineDiffView: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(parsedLines) { line in
-                    inlineLineView(line)
+        GeometryReader { geo in
+            ScrollView([.horizontal, .vertical]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(parsedLines) { line in
+                        inlineLineView(line)
+                    }
                 }
+                .frame(minWidth: geo.size.width)
             }
         }
         .font(.system(size: 11, design: .monospaced))
@@ -114,85 +138,28 @@ struct DiffView: View {
 
     private func inlineLineView(_ line: DiffLine) -> some View {
         HStack(spacing: 0) {
-            // Old line number
             Text(line.oldLineNumber.map { "\($0)" } ?? "")
-                .frame(width: 36, alignment: .trailing)
+                .frame(width: 40, alignment: .trailing)
                 .foregroundColor(.secondary)
                 .font(.system(size: 9, design: .monospaced))
 
-            // New line number
             Text(line.newLineNumber.map { "\($0)" } ?? "")
-                .frame(width: 36, alignment: .trailing)
+                .frame(width: 40, alignment: .trailing)
                 .foregroundColor(.secondary)
                 .font(.system(size: 9, design: .monospaced))
 
-            // Gutter indicator
             Text(gutterChar(line.type))
                 .frame(width: 16)
                 .foregroundColor(lineColor(line.type))
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
 
-            // Content
-            Text(line.text)
+            Text(line.text.isEmpty ? " " : line.text)
                 .foregroundColor(lineColor(line.type))
                 .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 40)
         }
-        .padding(.vertical, 0.5)
-        .background(lineBackground(line.type))
-    }
-
-    // MARK: - Side by Side Diff
-
-    private var sideBySideDiffView: some View {
-        let (leftLines, rightLines) = splitSideBySide()
-
-        return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(0..<max(leftLines.count, rightLines.count), id: \.self) { index in
-                    HStack(spacing: 0) {
-                        // Left (old)
-                        if index < leftLines.count {
-                            sideLineView(leftLines[index], isLeft: true)
-                        } else {
-                            Color.clear.frame(maxWidth: .infinity, minHeight: 16)
-                        }
-
-                        Divider()
-
-                        // Right (new)
-                        if index < rightLines.count {
-                            sideLineView(rightLines[index], isLeft: false)
-                        } else {
-                            Color.clear.frame(maxWidth: .infinity, minHeight: 16)
-                        }
-                    }
-                }
-            }
-        }
-        .font(.system(size: 11, design: .monospaced))
-        .background(Color(nsColor: .textBackgroundColor))
-    }
-
-    private func sideLineView(_ line: DiffLine, isLeft: Bool) -> some View {
-        HStack(spacing: 0) {
-            let num = isLeft ? line.oldLineNumber : line.newLineNumber
-            Text(num.map { "\($0)" } ?? "")
-                .frame(width: 30, alignment: .trailing)
-                .foregroundColor(.secondary)
-                .font(.system(size: 9, design: .monospaced))
-
-            Text(" ")
-
-            Text(line.text)
-                .foregroundColor(lineColor(line.type))
-                .textSelection(.enabled)
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity)
         .padding(.vertical, 0.5)
         .background(lineBackground(line.type))
     }
@@ -219,7 +186,6 @@ struct DiffView: View {
         var newLine = 0
         var lineId = 0
 
-        // Extract filename from diff header
         for rawLine in diffText.split(separator: "\n", omittingEmptySubsequences: false).prefix(5) {
             if rawLine.hasPrefix("+++ b/") {
                 fileName = String(rawLine.dropFirst(6))
@@ -234,11 +200,10 @@ struct DiffView: View {
             let text = String(rawLine)
 
             if text.hasPrefix("@@") {
-                // Parse hunk header: @@ -oldStart,count +newStart,count @@
                 let parts = text.split(separator: " ")
                 if parts.count >= 3 {
-                    let oldPart = parts[1].dropFirst() // remove "-"
-                    let newPart = parts[2].dropFirst() // remove "+"
+                    let oldPart = parts[1].dropFirst()
+                    let newPart = parts[2].dropFirst()
                     oldLine = Int(oldPart.split(separator: ",").first ?? "0") ?? 0
                     newLine = Int(newPart.split(separator: ",").first ?? "0") ?? 0
                 }
@@ -254,7 +219,6 @@ struct DiffView: View {
                 oldLine += 1
                 newLine += 1
             } else if !text.hasPrefix("diff ") && !text.hasPrefix("index ") && !text.hasPrefix("---") && !text.hasPrefix("+++") {
-                // Other lines (binary, etc.)
                 lines.append(DiffLine(id: lineId, text: text, type: .context, oldLineNumber: nil, newLineNumber: nil))
             }
 
@@ -262,30 +226,6 @@ struct DiffView: View {
         }
 
         parsedLines = lines
-    }
-
-    /// Split parsed lines into left (deletions + context) and right (additions + context)
-    /// for side-by-side display.
-    private func splitSideBySide() -> ([DiffLine], [DiffLine]) {
-        var left: [DiffLine] = []
-        var right: [DiffLine] = []
-
-        for line in parsedLines {
-            switch line.type {
-            case .header:
-                left.append(line)
-                right.append(line)
-            case .context:
-                left.append(line)
-                right.append(line)
-            case .deletion:
-                left.append(line)
-            case .addition:
-                right.append(line)
-            }
-        }
-
-        return (left, right)
     }
 
     // MARK: - Styling Helpers
@@ -314,6 +254,326 @@ struct DiffView: View {
         case .deletion: return Color.red.opacity(0.08)
         case .header:   return Color.cyan.opacity(0.05)
         case .context:  return .clear
+        }
+    }
+}
+
+// MARK: - Synced Side-by-Side Diff View (NSView-based for native scroll sync)
+
+/// This entire side-by-side diff view is implemented in AppKit for native
+/// scroll bar support and synchronized scrolling between left and right panes.
+struct SyncedSideBySideDiffView: NSViewRepresentable {
+    let parsedLines: [DiffLine]
+
+    func makeCoordinator() -> SideBySideCoordinator {
+        SideBySideCoordinator()
+    }
+
+    func makeNSView(context: Context) -> SideBySideContainerView {
+        let container = SideBySideContainerView(coordinator: context.coordinator)
+        let (left, right) = splitSideBySide()
+        container.update(leftLines: left, rightLines: right)
+        return container
+    }
+
+    func updateNSView(_ container: SideBySideContainerView, context: Context) {
+        let (left, right) = splitSideBySide()
+        container.update(leftLines: left, rightLines: right)
+    }
+
+    private func splitSideBySide() -> ([DiffLine], [DiffLine]) {
+        var left: [DiffLine] = []
+        var right: [DiffLine] = []
+        var pendingDeletions: [DiffLine] = []
+        var pendingAdditions: [DiffLine] = []
+        var blankId = -1
+
+        func makeBlank() -> DiffLine {
+            blankId -= 1
+            return DiffLine(id: blankId, text: "", type: .context, oldLineNumber: nil, newLineNumber: nil)
+        }
+
+        func flushPending() {
+            let maxCount = max(pendingDeletions.count, pendingAdditions.count)
+            for i in 0..<maxCount {
+                left.append(i < pendingDeletions.count ? pendingDeletions[i] : makeBlank())
+                right.append(i < pendingAdditions.count ? pendingAdditions[i] : makeBlank())
+            }
+            pendingDeletions.removeAll()
+            pendingAdditions.removeAll()
+        }
+
+        for line in parsedLines {
+            switch line.type {
+            case .header, .context:
+                flushPending()
+                left.append(line)
+                right.append(line)
+            case .deletion:
+                if !pendingAdditions.isEmpty { flushPending() }
+                pendingDeletions.append(line)
+            case .addition:
+                pendingAdditions.append(line)
+            }
+        }
+        flushPending()
+
+        return (left, right)
+    }
+}
+
+/// Coordinator that observes scroll changes and synchronizes both panes.
+class SideBySideCoordinator: NSObject {
+    weak var leftScrollView: NSScrollView?
+    weak var rightScrollView: NSScrollView?
+    private var isSyncing = false
+
+    func startObserving() {
+        guard let leftClip = leftScrollView?.contentView,
+              let rightClip = rightScrollView?.contentView else { return }
+
+        leftClip.postsBoundsChangedNotifications = true
+        rightClip.postsBoundsChangedNotifications = true
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(leftDidScroll(_:)),
+            name: NSView.boundsDidChangeNotification, object: leftClip
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(rightDidScroll(_:)),
+            name: NSView.boundsDidChangeNotification, object: rightClip
+        )
+    }
+
+    @objc private func leftDidScroll(_ notification: Notification) {
+        guard !isSyncing, let left = leftScrollView, let right = rightScrollView else { return }
+        isSyncing = true
+        let origin = left.contentView.bounds.origin
+        right.contentView.scroll(to: origin)
+        right.reflectScrolledClipView(right.contentView)
+        isSyncing = false
+    }
+
+    @objc private func rightDidScroll(_ notification: Notification) {
+        guard !isSyncing, let left = leftScrollView, let right = rightScrollView else { return }
+        isSyncing = true
+        let origin = right.contentView.bounds.origin
+        left.contentView.scroll(to: origin)
+        left.reflectScrolledClipView(left.contentView)
+        isSyncing = false
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+}
+
+/// Container NSView hosting left and right scroll panes with a draggable divider.
+class SideBySideContainerView: NSView {
+    let leftScrollView = NSScrollView()
+    let rightScrollView = NSScrollView()
+    let dividerView = NSView()
+    let dividerHitView = NSView() // wider invisible area for dragging
+    let coordinator: SideBySideCoordinator
+
+    private let leftDocView = DiffDocumentView()
+    private let rightDocView = DiffDocumentView()
+
+    private var dividerFraction: CGFloat = 0.5
+    private let dividerWidth: CGFloat = 1
+    private let dividerHitWidth: CGFloat = 8
+
+    init(coordinator: SideBySideCoordinator) {
+        self.coordinator = coordinator
+        super.init(frame: .zero)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setupViews() {
+        // Left scroll view
+        leftScrollView.hasVerticalScroller = true
+        leftScrollView.hasHorizontalScroller = true
+        leftScrollView.autohidesScrollers = false
+        leftScrollView.borderType = .noBorder
+        leftScrollView.backgroundColor = .textBackgroundColor
+        leftScrollView.drawsBackground = true
+        leftScrollView.documentView = leftDocView
+        addSubview(leftScrollView)
+
+        // Right scroll view
+        rightScrollView.hasVerticalScroller = true
+        rightScrollView.hasHorizontalScroller = true
+        rightScrollView.autohidesScrollers = false
+        rightScrollView.borderType = .noBorder
+        rightScrollView.backgroundColor = .textBackgroundColor
+        rightScrollView.drawsBackground = true
+        rightScrollView.documentView = rightDocView
+        addSubview(rightScrollView)
+
+        // Visible thin divider
+        dividerView.wantsLayer = true
+        dividerView.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        addSubview(dividerView)
+
+        // wider invisible drag area on top of divider
+        dividerHitView.wantsLayer = true
+        addSubview(dividerHitView)
+
+        // Set up drag gesture on hit area
+        let panGesture = NSPanGestureRecognizer(target: self, action: #selector(handleDividerDrag(_:)))
+        dividerHitView.addGestureRecognizer(panGesture)
+
+        // Set up tracking area for cursor change
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        dividerHitView.addTrackingArea(trackingArea)
+
+        // Link coordinator
+        coordinator.leftScrollView = leftScrollView
+        coordinator.rightScrollView = rightScrollView
+        coordinator.startObserving()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.resizeLeftRight.push()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.pop()
+    }
+
+    @objc private func handleDividerDrag(_ gesture: NSPanGestureRecognizer) {
+        let location = gesture.location(in: self)
+        let newFrac = location.x / bounds.width
+        dividerFraction = max(0.2, min(0.8, newFrac))
+        needsLayout = true
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+
+        let totalW = bounds.width
+        let totalH = bounds.height
+        let leftW = (totalW - dividerHitWidth) * dividerFraction
+        let rightX = leftW + dividerHitWidth
+        let rightW = totalW - rightX
+
+        leftScrollView.frame = NSRect(x: 0, y: 0, width: leftW, height: totalH)
+        rightScrollView.frame = NSRect(x: rightX, y: 0, width: rightW, height: totalH)
+
+        // Thin visible divider centered in hit area
+        let dividerX = leftW + (dividerHitWidth - dividerWidth) / 2
+        dividerView.frame = NSRect(x: dividerX, y: 0, width: dividerWidth, height: totalH)
+
+        // Hit area
+        dividerHitView.frame = NSRect(x: leftW, y: 0, width: dividerHitWidth, height: totalH)
+    }
+
+    func update(leftLines: [DiffLine], rightLines: [DiffLine]) {
+        leftDocView.update(lines: leftLines, isLeft: true)
+        rightDocView.update(lines: rightLines, isLeft: false)
+    }
+}
+
+/// Custom flipped NSView that draws diff lines with proper text measurement for content size.
+class DiffDocumentView: NSView {
+    private var lines: [DiffLine] = []
+    private var isLeft: Bool = true
+
+    private let lineHeight: CGFloat = 18
+    private let gutterWidth: CGFloat = 40
+    private let gutterPadding: CGFloat = 6
+    private let textFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    private let numFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
+
+    override var isFlipped: Bool { true }
+
+    func update(lines: [DiffLine], isLeft: Bool) {
+        self.lines = lines
+        self.isLeft = isLeft
+
+        // Measure max text width accurately
+        let attrs: [NSAttributedString.Key: Any] = [.font: textFont]
+        var maxW: CGFloat = 200
+        for line in lines {
+            let w = (line.text as NSString).size(withAttributes: attrs).width
+            if w > maxW { maxW = w }
+        }
+
+        let totalW = gutterWidth + gutterPadding + maxW + 60
+        let totalH = CGFloat(lines.count) * lineHeight + 10
+
+        frame = NSRect(x: 0, y: 0, width: totalW, height: totalH)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let textAttrsBase: [NSAttributedString.Key: Any] = [.font: textFont]
+        let numAttrs: [NSAttributedString.Key: Any] = [
+            .font: numFont,
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]
+
+        for (i, line) in lines.enumerated() {
+            let y = CGFloat(i) * lineHeight
+            let rowRect = NSRect(x: 0, y: y, width: bounds.width, height: lineHeight)
+
+            guard dirtyRect.intersects(rowRect) else { continue }
+
+            // Background
+            let bg = bgColor(line.type)
+            if bg != .clear {
+                bg.setFill()
+                rowRect.fill()
+            }
+
+            // Line number
+            let num = isLeft ? line.oldLineNumber : line.newLineNumber
+            if let num = num {
+                let numStr = "\(num)"
+                let numSize = (numStr as NSString).size(withAttributes: numAttrs)
+                let numX = gutterWidth - numSize.width - 2
+                let numY = y + (lineHeight - numSize.height) / 2
+                (numStr as NSString).draw(at: NSPoint(x: numX, y: numY), withAttributes: numAttrs)
+            }
+
+            // Text content
+            let textX = gutterWidth + gutterPadding
+            let fg = fgColor(line.type)
+            var textAttrs = textAttrsBase
+            textAttrs[.foregroundColor] = fg
+            let text = line.text.isEmpty ? " " : line.text
+            let textSize = (text as NSString).size(withAttributes: textAttrs)
+            let textY = y + (lineHeight - textSize.height) / 2
+            (text as NSString).draw(at: NSPoint(x: textX, y: textY), withAttributes: textAttrs)
+        }
+    }
+
+    private func bgColor(_ type: DiffLineType) -> NSColor {
+        switch type {
+        case .addition: return NSColor.systemGreen.withAlphaComponent(0.08)
+        case .deletion: return NSColor.systemRed.withAlphaComponent(0.08)
+        case .header:   return NSColor.systemCyan.withAlphaComponent(0.05)
+        case .context:  return .clear
+        }
+    }
+
+    private func fgColor(_ type: DiffLineType) -> NSColor {
+        switch type {
+        case .addition: return .systemGreen
+        case .deletion: return .systemRed
+        case .header:   return .systemCyan
+        case .context:  return .labelColor
         }
     }
 }

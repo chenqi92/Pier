@@ -86,6 +86,7 @@
 "git.push" = "推送";
 "git.stage" = "暂存";
 "git.unstage" = "取消暂存";
+"git.unstageAll" = "全部取消暂存";
 "git.showDiff" = "查看差异";
 "git.discardChanges" = "放弃更改";
 "git.copyHash" = "复制哈希";

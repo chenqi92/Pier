@@ -86,6 +86,7 @@
 "git.push" = "Git Push";
 "git.stage" = "Stage";
 "git.unstage" = "Unstage";
+"git.unstageAll" = "Unstage All";
 "git.showDiff" = "Show Diff";
 "git.discardChanges" = "Discard Changes";
 "git.copyHash" = "Copy Hash";

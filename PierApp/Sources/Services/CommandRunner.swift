@@ -130,8 +130,18 @@ actor CommandRunner {
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
 
-                let stdout = String(data: stdoutData, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                // Only trim trailing whitespace — leading spaces may be semantically
+                // significant (e.g. git status --porcelain positional flags).
+                let stdout: String = {
+                    guard let s = String(data: stdoutData, encoding: .utf8) else { return "" }
+                    var end = s.endIndex
+                    while end > s.startIndex {
+                        let prev = s.index(before: end)
+                        if s[prev].isWhitespace || s[prev].isNewline { end = prev }
+                        else { break }
+                    }
+                    return String(s[s.startIndex..<end])
+                }()
                 var stderr = String(data: stderrData, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
