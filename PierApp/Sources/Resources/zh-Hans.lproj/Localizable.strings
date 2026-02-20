@@ -721,3 +721,35 @@
 // MARK: - Git Config
 
 "git.config" = "Git 配置";
+
+// MARK: - Git Config Extended
+
+"gitConfig.local" = "本地";
+"gitConfig.global" = "全局";
+"gitConfig.systemScope" = "系统";
+"gitConfig.filter" = "过滤...";
+"gitConfig.keyPlaceholder" = "键名（如 user.name）";
+"gitConfig.value" = "值";
+"gitConfig.set" = "设置";
+"gitConfig.noEntries" = "无配置项";
+"gitConfig.copyKey" = "复制键名";
+"gitConfig.copyValue" = "复制值";
+"gitConfig.remove" = "移除";
+
+// MARK: - Git Tag Extended
+
+"git.noTags" = "暂无标签";
+
+// MARK: - Git Remote Extended
+
+"git.noRemotes" = "未配置远程仓库";
+
+// MARK: - Database Common
+
+"db.rowCountSimple" = "%lld 行";
+"db.executing" = "执行中...";
+"common.ok" = "确定";
+
+// MARK: - PostgreSQL Extended
+
+"pg.rowsAndSize" = "%@ 行 · %@";

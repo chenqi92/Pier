@@ -88,7 +88,7 @@ struct GitRemoteManagerView: View {
                     Image(systemName: "network")
                         .font(.system(size: 24))
                         .foregroundColor(.secondary)
-                    Text("No remotes configured")
+                    Text(LS("git.noRemotes"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -128,7 +128,7 @@ struct GitRemoteManagerView: View {
         .contextMenu {
             Button(LS("git.fetchRemote")) { gitViewModel.fetchRemote(remote.name) }
             Divider()
-            Button("Copy URL") {
+            Button(LS("git.copyURL")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(remote.fetchURL, forType: .string)
             }

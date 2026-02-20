@@ -18,7 +18,7 @@ struct GitConfigView: View {
                 Image(systemName: "gearshape.2")
                     .foregroundColor(.gray)
                     .font(.caption)
-                Text("Git Config")
+                Text(LS("git.config"))
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
@@ -43,7 +43,7 @@ struct GitConfigView: View {
             // Scope picker
             Picker("", selection: $selectedScope) {
                 ForEach(GitConfigScope.allCases, id: \.self) { scope in
-                    Text(scope.rawValue.capitalized).tag(scope)
+                    Text(scope.displayName).tag(scope)
                 }
             }
             .pickerStyle(.segmented)
@@ -56,7 +56,7 @@ struct GitConfigView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
-                TextField("Filter...", text: $filterText)
+                TextField(LS("gitConfig.filter"), text: $filterText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 10))
             }
@@ -69,11 +69,11 @@ struct GitConfigView: View {
             // Add entry form
             if showAddEntry {
                 VStack(spacing: 4) {
-                    TextField("Key (e.g. user.name)", text: $newKey)
+                    TextField(LS("gitConfig.keyPlaceholder"), text: $newKey)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 10))
 
-                    TextField("Value", text: $newValue)
+                    TextField(LS("gitConfig.value"), text: $newValue)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 10))
 
@@ -87,7 +87,7 @@ struct GitConfigView: View {
                         .controlSize(.mini)
 
                         Button(action: addEntry) {
-                            Text("Set")
+                            Text(LS("gitConfig.set"))
                                 .font(.system(size: 9))
                         }
                         .buttonStyle(.borderedProminent)
@@ -110,7 +110,7 @@ struct GitConfigView: View {
                     Image(systemName: "gearshape.2")
                         .font(.system(size: 24))
                         .foregroundColor(.secondary)
-                    Text("No config entries")
+                    Text(LS("gitConfig.noEntries"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -153,16 +153,16 @@ struct GitConfigView: View {
         }
         .padding(.vertical, 1)
         .contextMenu {
-            Button("Copy Key") {
+            Button(LS("gitConfig.copyKey")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(entry.key, forType: .string)
             }
-            Button("Copy Value") {
+            Button(LS("gitConfig.copyValue")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(entry.value, forType: .string)
             }
             Divider()
-            Button("Remove", role: .destructive) {
+            Button(LS("gitConfig.remove"), role: .destructive) {
                 gitViewModel.unsetGitConfig(key: entry.key, scope: selectedScope)
                 Task {
                     try? await Task.sleep(nanoseconds: 500_000_000)

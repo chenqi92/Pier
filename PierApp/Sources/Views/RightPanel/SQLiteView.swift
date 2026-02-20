@@ -83,7 +83,7 @@ struct SQLiteView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(table.name)
                             .font(.system(size: 10))
-                        Text("\(table.rowCount) rows")
+                        Text(String(format: LS("db.rowCountSimple"), table.rowCount))
                             .font(.system(size: 8))
                             .foregroundColor(.secondary)
                     }
@@ -189,7 +189,7 @@ struct SQLiteView: View {
             } else if let result = viewModel.queryResult {
                 VStack(spacing: 0) {
                     HStack {
-                        Text("\(result.affectedRows) rows")
+                        Text(String(format: LS("db.rowCountSimple"), result.affectedRows))
                             .font(.system(size: 9))
                             .foregroundColor(.secondary)
                         Spacer()

@@ -721,3 +721,35 @@
 // MARK: - Git Config
 
 "git.config" = "Git Config";
+
+// MARK: - Git Config Extended
+
+"gitConfig.local" = "Local";
+"gitConfig.global" = "Global";
+"gitConfig.systemScope" = "System";
+"gitConfig.filter" = "Filter...";
+"gitConfig.keyPlaceholder" = "Key (e.g. user.name)";
+"gitConfig.value" = "Value";
+"gitConfig.set" = "Set";
+"gitConfig.noEntries" = "No config entries";
+"gitConfig.copyKey" = "Copy Key";
+"gitConfig.copyValue" = "Copy Value";
+"gitConfig.remove" = "Remove";
+
+// MARK: - Git Tag Extended
+
+"git.noTags" = "No tags";
+
+// MARK: - Git Remote Extended
+
+"git.noRemotes" = "No remotes configured";
+
+// MARK: - Database Common
+
+"db.rowCountSimple" = "%lld rows";
+"db.executing" = "Executing...";
+"common.ok" = "OK";
+
+// MARK: - PostgreSQL Extended
+
+"pg.rowsAndSize" = "%@ rows · %@";

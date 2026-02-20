@@ -22,6 +22,14 @@ enum GitConfigScope: String, CaseIterable {
         case .system: return "--system"
         }
     }
+
+    var displayName: String {
+        switch self {
+        case .local: return LS("gitConfig.local")
+        case .global: return LS("gitConfig.global")
+        case .system: return LS("gitConfig.systemScope")
+        }
+    }
 }
 
 // MARK: - Config Extension

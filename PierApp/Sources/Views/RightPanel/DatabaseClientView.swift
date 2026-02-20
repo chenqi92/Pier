@@ -253,7 +253,7 @@ struct DatabaseClientView: View {
                         .foregroundColor(.secondary)
                 }
                 if let count = viewModel.resultRowCount {
-                    Text("• \(count) rows")
+                    Text("• " + String(format: LS("db.rowCountSimple"), count))
                         .font(.system(size: 9))
                         .foregroundColor(.secondary)
                 }
@@ -324,7 +324,7 @@ struct DatabaseClientView: View {
             }
 
             if viewModel.isExecuting {
-                ProgressView("Executing...")
+                ProgressView(LS("db.executing"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = viewModel.queryError {
                 ScrollView {
@@ -379,7 +379,7 @@ struct DatabaseClientView: View {
             }
         }
         .alert(LS("db.exportSuccess"), isPresented: $showExportAlert) {
-            Button("OK", role: .cancel) { }
+            Button(LS("common.ok"), role: .cancel) { }
         } message: {
             Text(exportedFileName)
         }

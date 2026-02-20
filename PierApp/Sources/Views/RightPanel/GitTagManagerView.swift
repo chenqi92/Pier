@@ -81,7 +81,7 @@ struct GitTagManagerView: View {
                     Image(systemName: "tag")
                         .font(.system(size: 24))
                         .foregroundColor(.secondary)
-                    Text("No tags")
+                    Text(LS("git.noTags"))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
