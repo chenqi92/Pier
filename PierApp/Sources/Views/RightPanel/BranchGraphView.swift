@@ -95,8 +95,15 @@ struct BranchGraphView: View {
 
         .sheet(isPresented: $showingPathPicker) { pathPickerSheet }
         .onChange(of: gitViewModel.graphGeneration) { _ in
-            // Only recalculate graph width on full reload, not on loadMore
+            // Full reload: recalculate graph width from scratch
             cachedGraphWidth = computeGraphColumnWidth()
+        }
+        .onChange(of: gitViewModel.graphNodes.count) { _ in
+            // loadMore: only grow, never shrink (prevents horizontal scroll jump)
+            let newWidth = computeGraphColumnWidth()
+            if newWidth > cachedGraphWidth {
+                cachedGraphWidth = newWidth
+            }
         }
         .onAppear {
             cachedGraphWidth = computeGraphColumnWidth()
