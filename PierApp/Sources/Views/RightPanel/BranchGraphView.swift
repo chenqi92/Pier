@@ -511,8 +511,8 @@ extension BranchGraphView {
                         .contentShape(Rectangle())
                         .onTapGesture { toggleDetail(node.id) }
                         .onAppear {
-                            // Preload: trigger loadMore at 80% scroll position
-                            let threshold = max(1, Int(Double(gitViewModel.graphNodes.count) * 0.8))
+                            // Preload: trigger loadMore at 50% scroll position
+                            let threshold = max(1, Int(Double(gitViewModel.graphNodes.count) * 0.5))
                             if index == threshold && gitViewModel.hasMoreHistory && !gitViewModel.isLoadingMoreHistory {
                                 Task { await gitViewModel.loadMoreGraphHistory() }
                             }

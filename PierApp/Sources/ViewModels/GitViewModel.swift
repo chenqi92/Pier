@@ -541,6 +541,14 @@ class GitViewModel: ObservableObject {
         return result
     }
 
+    /// Static (nonisolated) version for use in Task.detached background work.
+    nonisolated static func callGitFFIStatic(_ cString: UnsafeMutablePointer<CChar>?) -> String? {
+        guard let ptr = cString else { return nil }
+        let result = String(cString: ptr)
+        pier_string_free(ptr)
+        return result
+    }
+
     /// Compute the Unix timestamp for the date range filter.
     private func afterTimestamp() -> Int64 {
         let now = Date()
@@ -564,47 +572,57 @@ class GitViewModel: ObservableObject {
         cachedCommitsJSON = "[]"
         guard !repoPath.isEmpty else { graphNodes = []; return }
 
-        // All FFI calls are in-process (libgit2), no process spawning.
         // Run branches + authors concurrently for UI pickers.
         async let branchTask: Void = fetchGraphBranches()
         async let authorTask: Void = fetchGraphAuthors()
 
-        // Detect default branch via FFI
-        let defaultBranch = callGitFFI(pier_git_detect_default_branch(repoPath)) ?? "HEAD"
+        // Capture values for background work
+        let path = repoPath
+        let pageSize = graphPageSize
+        let filterBranch = graphFilterBranch
+        let filterUser = graphFilterUser
+        let searchText = graphSearchText.trimmingCharacters(in: .whitespaces)
+        let afterTs = afterTimestamp()
+        let topoOrder = !graphSortByDate
+        let firstParent = graphFirstParentOnly
+        let noMerges = graphNoMerges
+        let filterPath = graphFilterPath
+        let longEdges = showLongEdges
+        let lw = BranchGraphView.laneW
+        let rh = BranchGraphView.rowH
 
-        // First-parent chain for main-chain identification (keep JSON for Rust)
-        if let fpJSON = callGitFFI(pier_git_first_parent_chain(repoPath, defaultBranch, UInt32(graphPageSize * 2))) {
-            mainChainJSON = fpJSON
-        }
+        // Run heavy FFI on background thread
+        let result = await Task.detached(priority: .userInitiated) { () -> (String, String, String)? in
+            // Detect default branch
+            let defaultBranch = Self.callGitFFIStatic(pier_git_detect_default_branch(path)) ?? "HEAD"
+
+            // First-parent chain
+            let fpJSON = Self.callGitFFIStatic(pier_git_first_parent_chain(path, defaultBranch, UInt32(pageSize * 2))) ?? "[]"
+
+            // Load commits
+            let logJSON = Self.callGitFFIStatic(pier_git_graph_log(
+                path, UInt32(pageSize), 0,
+                filterBranch, filterUser,
+                searchText.isEmpty ? nil : searchText,
+                afterTs, topoOrder, firstParent, noMerges, filterPath
+            ))
+            guard let json = logJSON else { return nil }
+
+            // Compute layout
+            let layoutJSON = Self.callGitFFIStatic(pier_git_compute_graph_layout(
+                json, fpJSON,
+                Float(lw), Float(rh),
+                longEdges
+            ))
+            guard let layout = layoutJSON else { return nil }
+            return (json, fpJSON, layout)
+        }.value
 
         _ = await (branchTask, authorTask)
 
-        // Load commits via FFI
-        let searchText = graphSearchText.trimmingCharacters(in: .whitespaces)
-        let logJSON = callGitFFI(pier_git_graph_log(
-            repoPath,
-            UInt32(graphPageSize),
-            0,
-            graphFilterBranch,           // branch (nil = all)
-            graphFilterUser,             // author
-            searchText.isEmpty ? nil : searchText,  // search
-            afterTimestamp(),             // after_timestamp
-            !graphSortByDate,            // topo_order
-            graphFirstParentOnly,        // first_parent
-            graphNoMerges,               // no_merges
-            graphFilterPath              // paths (newline-separated)
-        ))
-
-        guard let json = logJSON else { graphNodes = []; return }
-        cachedCommitsJSON = json  // cache for loadMore
-
-        // Compute layout via Rust FFI (IDEA-style lane assignment + segments)
-        let layoutJSON = callGitFFI(pier_git_compute_graph_layout(
-            json, mainChainJSON,
-            Float(BranchGraphView.laneW), Float(BranchGraphView.rowH),
-            showLongEdges
-        ))
-        guard let layoutResult = layoutJSON else { graphNodes = []; return }
+        guard let (json, fpJSON, layoutResult) = result else { graphNodes = []; return }
+        mainChainJSON = fpJSON
+        cachedCommitsJSON = json
         graphNodes = Self.parseLayoutNodesFromJSON(layoutResult)
         graphSkipCount = graphNodes.count
         hasMoreHistory = graphNodes.count >= graphPageSize
@@ -615,40 +633,50 @@ class GitViewModel: ObservableObject {
         guard hasMoreHistory, !isLoadingMoreHistory, !repoPath.isEmpty else { return }
         isLoadingMoreHistory = true
 
+        // Capture values for background work
+        let path = repoPath
+        let pageSize = graphPageSize
+        let skipCount = graphSkipCount
+        let filterBranch = graphFilterBranch
+        let filterUser = graphFilterUser
         let searchText = graphSearchText.trimmingCharacters(in: .whitespaces)
-        let logJSON = callGitFFI(pier_git_graph_log(
-            repoPath,
-            UInt32(graphPageSize),
-            UInt32(graphSkipCount),
-            graphFilterBranch,
-            graphFilterUser,
-            searchText.isEmpty ? nil : searchText,
-            afterTimestamp(),
-            !graphSortByDate,
-            graphFirstParentOnly,
-            graphNoMerges,
-            graphFilterPath
-        ))
+        let afterTs = afterTimestamp()
+        let topoOrder = !graphSortByDate
+        let firstParent = graphFirstParentOnly
+        let noMerges = graphNoMerges
+        let filterPath = graphFilterPath
+        let longEdges = showLongEdges
+        let lw = BranchGraphView.laneW
+        let rh = BranchGraphView.rowH
+        let oldJSON = cachedCommitsJSON
+        let mainJSON = mainChainJSON
 
-        guard let json = logJSON else {
+        // Run heavy FFI on background thread to avoid blocking UI
+        let result = await Task.detached(priority: .userInitiated) { () -> (String, String)? in
+            let logJSON = Self.callGitFFIStatic(pier_git_graph_log(
+                path, UInt32(pageSize), UInt32(skipCount),
+                filterBranch, filterUser,
+                searchText.isEmpty ? nil : searchText,
+                afterTs, topoOrder, firstParent, noMerges, filterPath
+            ))
+            guard let json = logJSON else { return nil }
+
+            let mergedJSON = Self.mergeJSONArrays(oldJSON, json)
+            let layoutJSON = Self.callGitFFIStatic(pier_git_compute_graph_layout(
+                mergedJSON, mainJSON,
+                Float(lw), Float(rh),
+                longEdges
+            ))
+            guard let layout = layoutJSON else { return nil }
+            return (mergedJSON, layout)
+        }.value
+
+        guard let (mergedJSON, layoutResult) = result else {
             isLoadingMoreHistory = false
             return
         }
 
-        // Merge cached old JSON + new JSON by concatenating arrays
-        // This avoids the expensive CommitNode → FFICommitRaw → JSON round-trip
-        let mergedJSON = Self.mergeJSONArrays(cachedCommitsJSON, json)
-        cachedCommitsJSON = mergedJSON  // update cache
-
-        let layoutJSON = callGitFFI(pier_git_compute_graph_layout(
-            mergedJSON, mainChainJSON,
-            Float(BranchGraphView.laneW), Float(BranchGraphView.rowH),
-            showLongEdges
-        ))
-        guard let layoutResult = layoutJSON else {
-            isLoadingMoreHistory = false
-            return
-        }
+        cachedCommitsJSON = mergedJSON
         let previousCount = graphNodes.count
         graphNodes = Self.parseLayoutNodesFromJSON(layoutResult)
         graphSkipCount = graphNodes.count
@@ -658,7 +686,7 @@ class GitViewModel: ObservableObject {
 
     /// Merge two JSON arrays by concatenating their elements.
     /// Much faster than decoding/re-encoding: just string manipulation.
-    private static func mergeJSONArrays(_ a: String, _ b: String) -> String {
+    nonisolated private static func mergeJSONArrays(_ a: String, _ b: String) -> String {
         let aT = a.trimmingCharacters(in: .whitespaces)
         let bT = b.trimmingCharacters(in: .whitespaces)
         // Handle empty cases
