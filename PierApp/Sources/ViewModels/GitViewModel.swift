@@ -140,6 +140,7 @@ class GitViewModel: ObservableObject {
     @Published var graphShowAuthor = true               // show author column
     @Published var graphShowDate = true                 // show date column
     @Published var graphShowZebraStripes = true         // alternating row background
+    @Published var graphGeneration = 0                  // increments on full reload only (not loadMore)
 
     // MARK: - Private
 
@@ -607,6 +608,7 @@ class GitViewModel: ObservableObject {
         graphNodes = Self.parseLayoutNodesFromJSON(layoutResult)
         graphSkipCount = graphNodes.count
         hasMoreHistory = graphNodes.count >= graphPageSize
+        graphGeneration += 1  // signal full reload to UI
     }
 
     func loadMoreGraphHistory() async {

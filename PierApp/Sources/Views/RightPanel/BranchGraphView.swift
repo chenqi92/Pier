@@ -72,7 +72,8 @@ struct BranchGraphView: View {
     @State private var hashColumnWidth: CGFloat = 62
     @State private var messageColumnWidth: CGFloat = 300
     @State private var authorColumnWidth: CGFloat = 100
-    @State private var dateColumnWidth: CGFloat = 120
+    @State private var dateColumnWidth: CGFloat = 100
+    @State private var cachedGraphWidth: CGFloat = 60  // graph lane column width, updated on data change
 
     var body: some View {
         VStack(spacing: 0) {
@@ -93,6 +94,13 @@ struct BranchGraphView: View {
         }
 
         .sheet(isPresented: $showingPathPicker) { pathPickerSheet }
+        .onChange(of: gitViewModel.graphGeneration) { _ in
+            // Only recalculate graph width on full reload, not on loadMore
+            cachedGraphWidth = computeGraphColumnWidth()
+        }
+        .onAppear {
+            cachedGraphWidth = computeGraphColumnWidth()
+        }
     }
 
     // MARK: - IDEA-Style Toolbar
@@ -471,8 +479,8 @@ private struct ColumnResizeHandle: View {
 
 extension BranchGraphView {
 
-    /// Calculate graph column width from nodes
-    private var graphColumnWidth: CGFloat {
+    /// Calculate graph column width from current nodes.
+    private func computeGraphColumnWidth() -> CGFloat {
         let nodes = gitViewModel.graphNodes
         var maxX: CGFloat = 0
         for n in nodes {
@@ -488,15 +496,13 @@ extension BranchGraphView {
     // MARK: - Scroll Content
 
     private var scrollContent: some View {
-        let gw = graphColumnWidth
-
-        return ScrollView([.vertical, .horizontal]) {
+        ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(gitViewModel.graphNodes.enumerated()), id: \.element.id) { index, node in
                     VStack(spacing: 0) {
                         HStack(alignment: .center, spacing: 0) {
                             Canvas { ctx, size in drawRow(ctx, node: node, size: size) }
-                                .frame(width: gw, height: Self.rowH)
+                                .frame(width: cachedGraphWidth, height: Self.rowH)
                             commitLabel(node)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
