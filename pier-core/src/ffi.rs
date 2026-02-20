@@ -721,6 +721,62 @@ pub extern "C" fn pier_git_detect_default_branch(repo_path: *const c_char) -> *m
     }
 }
 
+/// Compute IDEA-style graph layout. Returns JSON array of GraphRow.
+/// Caller must free with pier_string_free.
+///
+/// Parameters:
+/// - commits_json: JSON from pier_git_graph_log
+/// - main_chain_json: JSON from pier_git_first_parent_chain
+/// - lane_width: pixel width of each lane column
+/// - row_height: pixel height of each row
+/// - show_long_edges: true for expanded mode, false for collapsed
+#[no_mangle]
+pub extern "C" fn pier_git_compute_graph_layout(
+    commits_json: *const c_char,
+    main_chain_json: *const c_char,
+    lane_width: f32,
+    row_height: f32,
+    show_long_edges: bool,
+) -> *mut c_char {
+    if commits_json.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let commits_str = unsafe { CStr::from_ptr(commits_json).to_str().unwrap_or("[]") };
+    let main_chain_str = if main_chain_json.is_null() {
+        "[]"
+    } else {
+        unsafe { CStr::from_ptr(main_chain_json).to_str().unwrap_or("[]") }
+    };
+
+    // Deserialize inputs
+    let commits: Vec<git_graph::LayoutInput> = match serde_json::from_str(commits_str) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("pier_git_compute_graph_layout: failed to parse commits: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
+    let main_chain_hashes: Vec<String> = serde_json::from_str(main_chain_str).unwrap_or_default();
+    let main_chain: std::collections::HashSet<String> = main_chain_hashes.into_iter().collect();
+
+    let params = git_graph::LayoutParams {
+        lane_width,
+        row_height,
+        show_long_edges,
+    };
+
+    let rows = git_graph::compute_graph_layout(&commits, &main_chain, &params);
+
+    match serde_json::to_string(&rows) {
+        Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
+        Err(e) => {
+            log::error!("pier_git_compute_graph_layout: serialization failed: {}", e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 // Utility FFI
 // ═══════════════════════════════════════════════════════════

@@ -198,6 +198,23 @@ char *pier_git_list_tracked_files(const char *repo_path);
 char *pier_git_detect_default_branch(const char *repo_path);
 
 /**
+ * Compute IDEA-style graph layout. Returns JSON array of GraphRow.
+ * Caller must free with pier_string_free.
+ *
+ * Parameters:
+ * - commits_json: JSON from pier_git_graph_log
+ * - main_chain_json: JSON from pier_git_first_parent_chain
+ * - lane_width: pixel width of each lane column
+ * - row_height: pixel height of each row
+ * - show_long_edges: true for expanded mode, false for collapsed
+ */
+char *pier_git_compute_graph_layout(const char *commits_json,
+                                    const char *main_chain_json,
+                                    float lane_width,
+                                    float row_height,
+                                    bool show_long_edges);
+
+/**
  * Free a string allocated by Rust.
  */
 void pier_string_free(char *s);

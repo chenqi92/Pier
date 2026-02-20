@@ -1,10 +1,11 @@
 //! Git Graph — direct `.git` access via libgit2 for high-performance graph data.
 //!
 //! Replaces process-spawned `git log`, `git branch`, etc. with in-process reads.
+//! Also provides IDEA-style graph layout computation (lane assignment, segments, arrows).
 
 use git2::{BranchType, Repository, Sort};
-use serde::Serialize;
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 // ═══════════════════════════════════════════════════════════
@@ -439,4 +440,573 @@ pub fn detect_default_branch(repo_path: &str) -> Result<String, String> {
 
     // Fallback
     Ok("HEAD".to_string())
+}
+
+// ═══════════════════════════════════════════════════════════
+// IDEA-Style Graph Layout Engine
+// ═══════════════════════════════════════════════════════════
+
+/// A line segment within a single row (pixel coordinates relative to row origin).
+#[derive(Serialize, Clone)]
+pub struct PrintSegment {
+    pub x_top: f32,
+    pub y_top: f32,
+    pub x_bottom: f32,
+    pub y_bottom: f32,
+    pub color_index: i32,
+}
+
+/// Arrow indicator for long-span branch lines.
+#[derive(Serialize, Clone)]
+pub struct ArrowElement {
+    pub x: f32,
+    pub y: f32,
+    pub color_index: i32,
+    pub is_down: bool,
+}
+
+/// Input commit entry for layout computation (deserialized from graph_log JSON).
+#[derive(Deserialize)]
+pub struct LayoutInput {
+    pub hash: String,
+    pub parents: String,
+    pub short_hash: String,
+    pub refs: String,
+    pub message: String,
+    pub author: String,
+    pub date_timestamp: i64,
+}
+
+/// Fully computed graph row with layout data.
+#[derive(Serialize)]
+pub struct GraphRow {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub author: String,
+    pub date_timestamp: i64,
+    pub refs: String,
+    pub parents: String,
+    pub node_column: i32,
+    pub color_index: i32,
+    pub segments: Vec<PrintSegment>,
+    pub arrows: Vec<ArrowElement>,
+}
+
+/// Layout parameters passed from Swift.
+pub struct LayoutParams {
+    pub lane_width: f32,
+    pub row_height: f32,
+    pub show_long_edges: bool,
+}
+
+/// Compute the full IDEA-style graph layout.
+///
+/// Takes commit entries + main chain hashes + rendering params,
+/// returns fully laid-out `GraphRow` entries with segments and arrows.
+pub fn compute_graph_layout(
+    commits: &[LayoutInput],
+    main_chain: &HashSet<String>,
+    params: &LayoutParams,
+) -> Vec<GraphRow> {
+    if commits.is_empty() {
+        return Vec::new();
+    }
+
+    let n = commits.len();
+    let lw = params.lane_width;
+    let rh = params.row_height;
+
+    // Derive mode-specific constants (from IDEA's PrintElementGeneratorImpl.kt)
+    let long_edge_size: i32 = if params.show_long_edges { 1000 } else { 30 };
+    let visible_part_size: i32 = if params.show_long_edges { 250 } else { 1 };
+    let edge_with_arrow_size: i32 = if params.show_long_edges { 30 } else { i32::MAX };
+
+    // Parse parent hashes for each commit
+    let parent_lists: Vec<Vec<String>> = commits
+        .iter()
+        .map(|c| {
+            if c.parents.is_empty() {
+                Vec::new()
+            } else {
+                c.parents.split(' ').map(|s| s.to_string()).collect()
+            }
+        })
+        .collect();
+
+    // Build hash → row index map
+    let mut hash_to_row: HashMap<&str, usize> = HashMap::with_capacity(n);
+    for (i, c) in commits.iter().enumerate() {
+        hash_to_row.insert(&c.hash, i);
+    }
+
+    // ── Phase 1: DFS Layout Index Assignment ──
+    // Matches IDEA's GraphLayoutBuilder.build() exactly.
+    let layout_index = assign_layout_indices(n, &parent_lists, &hash_to_row);
+
+    // ── Color Assignment ──
+    // layoutIndex → color mapping. Main chain gets color 0.
+    let mut li_to_color: HashMap<i32, i32> = HashMap::new();
+    let mut next_color: i32 = 1;
+    let mut node_colors: Vec<i32> = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let li = layout_index[i];
+        let is_main = main_chain.contains(&commits[i].hash);
+        let ci = if is_main {
+            0
+        } else if let Some(&c) = li_to_color.get(&li) {
+            c
+        } else {
+            let c = next_color;
+            next_color += 1;
+            li_to_color.insert(li, c);
+            c
+        };
+        node_colors.push(ci);
+    }
+
+    // ── Build Edge List ──
+    struct EdgeInfo {
+        child_row: usize,
+        parent_row: usize,
+        _parent_index: usize,
+        up_li: i32,
+        down_li: i32,
+        color_index: i32,
+    }
+    let mut all_edges: Vec<EdgeInfo> = Vec::new();
+
+    for (child_row, parents) in parent_lists.iter().enumerate() {
+        for (pi, parent_hash) in parents.iter().enumerate() {
+            let parent_row = match hash_to_row.get(parent_hash.as_str()) {
+                Some(&pr) => pr,
+                None => continue,
+            };
+            if parent_row <= child_row {
+                continue;
+            }
+
+            let child_li = layout_index[child_row];
+            let parent_li = if parent_row < n { layout_index[parent_row] } else { child_li };
+
+            // Color: first-parent edges inherit child color;
+            // merge edges (2nd+ parent) use parent color
+            let ci = if pi == 0 {
+                node_colors[child_row]
+            } else if parent_row < n {
+                node_colors[parent_row]
+            } else {
+                node_colors[child_row]
+            };
+
+            all_edges.push(EdgeInfo {
+                child_row,
+                parent_row,
+                _parent_index: pi,
+                up_li: child_li,
+                down_li: parent_li,
+                color_index: ci,
+            });
+        }
+    }
+
+    // ── Phase 2: Column Positions per Row ──
+    // Sweep through rows, maintaining active edges.
+    // At each row: sort(node + active_edges) by IDEA comparator → position = column.
+
+    // Group edges by their first intermediate row
+    let mut edges_by_start: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (ei, edge) in all_edges.iter().enumerate() {
+        let first_intermediate = edge.child_row + 1;
+        let last_intermediate = edge.parent_row.saturating_sub(1).min(n - 1);
+        if first_intermediate <= last_intermediate {
+            edges_by_start.entry(first_intermediate).or_default().push(ei);
+        }
+    }
+
+    let mut active_edge_indices: HashSet<usize> = HashSet::new();
+    let mut node_columns: Vec<i32> = vec![0; n];
+    let mut edge_column_at_row: Vec<HashMap<usize, i32>> = vec![HashMap::new(); n];
+
+    for row in 0..n {
+        // Add edges whose first intermediate row is this row
+        if let Some(new_edges) = edges_by_start.get(&row) {
+            for &ei in new_edges {
+                active_edge_indices.insert(ei);
+            }
+        }
+
+        // Build sorted elements for this row using IDEA's comparator
+        #[derive(Clone)]
+        struct RowElement {
+            is_node: bool,
+            edge_index: usize,
+            up_li: i32,
+            down_li: i32,
+            up_row: i32,
+            down_row: i32,
+        }
+
+        // IDEA's compare2(edge, node): positive means edge goes RIGHT of node
+        fn compare2(e: &RowElement, n_elem: &RowElement) -> i32 {
+            let max_edge_li = e.up_li.max(e.down_li);
+            let node_li = n_elem.up_li;
+            if max_edge_li != node_li {
+                return max_edge_li - node_li;
+            }
+            e.up_row - n_elem.up_row
+        }
+
+        fn compare_elements(lhs: &RowElement, rhs: &RowElement) -> i32 {
+            if !lhs.is_node && !rhs.is_node {
+                // Edge vs Edge
+                if lhs.up_row == rhs.up_row {
+                    if lhs.down_row < rhs.down_row {
+                        let vn = RowElement {
+                            is_node: true, edge_index: 0, up_li: lhs.down_li,
+                            down_li: lhs.down_li, up_row: lhs.down_row, down_row: lhs.down_row,
+                        };
+                        return -compare2(rhs, &vn);
+                    } else {
+                        let vn = RowElement {
+                            is_node: true, edge_index: 0, up_li: rhs.down_li,
+                            down_li: rhs.down_li, up_row: rhs.down_row, down_row: rhs.down_row,
+                        };
+                        return compare2(lhs, &vn);
+                    }
+                }
+                if lhs.up_row < rhs.up_row {
+                    let vn = RowElement {
+                        is_node: true, edge_index: 0, up_li: rhs.up_li,
+                        down_li: rhs.up_li, up_row: rhs.up_row, down_row: rhs.up_row,
+                    };
+                    return compare2(lhs, &vn);
+                } else {
+                    let vn = RowElement {
+                        is_node: true, edge_index: 0, up_li: lhs.up_li,
+                        down_li: lhs.up_li, up_row: lhs.up_row, down_row: lhs.up_row,
+                    };
+                    return -compare2(rhs, &vn);
+                }
+            }
+            if !lhs.is_node && rhs.is_node {
+                return compare2(lhs, rhs);
+            }
+            if lhs.is_node && !rhs.is_node {
+                return -compare2(rhs, lhs);
+            }
+            0
+        }
+
+        let node_li = layout_index[row];
+        let mut elements: Vec<RowElement> = Vec::new();
+        elements.push(RowElement {
+            is_node: true,
+            edge_index: 0,
+            up_li: node_li,
+            down_li: node_li,
+            up_row: row as i32,
+            down_row: row as i32,
+        });
+
+        for &ei in &active_edge_indices {
+            let e = &all_edges[ei];
+            let clamped_pr = e.parent_row.min(n - 1);
+            if !is_edge_visible_in_row(
+                e.child_row as i32, clamped_pr as i32, row as i32,
+                long_edge_size, visible_part_size, edge_with_arrow_size,
+            ) {
+                continue;
+            }
+            elements.push(RowElement {
+                is_node: false,
+                edge_index: ei,
+                up_li: e.up_li,
+                down_li: e.down_li,
+                up_row: e.child_row as i32,
+                down_row: e.parent_row as i32,
+            });
+        }
+
+        elements.sort_by(|a, b| {
+            let cmp = compare_elements(a, b);
+            cmp.cmp(&0)
+        });
+
+        for (col, elem) in elements.iter().enumerate() {
+            if elem.is_node {
+                node_columns[row] = col as i32;
+            } else {
+                edge_column_at_row[row].insert(elem.edge_index, col as i32);
+            }
+        }
+
+        // Remove edges whose last intermediate row is this row
+        active_edge_indices.retain(|&ei| {
+            let last_interm = all_edges[ei].parent_row.saturating_sub(1).min(n - 1);
+            row < last_interm
+        });
+    }
+
+    // ── Phase 3: Generate Segments and Arrows ──
+    let x_pos = |col: i32| -> f32 { col as f32 * lw + lw / 2.0 + 4.0 };
+    let approach_len: f32 = 8.0;
+
+    // Pre-allocate per-row segment/arrow storage
+    let mut row_segments: Vec<Vec<PrintSegment>> = vec![Vec::new(); n];
+    let mut row_arrows: Vec<Vec<ArrowElement>> = vec![Vec::new(); n];
+
+    for (ei, edge) in all_edges.iter().enumerate() {
+        let ci = edge.color_index;
+        let clamped_parent = edge.parent_row.min(n - 1);
+        let span = clamped_parent as i32 - edge.child_row as i32;
+        if span <= 0 {
+            continue;
+        }
+
+        // Build anchor list: (row, x) — only visible rows
+        let mut anchors: Vec<(usize, f32)> = Vec::new();
+        anchors.push((edge.child_row, x_pos(node_columns[edge.child_row])));
+
+        for r in (edge.child_row + 1)..clamped_parent {
+            if r >= n { break; }
+            if !is_edge_visible_in_row(
+                edge.child_row as i32, clamped_parent as i32, r as i32,
+                long_edge_size, visible_part_size, edge_with_arrow_size,
+            ) {
+                continue;
+            }
+            let col = edge_column_at_row[r]
+                .get(&ei)
+                .copied()
+                .unwrap_or(node_columns[edge.child_row]);
+            anchors.push((r, x_pos(col)));
+        }
+        anchors.push((clamped_parent, x_pos(node_columns[clamped_parent])));
+
+        // Pre-compute arrow rows
+        let mut down_arrow_rows: HashSet<usize> = HashSet::new();
+        let mut up_arrow_rows: HashSet<usize> = HashSet::new();
+        if span >= long_edge_size {
+            down_arrow_rows.insert(edge.child_row + visible_part_size as usize);
+            if clamped_parent >= visible_part_size as usize {
+                up_arrow_rows.insert(clamped_parent - visible_part_size as usize);
+            }
+        }
+        if span >= edge_with_arrow_size {
+            down_arrow_rows.insert(edge.child_row + 1);
+            if clamped_parent >= 1 {
+                up_arrow_rows.insert(clamped_parent - 1);
+            }
+        }
+
+        // Generate half-row segments between consecutive anchors
+        for ai in 0..anchors.len().saturating_sub(1) {
+            let (row_a, x_a) = anchors[ai];
+            let (row_b, x_b) = anchors[ai + 1];
+            if row_a >= n { continue; }
+
+            if row_b == row_a + 1 {
+                let x_mid = (x_a + x_b) / 2.0;
+                let is_diagonal = (x_a - x_b).abs() > 0.5;
+
+                // Bottom half of row_a
+                if up_arrow_rows.contains(&row_a) && is_diagonal {
+                    row_segments[row_a].push(PrintSegment {
+                        x_top: x_a, y_top: 0.0, x_bottom: x_a, y_bottom: approach_len, color_index: ci,
+                    });
+                    row_segments[row_a].push(PrintSegment {
+                        x_top: x_a, y_top: approach_len, x_bottom: x_mid, y_bottom: rh, color_index: ci,
+                    });
+                } else if up_arrow_rows.contains(&row_a) {
+                    row_segments[row_a].push(PrintSegment {
+                        x_top: x_a, y_top: 0.0, x_bottom: x_mid, y_bottom: rh, color_index: ci,
+                    });
+                } else {
+                    row_segments[row_a].push(PrintSegment {
+                        x_top: x_a, y_top: rh / 2.0, x_bottom: x_mid, y_bottom: rh, color_index: ci,
+                    });
+                }
+
+                // Top half of row_b
+                if row_b < n {
+                    if down_arrow_rows.contains(&row_b) && is_diagonal {
+                        row_segments[row_b].push(PrintSegment {
+                            x_top: x_mid, y_top: 0.0, x_bottom: x_b, y_bottom: rh - approach_len, color_index: ci,
+                        });
+                        row_segments[row_b].push(PrintSegment {
+                            x_top: x_b, y_top: rh - approach_len, x_bottom: x_b, y_bottom: rh, color_index: ci,
+                        });
+                    } else if down_arrow_rows.contains(&row_b) {
+                        row_segments[row_b].push(PrintSegment {
+                            x_top: x_mid, y_top: 0.0, x_bottom: x_b, y_bottom: rh, color_index: ci,
+                        });
+                    } else {
+                        row_segments[row_b].push(PrintSegment {
+                            x_top: x_mid, y_top: 0.0, x_bottom: x_b, y_bottom: rh / 2.0, color_index: ci,
+                        });
+                    }
+                }
+            }
+            // else: gap in visibility (long edge break) — no segments drawn
+        }
+
+        // Add arrow indicators — dual-rule system
+        // Rule 1: Long-edge break arrows (span >= longEdgeSize)
+        if span >= long_edge_size {
+            let down_row = edge.child_row + visible_part_size as usize;
+            if down_row < n {
+                let col = edge_column_at_row[down_row]
+                    .get(&ei).copied()
+                    .unwrap_or(node_columns[edge.child_row]);
+                row_arrows[down_row].push(ArrowElement {
+                    x: x_pos(col), y: rh, color_index: ci, is_down: true,
+                });
+            }
+            if clamped_parent >= visible_part_size as usize {
+                let up_row = clamped_parent - visible_part_size as usize;
+                if up_row < n {
+                    let col = edge_column_at_row[up_row]
+                        .get(&ei).copied()
+                        .unwrap_or(node_columns[clamped_parent]);
+                    row_arrows[up_row].push(ArrowElement {
+                        x: x_pos(col), y: 0.0, color_index: ci, is_down: false,
+                    });
+                }
+            }
+        }
+        // Rule 2: Visible-edge arrows (span >= edgeWithArrowSize)
+        if span >= edge_with_arrow_size {
+            let down_row = edge.child_row + 1;
+            if down_row < n {
+                let col = edge_column_at_row[down_row]
+                    .get(&ei).copied()
+                    .unwrap_or(node_columns[edge.child_row]);
+                row_arrows[down_row].push(ArrowElement {
+                    x: x_pos(col), y: rh, color_index: ci, is_down: true,
+                });
+            }
+            if clamped_parent >= 1 {
+                let up_row = clamped_parent - 1;
+                if up_row < n {
+                    let col = edge_column_at_row[up_row]
+                        .get(&ei).copied()
+                        .unwrap_or(node_columns[clamped_parent]);
+                    row_arrows[up_row].push(ArrowElement {
+                        x: x_pos(col), y: 0.0, color_index: ci, is_down: false,
+                    });
+                }
+            }
+        }
+    }
+
+    // ── Build output ──
+    let mut result: Vec<GraphRow> = Vec::with_capacity(n);
+    for i in 0..n {
+        result.push(GraphRow {
+            hash: commits[i].hash.clone(),
+            short_hash: commits[i].short_hash.clone(),
+            message: commits[i].message.clone(),
+            author: commits[i].author.clone(),
+            date_timestamp: commits[i].date_timestamp,
+            refs: commits[i].refs.clone(),
+            parents: commits[i].parents.clone(),
+            node_column: node_columns[i],
+            color_index: node_colors[i],
+            segments: std::mem::take(&mut row_segments[i]),
+            arrows: std::mem::take(&mut row_arrows[i]),
+        });
+    }
+    result
+}
+
+// ── Phase 1 helper: DFS layout index assignment ──
+
+fn assign_layout_indices(
+    n: usize,
+    parent_lists: &[Vec<String>],
+    hash_to_row: &HashMap<&str, usize>,
+) -> Vec<i32> {
+    let mut layout_index = vec![0i32; n];
+    let mut current_li: i32 = 1;
+
+    // Identify heads: nodes not referenced as parent by any other node
+    let mut parent_set: HashSet<usize> = HashSet::new();
+    for parents in parent_lists {
+        for p in parents {
+            if let Some(&pr) = hash_to_row.get(p.as_str()) {
+                parent_set.insert(pr);
+            }
+        }
+    }
+    let mut heads: Vec<usize> = Vec::new();
+    for i in 0..n {
+        if !parent_set.contains(&i) {
+            heads.push(i);
+        }
+    }
+    heads.sort();
+
+    // DFS walk from each head
+    let dfs_walk = |head: usize, li: &mut Vec<i32>, current: &mut i32| {
+        if li[head] != 0 { return; }
+        let mut stack = vec![head];
+        while let Some(&cur) = stack.last() {
+            let first_visit = li[cur] == 0;
+            if first_visit {
+                li[cur] = *current;
+            }
+            // Find first unvisited parent
+            let mut next_node: Option<usize> = None;
+            for p in &parent_lists[cur] {
+                if let Some(&pr) = hash_to_row.get(p.as_str()) {
+                    if li[pr] == 0 {
+                        next_node = Some(pr);
+                        break;
+                    }
+                }
+            }
+            if let Some(next) = next_node {
+                stack.push(next);
+            } else {
+                if first_visit {
+                    *current += 1;
+                }
+                stack.pop();
+            }
+        }
+    };
+
+    for &head in &heads {
+        dfs_walk(head, &mut layout_index, &mut current_li);
+    }
+    // Assign any remaining disconnected nodes
+    for i in 0..n {
+        if layout_index[i] == 0 {
+            dfs_walk(i, &mut layout_index, &mut current_li);
+        }
+    }
+
+    layout_index
+}
+
+// ── Visibility helpers ──
+
+fn is_edge_visible_in_row(
+    child_row: i32, parent_row: i32, row: i32,
+    long_edge_size: i32, visible_part_size: i32, edge_with_arrow_size: i32,
+) -> bool {
+    let span = parent_row - child_row;
+    if span >= long_edge_size {
+        let up_offset = row - child_row;
+        let down_offset = parent_row - row;
+        return up_offset <= visible_part_size || down_offset <= visible_part_size;
+    }
+    if span >= edge_with_arrow_size {
+        let up_offset = row - child_row;
+        let down_offset = parent_row - row;
+        return up_offset <= 1 || down_offset <= 1;
+    }
+    true
 }

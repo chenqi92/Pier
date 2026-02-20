@@ -142,7 +142,7 @@ class GitViewModel: ObservableObject {
     private var timer: AnyCancellable?
     private let graphPageSize = 500
     private var graphSkipCount = 0
-    private var laneState = LaneState()
+    private var mainChainJSON: String = "[]"
     private var directoryObserver: AnyCancellable?
     private var statusDismissTask: Task<Void, Never>?
 
@@ -553,7 +553,7 @@ class GitViewModel: ObservableObject {
     func loadGraphHistory() async {
         graphSkipCount = 0
         hasMoreHistory = true
-        laneState = LaneState()
+        mainChainJSON = "[]"
         guard !repoPath.isEmpty else { graphNodes = []; return }
 
         // All FFI calls are in-process (libgit2), no process spawning.
@@ -564,11 +564,9 @@ class GitViewModel: ObservableObject {
         // Detect default branch via FFI
         let defaultBranch = callGitFFI(pier_git_detect_default_branch(repoPath)) ?? "HEAD"
 
-        // First-parent chain for main-chain identification
+        // First-parent chain for main-chain identification (keep JSON for Rust)
         if let fpJSON = callGitFFI(pier_git_first_parent_chain(repoPath, defaultBranch, UInt32(graphPageSize * 2))) {
-            if let hashes = try? JSONDecoder().decode([String].self, from: Data(fpJSON.utf8)) {
-                laneState.mainChain = Set(hashes)
-            }
+            mainChainJSON = fpJSON
         }
 
         _ = await (branchTask, authorTask)
@@ -590,11 +588,17 @@ class GitViewModel: ObservableObject {
         ))
 
         guard let json = logJSON else { graphNodes = []; return }
-        var nodes = Self.parseCommitNodesFromJSON(json)
-        LaneState.computeIDEALayout(&nodes, mainChain: laneState.mainChain, showLongEdges: showLongEdges)
-        graphNodes = nodes
-        graphSkipCount = nodes.count
-        hasMoreHistory = nodes.count >= graphPageSize
+
+        // Compute layout via Rust FFI (IDEA-style lane assignment + segments)
+        let layoutJSON = callGitFFI(pier_git_compute_graph_layout(
+            json, mainChainJSON,
+            Float(BranchGraphView.laneW), Float(BranchGraphView.rowH),
+            showLongEdges
+        ))
+        guard let layoutResult = layoutJSON else { graphNodes = []; return }
+        graphNodes = Self.parseLayoutNodesFromJSON(layoutResult)
+        graphSkipCount = graphNodes.count
+        hasMoreHistory = graphNodes.count >= graphPageSize
     }
 
     func loadMoreGraphHistory() async {
@@ -620,13 +624,31 @@ class GitViewModel: ObservableObject {
             isLoadingMoreHistory = false
             return
         }
-        let newNodes = Self.parseCommitNodesFromJSON(json)
-        var allNodes = graphNodes
-        allNodes.append(contentsOf: newNodes)
-        LaneState.computeIDEALayout(&allNodes, mainChain: laneState.mainChain, showLongEdges: showLongEdges)
-        graphNodes = allNodes
-        graphSkipCount += newNodes.count
-        hasMoreHistory = newNodes.count >= graphPageSize
+
+        // Merge old + new commits' raw JSON, then recompute layout
+        // We need the raw commit data from both existing + new for Rust layout
+        let existingJSON = try? JSONEncoder().encode(graphNodes.map { FFICommitRaw(from: $0) })
+        let existingStr = existingJSON.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        
+        // Concatenate as JSON arrays: parse both, merge, re-serialize
+        let oldCommits = (try? JSONDecoder().decode([FFICommitRaw].self, from: Data(existingStr.utf8))) ?? []
+        let newCommits = (try? JSONDecoder().decode([FFICommitRaw].self, from: Data(json.utf8))) ?? []
+        var allCommits = oldCommits
+        allCommits.append(contentsOf: newCommits)
+        let mergedJSON = (try? String(data: JSONEncoder().encode(allCommits), encoding: .utf8)) ?? "[]"
+
+        let layoutJSON = callGitFFI(pier_git_compute_graph_layout(
+            mergedJSON, mainChainJSON,
+            Float(BranchGraphView.laneW), Float(BranchGraphView.rowH),
+            showLongEdges
+        ))
+        guard let layoutResult = layoutJSON else {
+            isLoadingMoreHistory = false
+            return
+        }
+        graphNodes = Self.parseLayoutNodesFromJSON(layoutResult)
+        graphSkipCount = oldCommits.count + newCommits.count
+        hasMoreHistory = newCommits.count >= graphPageSize
         isLoadingMoreHistory = false
     }
 
@@ -720,6 +742,114 @@ class GitViewModel: ObservableObject {
                 refs: refs,
                 parents: parents
             )
+        }
+    }
+
+    /// Raw commit data for round-tripping through JSON during loadMore pagination.
+    /// This matches the LayoutInput struct expected by Rust's compute_graph_layout.
+    private struct FFICommitRaw: Codable {
+        let hash: String
+        let parents: String
+        let short_hash: String
+        let refs: String
+        let message: String
+        let author: String
+        let date_timestamp: Int64
+
+        init(from node: CommitNode) {
+            self.hash = node.id
+            self.parents = node.parents.joined(separator: " ")
+            self.short_hash = node.shortHash
+            self.refs = ""  // refs are decoration-only, not needed for layout
+            self.message = node.message
+            self.author = node.author
+            self.date_timestamp = 0  // not needed for layout
+        }
+    }
+
+    /// Parse layout JSON from Rust (GraphRow array) into CommitNode array.
+    /// The Rust output includes pre-computed lane, colorIndex, segments, and arrows.
+    private static func parseLayoutNodesFromJSON(_ json: String) -> [CommitNode] {
+        struct FFISegment: Decodable {
+            let x_top: CGFloat
+            let y_top: CGFloat
+            let x_bottom: CGFloat
+            let y_bottom: CGFloat
+            let color_index: Int
+        }
+        struct FFIArrow: Decodable {
+            let x: CGFloat
+            let y: CGFloat
+            let color_index: Int
+            let is_down: Bool
+        }
+        struct FFIGraphRow: Decodable {
+            let hash: String
+            let short_hash: String
+            let message: String
+            let author: String
+            let date_timestamp: Int64
+            let refs: String
+            let parents: String
+            let node_column: Int
+            let color_index: Int
+            let segments: [FFISegment]
+            let arrows: [FFIArrow]
+        }
+
+        guard let data = json.data(using: .utf8),
+              let rows = try? JSONDecoder().decode([FFIGraphRow].self, from: data) else {
+            return []
+        }
+
+        let cal = Calendar.current
+        let now = Date()
+        let todayStart = cal.startOfDay(for: now)
+        let yesterdayStart = cal.date(byAdding: .day, value: -1, to: todayStart)!
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm"
+        let fullFmt = DateFormatter()
+        fullFmt.dateFormat = "yyyy/M/d HH:mm"
+
+        return rows.map { r in
+            let parents = r.parents.isEmpty ? [] : r.parents.split(separator: " ").map(String.init)
+            var refs: [String] = []
+            let decoRaw = r.refs.trimmingCharacters(in: .whitespaces)
+            if decoRaw.hasPrefix("(") && decoRaw.hasSuffix(")") {
+                let inner = String(decoRaw.dropFirst().dropLast())
+                refs = inner.split(separator: ",").map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                        .replacingOccurrences(of: "HEAD -> ", with: "\u{2192} ")
+                }
+            }
+            let commitDate = Date(timeIntervalSince1970: TimeInterval(r.date_timestamp))
+            let dateStr: String
+            if commitDate >= todayStart {
+                dateStr = "今天 \(timeFmt.string(from: commitDate))"
+            } else if commitDate >= yesterdayStart {
+                dateStr = "昨天 \(timeFmt.string(from: commitDate))"
+            } else {
+                dateStr = fullFmt.string(from: commitDate)
+            }
+
+            var node = CommitNode(
+                id: r.hash,
+                shortHash: r.short_hash,
+                message: r.message,
+                author: r.author,
+                relativeDate: dateStr,
+                refs: refs,
+                parents: parents
+            )
+            node.lane = r.node_column
+            node.colorIndex = r.color_index
+            node.segments = r.segments.map {
+                Segment(xTop: $0.x_top, yTop: $0.y_top, xBottom: $0.x_bottom, yBottom: $0.y_bottom, colorIndex: $0.color_index)
+            }
+            node.arrows = r.arrows.map {
+                ArrowIndicator(x: $0.x, y: $0.y, colorIndex: $0.color_index, isDown: $0.is_down)
+            }
+            return node
         }
     }
 
