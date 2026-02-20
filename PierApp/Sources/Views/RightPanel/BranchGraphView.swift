@@ -31,6 +31,8 @@ struct CommitNode: Identifiable {
     var colorIndex: Int = 0
     var segments: [Segment] = []
     var arrows: [ArrowIndicator] = []
+    var dateTimestamp: Int64 = 0   // original Unix timestamp for round-tripping
+    var rawRefs: String = ""       // original refs decoration string for round-tripping
 }
 
 // MARK: - Graph Layout (IDEA-style)
@@ -390,7 +392,7 @@ struct BranchGraphView: View {
 
         return ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(nodes) { node in
+                ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
                     VStack(spacing: 0) {
                         HStack(alignment: .center, spacing: 0) {
                             Canvas { ctx, size in drawRow(ctx, node: node, size: size) }
@@ -402,6 +404,13 @@ struct BranchGraphView: View {
                         .background(selectedHash == node.id ? Color.accentColor.opacity(0.08) : .clear)
                         .contentShape(Rectangle())
                         .onTapGesture { toggleDetail(node.id) }
+                        .onAppear {
+                            // Preload: trigger loadMore at 80% scroll position
+                            let threshold = max(1, Int(Double(nodes.count) * 0.8))
+                            if index == threshold && gitViewModel.hasMoreHistory && !gitViewModel.isLoadingMoreHistory {
+                                Task { await gitViewModel.loadMoreGraphHistory() }
+                            }
+                        }
                         if let d = selectedDetail, d.hash == node.id { detailSection(d) }
                     }
                 }

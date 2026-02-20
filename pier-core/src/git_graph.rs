@@ -109,107 +109,108 @@ fn build_ref_decoration(repo: &Repository, commit_id: git2::Oid) -> String {
 // ═══════════════════════════════════════════════════════════
 
 /// Load commit graph data with filters. Returns a list of CommitEntry.
+///
+/// Uses `git log --topo-order --date-order` subprocess to ensure commit
+/// ordering matches IntelliJ IDEA exactly. Ref decorations are enriched
+/// via libgit2.
 pub fn graph_log(
     repo_path: &str,
     limit: usize,
     skip: usize,
     filter: &GraphFilter,
 ) -> Result<Vec<CommitEntry>, String> {
+    use std::process::Command;
+
+    // Open repo with libgit2 only for ref decoration
     let repo = Repository::open(repo_path).map_err(|e| format!("Failed to open repo: {}", e))?;
 
-    let mut revwalk = repo.revwalk().map_err(|e| format!("Failed to create revwalk: {}", e))?;
+    // Build git log command
+    // Format: hash<SEP>parents<SEP>message<SEP>author<SEP>timestamp
+    let separator = "\x1f"; // ASCII Unit Separator
+    let format_str = format!(
+        "%H{0}%P{0}%s{0}%an{0}%ct",
+        separator
+    );
 
-    // Sort order
-    if filter.topo_order {
-        revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME).ok();
-    } else {
-        revwalk.set_sorting(Sort::TIME).ok();
-    }
+    let mut cmd = Command::new("git");
+    cmd.current_dir(repo_path);
+    cmd.args(["log", "--topo-order", "--date-order"]);
+    cmd.args([&format!("--format={}", format_str)]);
+
+    // Limit & skip
+    cmd.arg(format!("-n{}", limit + skip)); // fetch enough to skip + limit
+    // We handle skip ourselves after parsing to support path-filter skipping
 
     // First-parent only
     if filter.first_parent_only {
-        revwalk.simplify_first_parent().ok();
+        cmd.arg("--first-parent");
     }
 
-    // Push starting points
+    // No merges
+    if filter.no_merges {
+        cmd.arg("--no-merges");
+    }
+
+    // Author filter
+    if let Some(ref author) = filter.author {
+        cmd.arg(format!("--author={}", author));
+    }
+
+    // Search text (grep commit message)
+    if let Some(ref search) = filter.search_text {
+        cmd.arg(format!("--grep={}", search));
+        cmd.arg("-i"); // case insensitive
+    }
+
+    // After date
+    if filter.after_timestamp > 0 {
+        cmd.arg(format!("--after={}", filter.after_timestamp));
+    }
+
+    // Branch filter or all refs
     if let Some(ref branch_name) = filter.branch {
-        // Specific branch
-        if let Ok(reference) = repo.find_reference(&format!("refs/heads/{}", branch_name))
-            .or_else(|_| repo.find_reference(&format!("refs/remotes/{}", branch_name)))
-            .or_else(|_| repo.find_reference(branch_name))
-        {
-            if let Some(target) = reference.target() {
-                revwalk.push(target).ok();
-            } else if let Ok(resolved) = reference.resolve() {
-                if let Some(target) = resolved.target() {
-                    revwalk.push(target).ok();
-                }
-            }
-        } else if let Ok(oid) = git2::Oid::from_str(branch_name) {
-            revwalk.push(oid).ok();
-        }
+        cmd.arg(branch_name.as_str());
     } else {
-        // All branches
-        revwalk.push_glob("refs/heads/*").ok();
-        revwalk.push_glob("refs/remotes/*").ok();
-        // Also push tags
-        revwalk.push_glob("refs/tags/*").ok();
+        cmd.arg("--all");
     }
 
-    // Path filter: if paths are specified, we need to check diff for each commit
-    let has_path_filter = !filter.paths.is_empty();
+    // Path filter (must come after --)
+    if !filter.paths.is_empty() {
+        cmd.arg("--");
+        for path in &filter.paths {
+            cmd.arg(path.as_str());
+        }
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run git log: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git log failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
 
     let mut results = Vec::with_capacity(limit);
     let mut skipped = 0;
 
-    for oid_result in revwalk {
-        let oid = match oid_result {
-            Ok(o) => o,
-            Err(_) => continue,
-        };
-
-        let commit = match repo.find_commit(oid) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        // Filter: no merges
-        if filter.no_merges && commit.parent_count() > 1 {
+    for line in stdout.lines() {
+        if line.is_empty() {
             continue;
         }
 
-        // Filter: author
-        if let Some(ref author_filter) = filter.author {
-            let commit_author = commit.author().name().unwrap_or("").to_lowercase();
-            if !commit_author.contains(&author_filter.to_lowercase()) {
-                continue;
-            }
+        let parts: Vec<&str> = line.splitn(5, '\x1f').collect();
+        if parts.len() < 5 {
+            continue;
         }
 
-        // Filter: after date
-        if filter.after_timestamp > 0 {
-            if commit.time().seconds() < filter.after_timestamp {
-                continue;
-            }
-        }
-
-        // Filter: search text (grep message or match hash)
-        if let Some(ref search) = filter.search_text {
-            let search_lower = search.to_lowercase();
-            let msg = commit.message().unwrap_or("").to_lowercase();
-            let hash_str = oid.to_string().to_lowercase();
-            if !msg.contains(&search_lower) && !hash_str.starts_with(&search_lower) {
-                continue;
-            }
-        }
-
-        // Filter: paths — check if commit touches any filtered path
-        if has_path_filter {
-            let touches_path = commit_touches_paths(&repo, &commit, &filter.paths);
-            if !touches_path {
-                continue;
-            }
-        }
+        let hash = parts[0].to_string();
+        let parents = parts[1].to_string();
+        let message = parts[2].to_string();
+        let author = parts[3].to_string();
+        let date_timestamp: i64 = parts[4].parse().unwrap_or(0);
 
         // Skip N commits
         if skipped < skip {
@@ -217,18 +218,11 @@ pub fn graph_log(
             continue;
         }
 
-        // Build entry
-        let hash = oid.to_string();
         let short_hash = hash[..7.min(hash.len())].to_string();
-        let parents = (0..commit.parent_count())
-            .filter_map(|i| commit.parent_id(i).ok())
-            .map(|pid| pid.to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let refs_str = build_ref_decoration(&repo, oid);
-        let message = commit.summary().unwrap_or("").to_string();
-        let author = commit.author().name().unwrap_or("").to_string();
-        let date_timestamp = commit.time().seconds();
+        let commit_oid = git2::Oid::from_str(&hash).ok();
+        let refs_str = commit_oid
+            .map(|oid| build_ref_decoration(&repo, oid))
+            .unwrap_or_default();
 
         results.push(CommitEntry {
             hash,
@@ -248,7 +242,9 @@ pub fn graph_log(
     Ok(results)
 }
 
+
 /// Check if a commit touches any of the specified paths.
+#[allow(dead_code)]
 fn commit_touches_paths(repo: &Repository, commit: &git2::Commit, paths: &[String]) -> bool {
     let tree = match commit.tree() {
         Ok(t) => t,

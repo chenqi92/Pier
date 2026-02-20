@@ -143,6 +143,7 @@ class GitViewModel: ObservableObject {
     private let graphPageSize = 500
     private var graphSkipCount = 0
     private var mainChainJSON: String = "[]"
+    private var cachedCommitsJSON: String = "[]"  // raw commits JSON for incremental loadMore
     private var directoryObserver: AnyCancellable?
     private var statusDismissTask: Task<Void, Never>?
 
@@ -554,6 +555,7 @@ class GitViewModel: ObservableObject {
         graphSkipCount = 0
         hasMoreHistory = true
         mainChainJSON = "[]"
+        cachedCommitsJSON = "[]"
         guard !repoPath.isEmpty else { graphNodes = []; return }
 
         // All FFI calls are in-process (libgit2), no process spawning.
@@ -588,6 +590,7 @@ class GitViewModel: ObservableObject {
         ))
 
         guard let json = logJSON else { graphNodes = []; return }
+        cachedCommitsJSON = json  // cache for loadMore
 
         // Compute layout via Rust FFI (IDEA-style lane assignment + segments)
         let layoutJSON = callGitFFI(pier_git_compute_graph_layout(
@@ -625,17 +628,10 @@ class GitViewModel: ObservableObject {
             return
         }
 
-        // Merge old + new commits' raw JSON, then recompute layout
-        // We need the raw commit data from both existing + new for Rust layout
-        let existingJSON = try? JSONEncoder().encode(graphNodes.map { FFICommitRaw(from: $0) })
-        let existingStr = existingJSON.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        
-        // Concatenate as JSON arrays: parse both, merge, re-serialize
-        let oldCommits = (try? JSONDecoder().decode([FFICommitRaw].self, from: Data(existingStr.utf8))) ?? []
-        let newCommits = (try? JSONDecoder().decode([FFICommitRaw].self, from: Data(json.utf8))) ?? []
-        var allCommits = oldCommits
-        allCommits.append(contentsOf: newCommits)
-        let mergedJSON = (try? String(data: JSONEncoder().encode(allCommits), encoding: .utf8)) ?? "[]"
+        // Merge cached old JSON + new JSON by concatenating arrays
+        // This avoids the expensive CommitNode → FFICommitRaw → JSON round-trip
+        let mergedJSON = Self.mergeJSONArrays(cachedCommitsJSON, json)
+        cachedCommitsJSON = mergedJSON  // update cache
 
         let layoutJSON = callGitFFI(pier_git_compute_graph_layout(
             mergedJSON, mainChainJSON,
@@ -646,10 +642,29 @@ class GitViewModel: ObservableObject {
             isLoadingMoreHistory = false
             return
         }
+        let previousCount = graphNodes.count
         graphNodes = Self.parseLayoutNodesFromJSON(layoutResult)
-        graphSkipCount = oldCommits.count + newCommits.count
-        hasMoreHistory = newCommits.count >= graphPageSize
+        graphSkipCount = graphNodes.count
+        hasMoreHistory = (graphNodes.count - previousCount) >= graphPageSize
         isLoadingMoreHistory = false
+    }
+
+    /// Merge two JSON arrays by concatenating their elements.
+    /// Much faster than decoding/re-encoding: just string manipulation.
+    private static func mergeJSONArrays(_ a: String, _ b: String) -> String {
+        let aT = a.trimmingCharacters(in: .whitespaces)
+        let bT = b.trimmingCharacters(in: .whitespaces)
+        // Handle empty cases
+        if aT == "[]" || aT.isEmpty { return bT }
+        if bT == "[]" || bT.isEmpty { return aT }
+        // Strip outer brackets and concatenate
+        guard aT.hasPrefix("[") && aT.hasSuffix("]"),
+              bT.hasPrefix("[") && bT.hasSuffix("]") else {
+            return aT  // fallback
+        }
+        let aInner = aT.dropFirst().dropLast()
+        let bInner = bT.dropFirst().dropLast()
+        return "[\(aInner),\(bInner)]"
     }
 
     /// Fetch all local and remote branch names via FFI.
@@ -760,10 +775,10 @@ class GitViewModel: ObservableObject {
             self.hash = node.id
             self.parents = node.parents.joined(separator: " ")
             self.short_hash = node.shortHash
-            self.refs = ""  // refs are decoration-only, not needed for layout
+            self.refs = node.rawRefs
             self.message = node.message
             self.author = node.author
-            self.date_timestamp = 0  // not needed for layout
+            self.date_timestamp = node.dateTimestamp
         }
     }
 
@@ -849,6 +864,8 @@ class GitViewModel: ObservableObject {
             node.arrows = r.arrows.map {
                 ArrowIndicator(x: $0.x, y: $0.y, colorIndex: $0.color_index, isDown: $0.is_down)
             }
+            node.dateTimestamp = r.date_timestamp
+            node.rawRefs = r.refs
             return node
         }
     }
