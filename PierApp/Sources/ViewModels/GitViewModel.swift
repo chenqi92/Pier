@@ -135,6 +135,11 @@ class GitViewModel: ObservableObject {
     @Published var graphNoMerges = false               // no-merges option
     @Published var graphAuthors: [String] = []         // available authors
     @Published var graphRepoFiles: [String] = []        // tracked file paths for tree picker
+    // Display options
+    @Published var graphShowHash = true                 // show hash column
+    @Published var graphShowAuthor = true               // show author column
+    @Published var graphShowDate = true                 // show date column
+    @Published var graphShowZebraStripes = true         // alternating row background
 
     // MARK: - Private
 

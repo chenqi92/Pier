@@ -398,6 +398,13 @@
 "git.expandLin" = "Expand Linear";
 "git.selectPaths" = "Select Paths to Filter";
 "git.confirm" = "OK";
+"git.display" = "Display";
+"git.zebraStripes" = "Zebra Stripes";
+"git.columns" = "Columns";
+"git.columnHash" = "Hash";
+"git.columnMessage" = "Message";
+"git.columnAuthor" = "Author";
+"git.columnDate" = "Date";
 
 // MARK: - Batch 6: PostgreSQL
 

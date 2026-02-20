@@ -398,6 +398,13 @@
 "git.expandLin" = "展开线性分支";
 "git.selectPaths" = "选择要筛选的路径";
 "git.confirm" = "确定";
+"git.display" = "显示";
+"git.zebraStripes" = "斑马纹";
+"git.columns" = "列";
+"git.columnHash" = "哈希";
+"git.columnMessage" = "提交信息";
+"git.columnAuthor" = "作者";
+"git.columnDate" = "日期";
 
 // MARK: - Batch 6: PostgreSQL
 

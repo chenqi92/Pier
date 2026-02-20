@@ -68,6 +68,12 @@ struct BranchGraphView: View {
     @State private var showingPathPicker = false
     @State private var pathPickerSelection: Set<String> = []
 
+    // Column widths — resizable by dragging handle on each column's right edge
+    @State private var hashColumnWidth: CGFloat = 62
+    @State private var messageColumnWidth: CGFloat = 300
+    @State private var authorColumnWidth: CGFloat = 100
+    @State private var dateColumnWidth: CGFloat = 120
+
     var body: some View {
         VStack(spacing: 0) {
             // Branch filter bar
@@ -326,6 +332,50 @@ struct BranchGraphView: View {
                         }
                     }
                 }
+
+                Divider()
+
+                // Display section — zebra stripes
+                Section(LS("git.display")) {
+                    Button {
+                        gitViewModel.graphShowZebraStripes.toggle()
+                    } label: {
+                        HStack {
+                            Text(LS("git.zebraStripes"))
+                            if gitViewModel.graphShowZebraStripes { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Column visibility
+                Section(LS("git.columns")) {
+                    Button {
+                        gitViewModel.graphShowHash.toggle()
+                    } label: {
+                        HStack {
+                            Text(LS("git.columnHash"))
+                            if gitViewModel.graphShowHash { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button {
+                        gitViewModel.graphShowAuthor.toggle()
+                    } label: {
+                        HStack {
+                            Text(LS("git.columnAuthor"))
+                            if gitViewModel.graphShowAuthor { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button {
+                        gitViewModel.graphShowDate.toggle()
+                    } label: {
+                        HStack {
+                            Text(LS("git.columnDate"))
+                            if gitViewModel.graphShowDate { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
             } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .font(.system(size: 13))
@@ -377,9 +427,53 @@ struct BranchGraphView: View {
         }
     }
 
-    private var scrollContent: some View {
+    /// Invisible drag handle on the right edge of a column.
+    private func columnResizeHandle(_ width: Binding<CGFloat>) -> some View {
+        ColumnResizeHandle(width: width)
+    }
+}
+
+// MARK: - Column Resize Handle (separate View for @GestureState)
+
+/// Separate struct so each handle gets its own @GestureState for drag tracking.
+private struct ColumnResizeHandle: View {
+    @Binding var width: CGFloat
+    @GestureState private var startWidth: CGFloat? = nil
+
+    init(width: Binding<CGFloat>) {
+        self._width = width
+    }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 6)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .updating($startWidth) { _, state, _ in
+                        if state == nil { state = width }
+                    }
+                    .onChanged { value in
+                        if let sw = startWidth {
+                            width = max(30, sw + value.translation.width)
+                        }
+                    }
+            )
+    }
+}
+
+extension BranchGraphView {
+
+    /// Calculate graph column width from nodes
+    private var graphColumnWidth: CGFloat {
         let nodes = gitViewModel.graphNodes
-        // Compute graph width from the widest element (node or edge segment)
         var maxX: CGFloat = 0
         for n in nodes {
             let nodeDx = CGFloat(n.lane) * Self.laneW + Self.laneW / 2 + 4
@@ -388,25 +482,31 @@ struct BranchGraphView: View {
                 maxX = max(maxX, s.xTop, s.xBottom)
             }
         }
-        let gw = max(maxX + Self.laneW, 60)
+        return max(maxX + Self.laneW, 60)
+    }
+
+    // MARK: - Scroll Content
+
+    private var scrollContent: some View {
+        let gw = graphColumnWidth
 
         return ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
+                ForEach(Array(gitViewModel.graphNodes.enumerated()), id: \.element.id) { index, node in
                     VStack(spacing: 0) {
                         HStack(alignment: .center, spacing: 0) {
                             Canvas { ctx, size in drawRow(ctx, node: node, size: size) }
                                 .frame(width: gw, height: Self.rowH)
                             commitLabel(node)
-                            Spacer(minLength: 0)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .frame(height: Self.rowH)
-                        .background(selectedHash == node.id ? Color.accentColor.opacity(0.08) : .clear)
+                        .background(rowBackground(index: index, nodeId: node.id))
                         .contentShape(Rectangle())
                         .onTapGesture { toggleDetail(node.id) }
                         .onAppear {
                             // Preload: trigger loadMore at 80% scroll position
-                            let threshold = max(1, Int(Double(nodes.count) * 0.8))
+                            let threshold = max(1, Int(Double(gitViewModel.graphNodes.count) * 0.8))
                             if index == threshold && gitViewModel.hasMoreHistory && !gitViewModel.isLoadingMoreHistory {
                                 Task { await gitViewModel.loadMoreGraphHistory() }
                             }
@@ -419,29 +519,62 @@ struct BranchGraphView: View {
         }
     }
 
+    /// Row background: selection highlight OR zebra stripe OR clear.
+    private func rowBackground(index: Int, nodeId: String) -> Color {
+        if selectedHash == nodeId {
+            return Color.accentColor.opacity(0.08)
+        }
+        if gitViewModel.graphShowZebraStripes && index % 2 == 1 {
+            return Color(nsColor: .textColor).opacity(0.03)
+        }
+        return .clear
+    }
+
+    // MARK: - Commit Label (columns)
+
     private func commitLabel(_ n: CommitNode) -> some View {
-        HStack(spacing: 5) {
-            Text(n.shortHash).font(.system(size: 10, design: .monospaced))
-                .foregroundColor(n.isMerge ? .secondary : .blue)
-                .frame(width: 54, alignment: .leading)
-            ForEach(Array(n.refs.enumerated()), id: \.offset) { i, ref in
-                Text(ref).font(.system(size: 8, weight: .semibold))
-                    .padding(.horizontal, 4).padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(Self.palette[i % Self.palette.count].opacity(0.15)))
-                    .foregroundColor(Self.palette[i % Self.palette.count])
+        HStack(spacing: 0) {
+            // Hash column + handle on right
+            if gitViewModel.graphShowHash {
+                Text(n.shortHash).font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(n.isMerge ? .secondary : .blue)
+                    .frame(width: hashColumnWidth, alignment: .leading)
+                    .padding(.leading, 4)
+                columnResizeHandle($hashColumnWidth)
             }
-            Text(n.message).font(.system(size: 10)).lineLimit(1)
-                .foregroundColor(n.isMerge ? .secondary : .primary)
-            Spacer(minLength: 8)
-            if !n.author.isEmpty {
+
+            // Message column + handle on right
+            HStack(spacing: 4) {
+                ForEach(Array(n.refs.enumerated()), id: \.offset) { i, ref in
+                    Text(ref).font(.system(size: 8, weight: .semibold))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 3).fill(Self.palette[i % Self.palette.count].opacity(0.15)))
+                        .foregroundColor(Self.palette[i % Self.palette.count])
+                        .fixedSize()
+                }
+                Text(n.message).font(.system(size: 10)).lineLimit(1)
+                    .foregroundColor(n.isMerge ? .secondary : .primary)
+            }
+            .frame(width: messageColumnWidth, alignment: .leading)
+            .clipped()
+            columnResizeHandle($messageColumnWidth)
+
+            // Author column + handle on right
+            if gitViewModel.graphShowAuthor {
                 Text(n.author).font(.system(size: 9)).foregroundColor(.secondary)
-                    .lineLimit(1).frame(maxWidth: 80, alignment: .trailing)
+                    .lineLimit(1)
+                    .frame(width: authorColumnWidth, alignment: .trailing)
+                columnResizeHandle($authorColumnWidth)
             }
-            if !n.relativeDate.isEmpty {
+
+            // Date column (last column, no handle needed)
+            if gitViewModel.graphShowDate {
                 Text(n.relativeDate).font(.system(size: 9)).foregroundColor(.secondary.opacity(0.6))
-                    .lineLimit(1).frame(width: 100, alignment: .trailing)
+                    .lineLimit(1)
+                    .frame(width: dateColumnWidth, alignment: .trailing)
+                    .padding(.trailing, 8)
             }
-        }.padding(.leading, 4).padding(.trailing, 8)
+        }
     }
 
     // MARK: - Canvas
@@ -508,12 +641,21 @@ struct BranchGraphView: View {
 
     private func detailSection(_ d: GitCommitDetail) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            // Hash + Author + Date on same line, all selectable
             HStack(spacing: 8) {
+                Text(String(d.hash.prefix(7)))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .textSelection(.enabled)
                 Image(systemName: "person.fill").font(.system(size: 9)).foregroundColor(.secondary)
-                Text("\(d.author) <\(d.authorEmail)>").font(.system(size: 10)).foregroundColor(.secondary)
+                Text("\(d.author) <\(d.authorEmail)>")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
                 Spacer()
                 Text(d.date).font(.system(size: 9)).foregroundColor(.secondary)
-            }.padding(.horizontal, 12).padding(.top, 4)
+                    .textSelection(.enabled)
+            }.padding(.horizontal, 12).padding(.top, 6)
             Text(d.message).font(.system(size: 10)).textSelection(.enabled).padding(.horizontal, 12)
             if !d.changedFiles.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
