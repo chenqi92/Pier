@@ -753,3 +753,103 @@
 // MARK: - PostgreSQL Extended
 
 "pg.rowsAndSize" = "%@ 行 · %@";
+
+// MARK: - About Window
+
+"about.menuItem" = "关于 Pier Terminal";
+"about.version" = "版本";
+"about.description" = "一款现代化的 macOS 终端与服务器管理工具。集 SSH、SFTP、Docker、Git、数据库于一体。";
+"about.copyright" = "Copyright © 2026 kkape.com. 保留所有权利。";
+"about.website" = "官网";
+
+// MARK: - Help Menu
+
+"help.quickStart" = "快速入门指南";
+"help.shortcuts" = "快捷键参考";
+"help.feedback" = "报告问题…";
+"help.github" = "GitHub 仓库";
+"help.website" = "官方网站";
+
+// MARK: - System Menus
+
+"sysMenu.file" = "文件";
+"sysMenu.edit" = "编辑";
+"sysMenu.view" = "显示";
+"sysMenu.window" = "窗口";
+"sysMenu.help" = "帮助";
+
+"sysMenu.settings" = "设置…";
+"sysMenu.services" = "服务";
+"sysMenu.hideApp" = "隐藏 Pier Terminal";
+"sysMenu.hideOthers" = "隐藏其他";
+"sysMenu.showAll" = "显示全部";
+"sysMenu.quitApp" = "退出 Pier Terminal";
+
+"sysMenu.newWindow" = "新建窗口";
+"sysMenu.closeAll" = "关闭所有";
+"sysMenu.close" = "关闭";
+
+"sysMenu.undo" = "撤销";
+"sysMenu.redo" = "重做";
+"sysMenu.cut" = "剪切";
+"sysMenu.copy" = "复制";
+"sysMenu.paste" = "粘贴";
+"sysMenu.pasteAndMatchStyle" = "粘贴并匹配样式";
+"sysMenu.delete" = "删除";
+"sysMenu.selectAll" = "全选";
+"sysMenu.autoFill" = "自动填充";
+"sysMenu.startDictation" = "开始听写…";
+"sysMenu.emojiAndSymbols" = "表情与符号";
+"sysMenu.find" = "查找";
+"sysMenu.spellingAndGrammar" = "拼写和语法";
+"sysMenu.substitutions" = "替换";
+"sysMenu.transformations" = "转换";
+"sysMenu.speech" = "语音";
+
+"sysMenu.showToolbar" = "显示工具栏";
+"sysMenu.hideToolbar" = "隐藏工具栏";
+"sysMenu.customizeToolbar" = "自定工具栏…";
+"sysMenu.enterFullScreen" = "进入全屏幕";
+"sysMenu.exitFullScreen" = "退出全屏幕";
+
+"sysMenu.minimize" = "最小化";
+"sysMenu.zoom" = "缩放";
+"sysMenu.fill" = "填充";
+"sysMenu.center" = "居中";
+"sysMenu.moveAndResize" = "移动与调整大小";
+"sysMenu.fullScreenTile" = "全屏幕拼贴";
+"sysMenu.removeWindowFromSet" = "从组中移除窗口";
+"sysMenu.bringAllToFront" = "前置全部窗口";
+"sysMenu.showPreviousTab" = "显示上一个标签页";
+"sysMenu.showNextTab" = "显示下一个标签页";
+"sysMenu.moveTabToNewWindow" = "将标签页移到新窗口";
+"sysMenu.mergeAllWindows" = "合并所有窗口";
+"sysMenu.minimizeAll" = "全部最小化";
+"sysMenu.zoomAll" = "全部缩放";
+
+// View menu extras
+"sysMenu.showTabBar" = "显示标签栏";
+"sysMenu.hideTabBar" = "隐藏标签栏";
+"sysMenu.showAllTabs" = "显示所有标签页";
+
+// Window → Move & Resize submenu
+"sysMenu.halves" = "二等分";
+"sysMenu.tileLeft" = "左";
+"sysMenu.tileRight" = "右";
+"sysMenu.tileTop" = "上";
+"sysMenu.tileBottom" = "下";
+"sysMenu.quarters" = "四等分";
+"sysMenu.tileTopLeft" = "左上";
+"sysMenu.tileTopRight" = "右上";
+"sysMenu.tileBottomLeft" = "左下";
+"sysMenu.tileBottomRight" = "右下";
+"sysMenu.arrange" = "排列";
+"sysMenu.leftAndQuarters" = "左侧与四等分";
+"sysMenu.rightAndQuarters" = "右侧与四等分";
+"sysMenu.topAndQuarters" = "顶部与四等分";
+"sysMenu.bottomAndQuarters" = "底部与四等分";
+"sysMenu.returnToPreviousSize" = "恢复先前大小";
+
+// Window → Full Screen Tile submenu
+"sysMenu.leftOfScreen" = "屏幕左侧";
+"sysMenu.rightOfScreen" = "屏幕右侧";

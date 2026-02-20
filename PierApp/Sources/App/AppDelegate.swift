@@ -39,6 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+
     func applicationWillTerminate(_ notification: Notification) {
         // Remove event monitor to prevent leak
         if let monitor = eventMonitor {

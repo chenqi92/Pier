@@ -753,3 +753,103 @@
 // MARK: - PostgreSQL Extended
 
 "pg.rowsAndSize" = "%@ rows · %@";
+
+// MARK: - About Window
+
+"about.menuItem" = "About Pier Terminal";
+"about.version" = "Version";
+"about.description" = "A modern terminal and server management tool for macOS. SSH, SFTP, Docker, Git, Database — all in one.";
+"about.copyright" = "Copyright © 2026 kkape.com. All rights reserved.";
+"about.website" = "Website";
+
+// MARK: - Help Menu
+
+"help.quickStart" = "Quick Start Guide";
+"help.shortcuts" = "Keyboard Shortcuts";
+"help.feedback" = "Report a Problem…";
+"help.github" = "GitHub Repository";
+"help.website" = "Official Website";
+
+// MARK: - System Menus
+
+"sysMenu.file" = "File";
+"sysMenu.edit" = "Edit";
+"sysMenu.view" = "View";
+"sysMenu.window" = "Window";
+"sysMenu.help" = "Help";
+
+"sysMenu.settings" = "Settings…";
+"sysMenu.services" = "Services";
+"sysMenu.hideApp" = "Hide PierApp";
+"sysMenu.hideOthers" = "Hide Others";
+"sysMenu.showAll" = "Show All";
+"sysMenu.quitApp" = "Quit PierApp";
+
+"sysMenu.newWindow" = "New Window";
+"sysMenu.closeAll" = "Close All";
+"sysMenu.close" = "Close";
+
+"sysMenu.undo" = "Undo";
+"sysMenu.redo" = "Redo";
+"sysMenu.cut" = "Cut";
+"sysMenu.copy" = "Copy";
+"sysMenu.paste" = "Paste";
+"sysMenu.pasteAndMatchStyle" = "Paste and Match Style";
+"sysMenu.delete" = "Delete";
+"sysMenu.selectAll" = "Select All";
+"sysMenu.autoFill" = "AutoFill";
+"sysMenu.startDictation" = "Start Dictation…";
+"sysMenu.emojiAndSymbols" = "Emoji & Symbols";
+"sysMenu.find" = "Find";
+"sysMenu.spellingAndGrammar" = "Spelling and Grammar";
+"sysMenu.substitutions" = "Substitutions";
+"sysMenu.transformations" = "Transformations";
+"sysMenu.speech" = "Speech";
+
+"sysMenu.showToolbar" = "Show Toolbar";
+"sysMenu.hideToolbar" = "Hide Toolbar";
+"sysMenu.customizeToolbar" = "Customize Toolbar…";
+"sysMenu.enterFullScreen" = "Enter Full Screen";
+"sysMenu.exitFullScreen" = "Exit Full Screen";
+
+"sysMenu.minimize" = "Minimize";
+"sysMenu.zoom" = "Zoom";
+"sysMenu.fill" = "Fill";
+"sysMenu.center" = "Center";
+"sysMenu.moveAndResize" = "Move & Resize";
+"sysMenu.fullScreenTile" = "Full Screen Tile";
+"sysMenu.removeWindowFromSet" = "Remove Window from Set";
+"sysMenu.bringAllToFront" = "Bring All to Front";
+"sysMenu.showPreviousTab" = "Show Previous Tab";
+"sysMenu.showNextTab" = "Show Next Tab";
+"sysMenu.moveTabToNewWindow" = "Move Tab to New Window";
+"sysMenu.mergeAllWindows" = "Merge All Windows";
+"sysMenu.minimizeAll" = "Minimize All";
+"sysMenu.zoomAll" = "Zoom All";
+
+// View menu extras
+"sysMenu.showTabBar" = "Show Tab Bar";
+"sysMenu.hideTabBar" = "Hide Tab Bar";
+"sysMenu.showAllTabs" = "Show All Tabs";
+
+// Window → Move & Resize submenu
+"sysMenu.halves" = "Halves";
+"sysMenu.tileLeft" = "Left";
+"sysMenu.tileRight" = "Right";
+"sysMenu.tileTop" = "Top";
+"sysMenu.tileBottom" = "Bottom";
+"sysMenu.quarters" = "Quarters";
+"sysMenu.tileTopLeft" = "Top Left";
+"sysMenu.tileTopRight" = "Top Right";
+"sysMenu.tileBottomLeft" = "Bottom Left";
+"sysMenu.tileBottomRight" = "Bottom Right";
+"sysMenu.arrange" = "Arrange";
+"sysMenu.leftAndQuarters" = "Left & Quarters";
+"sysMenu.rightAndQuarters" = "Right & Quarters";
+"sysMenu.topAndQuarters" = "Top & Quarters";
+"sysMenu.bottomAndQuarters" = "Bottom & Quarters";
+"sysMenu.returnToPreviousSize" = "Return to Previous Size";
+
+// Window → Full Screen Tile submenu
+"sysMenu.leftOfScreen" = "Left of Screen";
+"sysMenu.rightOfScreen" = "Right of Screen";

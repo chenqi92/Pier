@@ -1,0 +1,6 @@
+/* System-level menu — English (base) */
+
+/* Info.plist keys */
+"CFBundleName" = "Pier Terminal";
+"CFBundleDisplayName" = "Pier Terminal";
+"NSHumanReadableCopyright" = "Copyright © 2026 kkape.com. All rights reserved.";

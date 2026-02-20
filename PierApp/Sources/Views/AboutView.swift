@@ -1,0 +1,81 @@
+import SwiftUI
+
+/// Custom About window for Pier Terminal.
+struct AboutView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+    }
+
+    private var buildNumber: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            // App icon
+            if let icon = NSApp.applicationIconImage {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 96, height: 96)
+            }
+
+            // App name
+            Text("Pier Terminal")
+                .font(.system(size: 20, weight: .bold))
+
+            // Version
+            Text(LS("about.version") + " \(appVersion) (\(buildNumber))")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+
+            // Description
+            Text(LS("about.description"))
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 280)
+
+            Divider()
+                .frame(width: 200)
+
+            // Copyright
+            Text(LS("about.copyright"))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+
+            // Links
+            HStack(spacing: 16) {
+                Link(destination: URL(string: "https://github.com/chenqi92/Pier")!) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "link")
+                            .font(.system(size: 10))
+                        Text("GitHub")
+                            .font(.system(size: 11))
+                    }
+                }
+
+                Link(destination: URL(string: "https://kkape.com")!) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 10))
+                        Text(LS("about.website"))
+                            .font(.system(size: 11))
+                    }
+                }
+            }
+
+            Spacer()
+                .frame(height: 4)
+
+            // Close button
+            Button(LS("common.ok")) {
+                dismiss()
+            }
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(24)
+        .frame(width: 340, height: 420)
+    }
+}
