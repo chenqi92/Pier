@@ -729,6 +729,10 @@
 "git.switchBranchSuccess" = "已切换到 %@";
 "git.mergeBranchSuccess" = "已合并 %@";
 "git.branchOperationFailed" = "分支操作失败";
+"git.renameBranch" = "重命名";
+"git.setTracking" = "设置跟踪分支";
+"git.unsetTracking" = "取消跟踪";
+"git.noTracking" = "不跟踪";
 
 // MARK: - Git Tag Management
 
@@ -803,6 +807,7 @@
 "gitConfig.noEntries" = "无配置项";
 "gitConfig.copyKey" = "复制键名";
 "gitConfig.copyValue" = "复制值";
+"gitConfig.edit" = "编辑值";
 "gitConfig.remove" = "移除";
 
 // MARK: - Git Tag Extended

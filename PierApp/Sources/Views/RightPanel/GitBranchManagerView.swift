@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Branch management popover: list, switch, create, delete, merge branches.
+/// Branch management popover: list, switch, create, delete, rename, and set tracking.
 struct GitBranchManagerView: View {
     @ObservedObject var gitViewModel: GitViewModel
     @State private var branches: [GitBranch] = []
@@ -8,6 +8,9 @@ struct GitBranchManagerView: View {
     @State private var showNewBranch = false
     @State private var showLocalOnly = true
     @State private var isLoading = false
+    // Rename state
+    @State private var renamingBranch: GitBranch?
+    @State private var renameText = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -95,6 +98,10 @@ struct GitBranchManagerView: View {
         branches.filter { showLocalOnly ? !$0.isRemote : $0.isRemote }
     }
 
+    private var remoteBranches: [String] {
+        branches.filter { $0.isRemote }.map { $0.name }
+    }
+
     private func branchRow(_ branch: GitBranch) -> some View {
         HStack(spacing: 6) {
             if branch.isCurrent {
@@ -107,12 +114,37 @@ struct GitBranchManagerView: View {
                     .font(.system(size: 10))
             }
 
-            Text(branch.name)
-                .font(.system(size: 10, weight: branch.isCurrent ? .semibold : .regular))
-                .lineLimit(1)
+            // Rename mode or display mode
+            if renamingBranch?.name == branch.name {
+                HStack(spacing: 4) {
+                    TextField("", text: $renameText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 10))
+                        .onSubmit { performRename(branch) }
 
-            if let tracking = branch.trackingBranch, !tracking.isEmpty {
-                Text(tracking)
+                    Button(action: { performRename(branch) }) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8))
+                            .foregroundColor(.green)
+                    }
+                    .buttonStyle(.borderless)
+
+                    Button(action: { renamingBranch = nil }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            } else {
+                Text(branch.name)
+                    .font(.system(size: 10, weight: branch.isCurrent ? .semibold : .regular))
+                    .lineLimit(1)
+            }
+
+            if let tracking = branch.trackingBranch, !tracking.isEmpty,
+               renamingBranch?.name != branch.name {
+                Text("→ \(tracking)")
                     .font(.system(size: 8))
                     .foregroundColor(.blue)
             }
@@ -121,16 +153,69 @@ struct GitBranchManagerView: View {
         }
         .padding(.vertical, 2)
         .contextMenu {
-            if !branch.isCurrent && !branch.isRemote {
-                Button(LS("git.switchBranch")) { gitViewModel.switchBranch(branch.name) }
-                Button(LS("git.mergeBranch")) { gitViewModel.mergeBranch(branch.name) }
-                Divider()
-                Button(LS("git.deleteBranch"), role: .destructive) { gitViewModel.deleteBranch(branch.name) }
-            } else if !branch.isCurrent && branch.isRemote {
+            if !branch.isRemote {
+                // Local branch context menu
+                if !branch.isCurrent {
+                    Button(LS("git.switchBranch")) { gitViewModel.switchBranch(branch.name) }
+                    Button(LS("git.mergeBranch")) { gitViewModel.mergeBranch(branch.name) }
+                    Divider()
+                }
+
+                Button(LS("git.renameBranch")) {
+                    renamingBranch = branch
+                    renameText = branch.name
+                }
+
+                // Set tracking branch via submenu
+                Menu(LS("git.setTracking")) {
+                    // "No tracking" option
+                    Button {
+                        performSetTracking(branch, upstream: nil)
+                    } label: {
+                        HStack {
+                            Text(LS("git.noTracking"))
+                            if branch.trackingBranch == nil {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    // All remote branches
+                    ForEach(remoteBranches, id: \.self) { remote in
+                        Button {
+                            performSetTracking(branch, upstream: remote)
+                        } label: {
+                            HStack {
+                                Text(remote)
+                                if branch.trackingBranch == remote {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !branch.isCurrent {
+                    Divider()
+                    Button(LS("git.deleteBranch"), role: .destructive) {
+                        gitViewModel.deleteBranch(branch.name)
+                        delayedRefresh()
+                    }
+                }
+            } else {
+                // Remote branch context menu
                 Button(LS("git.checkout")) {
-                    // Create local tracking branch from remote
                     let localName = branch.name.split(separator: "/").dropFirst().joined(separator: "/")
                     gitViewModel.switchBranch(localName)
+                    delayedRefresh()
+                }
+
+                Button(LS("git.renameBranch")) {
+                    renamingBranch = branch
+                    let parts = branch.name.split(separator: "/", maxSplits: 1)
+                    renameText = parts.count > 1 ? String(parts[1]) : branch.name
                 }
             }
         }
@@ -141,12 +226,50 @@ struct GitBranchManagerView: View {
         }
     }
 
+    // MARK: - Actions
+
+    private func performRename(_ branch: GitBranch) {
+        let newName = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty, newName != branch.name else {
+            renamingBranch = nil
+            return
+        }
+
+        Task {
+            if branch.isRemote {
+                let parts = branch.name.split(separator: "/", maxSplits: 1)
+                let remote = parts.count > 1 ? String(parts[0]) : "origin"
+                let oldBranch = parts.count > 1 ? String(parts[1]) : branch.name
+                _ = await gitViewModel.runGitFull(["push", remote, "\(oldBranch):\(newName)"])
+                _ = await gitViewModel.runGitFull(["push", remote, "--delete", oldBranch])
+            } else {
+                _ = await gitViewModel.runGitFull(["branch", "-m", branch.name, newName])
+            }
+            renamingBranch = nil
+            refreshBranches()
+        }
+    }
+
+    private func performSetTracking(_ branch: GitBranch, upstream: String?) {
+        Task {
+            if let upstream = upstream {
+                _ = await gitViewModel.runGitFull(["branch", "--set-upstream-to=\(upstream)", branch.name])
+            } else {
+                _ = await gitViewModel.runGitFull(["branch", "--unset-upstream", branch.name])
+            }
+            refreshBranches()
+        }
+    }
+
     private func createNewBranch() {
         guard !newBranchName.isEmpty else { return }
         gitViewModel.createBranch(newBranchName)
         newBranchName = ""
         showNewBranch = false
-        // Refresh after a short delay to let git complete
+        delayedRefresh()
+    }
+
+    private func delayedRefresh() {
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000)
             refreshBranches()

@@ -10,6 +10,8 @@ struct GitConfigView: View {
     @State private var newKey = ""
     @State private var newValue = ""
     @State private var filterText = ""
+    @State private var editingEntry: GitConfigEntry?
+    @State private var editingValue = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -136,23 +138,55 @@ struct GitConfigView: View {
     }
 
     private func configRow(_ entry: GitConfigEntry) -> some View {
-        HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.key)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.blue)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(entry.key)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(.blue)
+                .lineLimit(1)
 
+            if editingEntry?.key == entry.key {
+                // Inline editing mode
+                HStack(spacing: 4) {
+                    TextField("", text: $editingValue)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 9))
+                        .onSubmit { saveEditingValue(for: entry.key) }
+
+                    Button(action: { saveEditingValue(for: entry.key) }) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8))
+                            .foregroundColor(.green)
+                    }
+                    .buttonStyle(.borderless)
+
+                    Button(action: { editingEntry = nil }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            } else {
+                // Display mode — click to edit
                 Text(entry.value)
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
                     .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editingEntry = entry
+                        editingValue = entry.value
+                    }
             }
-
-            Spacer()
         }
         .padding(.vertical, 1)
         .contextMenu {
+            Button(LS("gitConfig.edit")) {
+                editingEntry = entry
+                editingValue = entry.value
+            }
+            Divider()
             Button(LS("gitConfig.copyKey")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(entry.key, forType: .string)
@@ -172,6 +206,15 @@ struct GitConfigView: View {
         }
     }
 
+    private func saveEditingValue(for key: String) {
+        gitViewModel.setGitConfig(key: key, value: editingValue, scope: selectedScope)
+        editingEntry = nil
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            refresh()
+        }
+    }
+
     private func addEntry() {
         guard !newKey.isEmpty else { return }
         gitViewModel.setGitConfig(key: newKey, value: newValue, scope: selectedScope)
@@ -186,6 +229,7 @@ struct GitConfigView: View {
 
     private func refresh() {
         isLoading = true
+        editingEntry = nil
         Task {
             entries = await gitViewModel.loadGitConfig(scope: selectedScope)
             isLoading = false

@@ -729,6 +729,10 @@
 "git.switchBranchSuccess" = "Switched to %@";
 "git.mergeBranchSuccess" = "Merged %@";
 "git.branchOperationFailed" = "Branch operation failed";
+"git.renameBranch" = "Rename";
+"git.setTracking" = "Set Tracking Branch";
+"git.unsetTracking" = "Unset Tracking";
+"git.noTracking" = "No Tracking";
 
 // MARK: - Git Tag Management
 
@@ -803,6 +807,7 @@
 "gitConfig.noEntries" = "No config entries";
 "gitConfig.copyKey" = "Copy Key";
 "gitConfig.copyValue" = "Copy Value";
+"gitConfig.edit" = "Edit Value";
 "gitConfig.remove" = "Remove";
 
 // MARK: - Git Tag Extended
