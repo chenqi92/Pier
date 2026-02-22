@@ -25,11 +25,6 @@ struct RightPanelView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // ── Vertical Tab Sidebar ──
-            modeSidebar
-
-            Divider()
-
             // ── Content Area ──
             VStack(spacing: 0) {
                 // Connection status bar
@@ -70,6 +65,11 @@ struct RightPanelView: View {
                     LogViewerView(serviceManager: serviceManager)
                 }
             }
+
+            Divider()
+
+            // ── Vertical Tab Sidebar (far right) ──
+            modeSidebar
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         .onAppear {

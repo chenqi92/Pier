@@ -260,6 +260,7 @@ struct GitPanelView: View {
                         }
                     }
                     .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
                     .fixedSize()
                 } else {
                     Text(viewModel.currentBranch)
