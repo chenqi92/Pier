@@ -465,6 +465,8 @@
 "git.ctx.changedFiles" = "变更的文件";
 "git.ctx.selectFile" = "选择文件查看差异";
 "git.ctx.selectFileHint" = "从左侧面板选择文件";
+"git.ctx.fileCount" = "个文件";
+"git.ctx.workingTree" = "工作区";
 
 // MARK: - Batch 6: PostgreSQL
 

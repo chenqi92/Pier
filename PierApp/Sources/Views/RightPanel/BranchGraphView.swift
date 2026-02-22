@@ -105,10 +105,13 @@ struct BranchGraphView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Branch filter bar
-            branchFilterBar
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color(nsColor: .controlBackgroundColor))
+            ScrollView(.horizontal, showsIndicators: false) {
+                branchFilterBar
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .background(Color(nsColor: .controlBackgroundColor))
 
             Divider()
 
@@ -164,72 +167,7 @@ struct BranchGraphView: View {
                 Text(LS("git.ctx.resetMsg") + " \(node.shortHash)")
             }
         }
-        .sheet(isPresented: $showDiffSheet) {
-            HSplitView {
-                // Left: changed file list
-                VStack(spacing: 0) {
-                    HStack {
-                        Text(LS("git.ctx.changedFiles")).font(.headline)
-                        Spacer()
-                        Text("\(diffFiles.count)").font(.caption).foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    Divider()
-                    List(diffFiles, id: \.self, selection: $selectedDiffFile) { file in
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.text")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text((file as NSString).lastPathComponent)
-                                .font(.system(size: 11))
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .listStyle(.sidebar)
-                }
-                .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
 
-                // Right: diff view for selected file
-                VStack(spacing: 0) {
-                    HStack {
-                        if let file = selectedDiffFile {
-                            Text(file).font(.system(size: 11, design: .monospaced)).lineLimit(1)
-                        } else {
-                            Text(LS("git.ctx.selectFile")).foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Button(LS("git.ctx.close")) { showDiffSheet = false }
-                            .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    Divider()
-                    if !diffFileContent.isEmpty {
-                        DiffView(diffText: diffFileContent)
-                    } else {
-                        VStack(spacing: 12) {
-                            Image(systemName: "arrow.left.circle")
-                                .font(.system(size: 30))
-                                .foregroundColor(.secondary)
-                            Text(LS("git.ctx.selectFileHint"))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                }
-            }
-            .frame(minWidth: 900, minHeight: 600)
-            .onChange(of: selectedDiffFile) {
-                guard let file = selectedDiffFile else { diffFileContent = ""; return }
-                Task {
-                    let result = await gitViewModel.runGitFull(["diff", diffCommitHash, "--", file])
-                    diffFileContent = result.combinedOutput
-                }
-            }
-        }
         .sheet(isPresented: $showEditMessageDialog) {
             VStack(spacing: 0) {
                 HStack {
@@ -896,16 +834,10 @@ extension BranchGraphView {
         // Get list of changed files
         let nameResult = await gitViewModel.runGitFull(["diff", "--name-only", hash])
         let files = nameResult.combinedOutput.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
-        diffFiles = files
-        diffCommitHash = hash
-        selectedDiffFile = nil
-        diffFileContent = ""
         if files.isEmpty {
             gitViewModel.setOperationStatus(.success(message: LS("git.ctx.noDifferences")))
         } else {
-            showDiffSheet = true
-            // Auto-select first file
-            selectedDiffFile = files.first
+            CompareWindowController.show(files: files, commitHash: hash, gitViewModel: gitViewModel)
         }
     }
 
@@ -1010,7 +942,7 @@ extension BranchGraphView {
                 columnResizeHandle($hashColumnWidth)
             }
 
-            // Message column + handle on right
+            // Message column (flexible — fills remaining space)
             HStack(spacing: 4) {
                 ForEach(Array(n.refs.enumerated()), id: \.offset) { i, ref in
                     Text(ref).font(.system(size: 8, weight: .semibold))
@@ -1022,16 +954,15 @@ extension BranchGraphView {
                 Text(n.message).font(.system(size: 10)).lineLimit(1)
                     .foregroundColor(n.isMerge ? .secondary : .primary)
             }
-            .frame(width: messageColumnWidth, alignment: .leading)
+            .frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
             .clipped()
-            columnResizeHandle($messageColumnWidth)
 
             // Author column + handle on right
             if gitViewModel.graphShowAuthor {
+                columnResizeHandle($authorColumnWidth)
                 Text(n.author).font(.system(size: 9)).foregroundColor(.secondary)
                     .lineLimit(1)
                     .frame(width: authorColumnWidth, alignment: .trailing)
-                columnResizeHandle($authorColumnWidth)
             }
 
             // Date column (last column, no handle needed)
@@ -1323,6 +1254,107 @@ extension BranchGraphView {
     }
 }
 
+// MARK: - Compare Window Controller
+
+/// Opens a resizable native macOS window for comparing a commit with working tree.
+final class CompareWindowController {
+    private static var currentWindow: NSWindow?
+
+    static func show(files: [String], commitHash: String, gitViewModel: GitViewModel) {
+        currentWindow?.close()
+
+        let compareView = CompareView(files: files, commitHash: commitHash, gitViewModel: gitViewModel)
+        let contentView = NSHostingView(rootView: compareView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = contentView
+        window.minSize = NSSize(width: 700, height: 400)
+        window.title = LS("git.ctx.compareWithLocal") + " — " + String(commitHash.prefix(8))
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        window.isReleasedWhenClosed = false
+        currentWindow = window
+    }
+}
+
+/// Self-contained compare view: file tree on left, DiffView on right.
+struct CompareView: View {
+    let files: [String]
+    let commitHash: String
+    let gitViewModel: GitViewModel
+
+    @State private var selectedFile: String?
+    @State private var diffContent: String = ""
+
+    var body: some View {
+        HSplitView {
+            // Left: file tree
+            VStack(spacing: 0) {
+                HStack {
+                    Text(LS("git.ctx.changedFiles")).font(.headline)
+                    Spacer()
+                    Text("\(files.count)").font(.caption).foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                Divider()
+                ScrollView {
+                    DiffFileTreeView(
+                        root: buildDiffTree(from: files),
+                        selectedFile: $selectedFile
+                    )
+                    .padding(.vertical, 4)
+                }
+            }
+            .frame(minWidth: 200, idealWidth: 250, maxWidth: 320)
+
+            // Right: diff view for selected file
+            VStack(spacing: 0) {
+                HStack {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(commitHash.prefix(8) + " ↔ " + LS("git.ctx.workingTree"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                Divider()
+                if !diffContent.isEmpty {
+                    DiffView(diffText: diffContent)
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "arrow.left.circle")
+                            .font(.system(size: 30))
+                            .foregroundColor(.secondary)
+                        Text(LS("git.ctx.selectFileHint"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .onAppear {
+            // Auto-select first file
+            selectedFile = files.first
+        }
+        .onChange(of: selectedFile) {
+            guard let file = selectedFile else { diffContent = ""; return }
+            Task {
+                let result = await gitViewModel.runGitFull(["diff", commitHash, "--", file])
+                diffContent = result.combinedOutput
+            }
+        }
+    }
+}
+
 // MARK: - File Tree Node
 
 /// Hierarchical tree node built from flat git file paths.
@@ -1352,14 +1384,12 @@ final class FileTreeNode: Identifiable, ObservableObject {
                     let node = FileTreeNode(name: comp, fullPath: accumulated)
                     current.children.append(node)
                     current = node
-                    // Only leaf nodes are files; intermediate are dirs
                     if i < components.count - 1 {
-                        // This is a directory node — it might get children later
+                        // directory node
                     }
                 }
             }
         }
-        // Sort: directories first, then files, alphabetically within each group
         func sortChildren(_ node: FileTreeNode) {
             node.children.sort { a, b in
                 let aDir = !a.children.isEmpty
@@ -1371,5 +1401,103 @@ final class FileTreeNode: Identifiable, ObservableObject {
         }
         sortChildren(root)
         return root.children
+    }
+
+    /// Count total leaf (file) nodes under this node.
+    var fileCount: Int {
+        if children.isEmpty { return 1 }
+        return children.reduce(0) { $0 + $1.fileCount }
+    }
+}
+
+// MARK: - Diff File Tree View
+
+/// Build tree from flat diff file list.
+private func buildDiffTree(from files: [String]) -> [FileTreeNode] {
+    FileTreeNode.buildTree(from: files)
+}
+
+/// Recursive tree view for the compare dialog file list.
+struct DiffFileTreeView: View {
+    let root: [FileTreeNode]
+    @Binding var selectedFile: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(root) { node in
+                DiffTreeNodeView(node: node, selectedFile: $selectedFile, depth: 0)
+            }
+        }
+        .padding(.horizontal, 8)
+    }
+}
+
+/// Single node in the tree — directory or file.
+struct DiffTreeNodeView: View {
+    let node: FileTreeNode
+    @Binding var selectedFile: String?
+    let depth: Int
+    @State private var isExpanded = true
+
+    var isDirectory: Bool { !node.children.isEmpty }
+    var isSelected: Bool { !isDirectory && selectedFile == node.fullPath }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if isDirectory {
+                // Directory row
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 10)
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.accentColor)
+                        Text(node.name)
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                        Text("\(node.fileCount) " + LS("git.ctx.fileCount"))
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, CGFloat(depth) * 14)
+                .padding(.vertical, 3)
+
+                if isExpanded {
+                    ForEach(node.children) { child in
+                        DiffTreeNodeView(node: child, selectedFile: $selectedFile, depth: depth + 1)
+                    }
+                }
+            } else {
+                // File row
+                Button(action: { selectedFile = node.fullPath }) {
+                    HStack(spacing: 4) {
+                        Spacer().frame(width: 10) // align with chevron
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Text(node.name)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .foregroundColor(isSelected ? .white : .primary)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, CGFloat(depth) * 14)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isSelected ? Color.accentColor.opacity(0.8) : Color.clear)
+                )
+            }
+        }
     }
 }

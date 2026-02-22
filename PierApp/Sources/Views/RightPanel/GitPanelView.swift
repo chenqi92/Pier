@@ -41,16 +41,21 @@ struct GitPanelView: View {
                 Divider()
 
                 // Tab content
-                switch viewModel.selectedTab {
-                case .changes:
-                    changesView
-                case .history:
-                    BranchGraphView(gitViewModel: viewModel)
-                case .stash:
-                    stashView
-                case .conflicts:
-                    MergeConflictView(gitViewModel: viewModel)
+                Group {
+                    switch viewModel.selectedTab {
+                    case .changes:
+                        changesView
+                    case .history:
+                        BranchGraphView(gitViewModel: viewModel)
+                    case .stash:
+                        stashView
+                    case .conflicts:
+                        MergeConflictView(gitViewModel: viewModel)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .layoutPriority(1)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gitShowDiff)) { notification in
@@ -221,141 +226,145 @@ struct GitPanelView: View {
     // MARK: - Branch Bar
 
     private var branchBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 10))
-                .foregroundColor(.green)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 10))
+                    .foregroundColor(.green)
 
-            // Branch switcher dropdown
-            if viewModel.localBranches.count > 1 {
-                Menu {
-                    ForEach(viewModel.localBranches, id: \.self) { branch in
-                        Button {
-                            if branch != viewModel.currentBranch {
-                                viewModel.checkout(branch)
-                            }
-                        } label: {
-                            HStack {
-                                Text(branch)
-                                if branch == viewModel.currentBranch {
-                                    Image(systemName: "checkmark")
+                // Branch switcher dropdown
+                if viewModel.localBranches.count > 1 {
+                    Menu {
+                        ForEach(viewModel.localBranches, id: \.self) { branch in
+                            Button {
+                                if branch != viewModel.currentBranch {
+                                    viewModel.checkout(branch)
+                                }
+                            } label: {
+                                HStack {
+                                    Text(branch)
+                                    if branch == viewModel.currentBranch {
+                                        Image(systemName: "checkmark")
+                                    }
                                 }
                             }
                         }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(viewModel.currentBranch)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 7, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
                     }
-                } label: {
-                    HStack(spacing: 3) {
-                        Text(viewModel.currentBranch)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 7, weight: .semibold))
-                            .foregroundColor(.secondary)
-                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                } else {
+                    Text(viewModel.currentBranch)
+                        .font(.caption)
+                        .fontWeight(.medium)
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-            } else {
-                Text(viewModel.currentBranch)
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
 
-            // Tracking remote branch
-            if !viewModel.trackingBranch.isEmpty {
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 7))
-                    .foregroundColor(.secondary)
-                Text(viewModel.trackingBranch)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
+                // Tracking remote branch
+                if !viewModel.trackingBranch.isEmpty {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 7))
+                        .foregroundColor(.secondary)
+                    Text(viewModel.trackingBranch)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
 
-            if viewModel.aheadCount > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 8))
-                    Text("\(viewModel.aheadCount)")
+                if viewModel.aheadCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 8))
+                        Text("\(viewModel.aheadCount)")
+                            .font(.system(size: 9))
+                    }
+                    .foregroundColor(.blue)
+                }
+
+                if viewModel.behindCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 8))
+                        Text("\(viewModel.behindCount)")
+                            .font(.system(size: 9))
+                    }
+                    .foregroundColor(.orange)
+                }
+
+                Spacer()
+
+                // Manager buttons
+                Button(action: { showingBranchManager.toggle() }) {
+                    Image(systemName: "arrow.triangle.branch")
                         .font(.system(size: 9))
                 }
-                .foregroundColor(.blue)
-            }
+                .buttonStyle(.borderless)
+                .help(LS("git.branches"))
 
-            if viewModel.behindCount > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 8))
-                    Text("\(viewModel.behindCount)")
+                Button(action: { showingTagManager.toggle() }) {
+                    Image(systemName: "tag")
                         .font(.system(size: 9))
                 }
-                .foregroundColor(.orange)
+                .buttonStyle(.borderless)
+                .help(LS("git.tags"))
+
+                Button(action: { showingRemoteManager.toggle() }) {
+                    Image(systemName: "network")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.borderless)
+                .help(LS("git.remotes"))
+
+                Button(action: { showingRebase.toggle() }) {
+                    Image(systemName: "arrow.triangle.swap")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.borderless)
+                .help(LS("git.interactiveRebase"))
+
+                Button(action: { showingSubmodule.toggle() }) {
+                    Image(systemName: "square.stack.3d.up")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.borderless)
+                .help(LS("git.submodules"))
+
+                Button(action: { showingConfig.toggle() }) {
+                    Image(systemName: "gearshape.2")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.borderless)
+                .help(LS("git.config"))
+
+                Divider()
+                    .frame(height: 12)
+
+                // Quick actions
+                Button(action: { viewModel.pull() }) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help(LS("git.pull"))
+
+                Button(action: { viewModel.push() }) {
+                    Image(systemName: "arrow.up.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help(LS("git.push"))
             }
-
-            Spacer()
-
-            // Manager buttons
-            Button(action: { showingBranchManager.toggle() }) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 9))
-            }
-            .buttonStyle(.borderless)
-            .help(LS("git.branches"))
-
-            Button(action: { showingTagManager.toggle() }) {
-                Image(systemName: "tag")
-                    .font(.system(size: 9))
-            }
-            .buttonStyle(.borderless)
-            .help(LS("git.tags"))
-
-            Button(action: { showingRemoteManager.toggle() }) {
-                Image(systemName: "network")
-                    .font(.system(size: 9))
-            }
-            .buttonStyle(.borderless)
-            .help(LS("git.remotes"))
-
-            Button(action: { showingRebase.toggle() }) {
-                Image(systemName: "arrow.triangle.swap")
-                    .font(.system(size: 9))
-            }
-            .buttonStyle(.borderless)
-            .help(LS("git.interactiveRebase"))
-
-            Button(action: { showingSubmodule.toggle() }) {
-                Image(systemName: "square.stack.3d.up")
-                    .font(.system(size: 9))
-            }
-            .buttonStyle(.borderless)
-            .help(LS("git.submodules"))
-
-            Button(action: { showingConfig.toggle() }) {
-                Image(systemName: "gearshape.2")
-                    .font(.system(size: 9))
-            }
-            .buttonStyle(.borderless)
-            .help(LS("git.config"))
-
-            Divider()
-                .frame(height: 12)
-
-            // Quick actions
-            Button(action: { viewModel.pull() }) {
-                Image(systemName: "arrow.down.circle")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help(LS("git.pull"))
-
-            Button(action: { viewModel.push() }) {
-                Image(systemName: "arrow.up.circle")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help(LS("git.push"))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
     }
 

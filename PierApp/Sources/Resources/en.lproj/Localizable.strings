@@ -465,6 +465,8 @@
 "git.ctx.changedFiles" = "Changed Files";
 "git.ctx.selectFile" = "Select a file to view diff";
 "git.ctx.selectFileHint" = "Select a file from the left panel";
+"git.ctx.fileCount" = "files";
+"git.ctx.workingTree" = "Working Tree";
 
 // MARK: - Batch 6: PostgreSQL
 

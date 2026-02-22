@@ -483,80 +483,84 @@ class SideBySideContainerView: NSView {
     }
 }
 
-/// Custom flipped NSView that draws diff lines with proper text measurement for content size.
+/// Custom flipped NSView that hosts an NSTextView for diff display with text selection support.
 class DiffDocumentView: NSView {
     private var lines: [DiffLine] = []
     private var isLeft: Bool = true
 
     private let lineHeight: CGFloat = 18
-    private let gutterWidth: CGFloat = 40
-    private let gutterPadding: CGFloat = 6
+    private let gutterWidth: CGFloat = 44
     private let textFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
     private let numFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
 
+    private let textView = NSTextView()
+    private let gutterView = DiffGutterView()
+
     override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupTextView()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setupTextView() {
+        // Gutter (line numbers only)
+        gutterView.frame = NSRect(x: 0, y: 0, width: gutterWidth, height: 0)
+        addSubview(gutterView)
+
+        // Text view — selectable, not editable
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.textContainer?.lineFragmentPadding = 4
+        textView.textContainer?.widthTracksTextView = false
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isHorizontallyResizable = true
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = []
+        addSubview(textView)
+    }
 
     func update(lines: [DiffLine], isLeft: Bool) {
         self.lines = lines
         self.isLeft = isLeft
 
-        // Measure max text width accurately
-        let attrs: [NSAttributedString.Key: Any] = [.font: textFont]
-        var maxW: CGFloat = 200
-        for line in lines {
-            let w = (line.text as NSString).size(withAttributes: attrs).width
-            if w > maxW { maxW = w }
-        }
-
-        let totalW = gutterWidth + gutterPadding + maxW + 60
-        let totalH = CGFloat(lines.count) * lineHeight + 10
-
-        frame = NSRect(x: 0, y: 0, width: totalW, height: totalH)
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        let textAttrsBase: [NSAttributedString.Key: Any] = [.font: textFont]
-        let numAttrs: [NSAttributedString.Key: Any] = [
-            .font: numFont,
-            .foregroundColor: NSColor.secondaryLabelColor
-        ]
+        // Build attributed string with per-line coloring
+        let storage = NSMutableAttributedString()
+        let paraStyle = NSMutableParagraphStyle()
+        paraStyle.minimumLineHeight = lineHeight
+        paraStyle.maximumLineHeight = lineHeight
 
         for (i, line) in lines.enumerated() {
-            let y = CGFloat(i) * lineHeight
-            let rowRect = NSRect(x: 0, y: y, width: bounds.width, height: lineHeight)
-
-            guard dirtyRect.intersects(rowRect) else { continue }
-
-            // Background
-            let bg = bgColor(line.type)
-            if bg != .clear {
-                bg.setFill()
-                rowRect.fill()
-            }
-
-            // Line number
-            let num = isLeft ? line.oldLineNumber : line.newLineNumber
-            if let num = num {
-                let numStr = "\(num)"
-                let numSize = (numStr as NSString).size(withAttributes: numAttrs)
-                let numX = gutterWidth - numSize.width - 2
-                let numY = y + (lineHeight - numSize.height) / 2
-                (numStr as NSString).draw(at: NSPoint(x: numX, y: numY), withAttributes: numAttrs)
-            }
-
-            // Text content
-            let textX = gutterWidth + gutterPadding
-            let fg = fgColor(line.type)
-            var textAttrs = textAttrsBase
-            textAttrs[.foregroundColor] = fg
-            let text = line.text.isEmpty ? " " : line.text
-            let textSize = (text as NSString).size(withAttributes: textAttrs)
-            let textY = y + (lineHeight - textSize.height) / 2
-            (text as NSString).draw(at: NSPoint(x: textX, y: textY), withAttributes: textAttrs)
+            let text = (line.text.isEmpty ? " " : line.text) + (i < lines.count - 1 ? "\n" : "")
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: textFont,
+                .foregroundColor: fgColor(line.type),
+                .backgroundColor: bgColor(line.type),
+                .paragraphStyle: paraStyle
+            ]
+            storage.append(NSAttributedString(string: text, attributes: attrs))
         }
+
+        textView.textStorage?.setAttributedString(storage)
+
+        // Measure content size
+        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
+        let usedRect = textView.layoutManager?.usedRect(for: textView.textContainer!) ?? .zero
+        let totalW = gutterWidth + max(usedRect.width, 200) + 40
+        let totalH = max(usedRect.height, CGFloat(lines.count) * lineHeight) + 10
+
+        frame = NSRect(x: 0, y: 0, width: totalW, height: totalH)
+        textView.frame = NSRect(x: gutterWidth, y: 0, width: totalW - gutterWidth, height: totalH)
+
+        // Update gutter
+        gutterView.update(lines: lines, isLeft: isLeft, lineHeight: lineHeight, font: numFont)
+        gutterView.frame = NSRect(x: 0, y: 0, width: gutterWidth, height: totalH)
     }
 
     private func bgColor(_ type: DiffLineType) -> NSColor {
@@ -574,6 +578,64 @@ class DiffDocumentView: NSView {
         case .deletion: return .systemRed
         case .header:   return .systemCyan
         case .context:  return .labelColor
+        }
+    }
+}
+
+/// Gutter view that draws line numbers next to the text view.
+class DiffGutterView: NSView {
+    private var lines: [DiffLine] = []
+    private var isLeft = true
+    private var lineHeight: CGFloat = 18
+    private var numFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
+
+    override var isFlipped: Bool { true }
+
+    func update(lines: [DiffLine], isLeft: Bool, lineHeight: CGFloat, font: NSFont) {
+        self.lines = lines
+        self.isLeft = isLeft
+        self.lineHeight = lineHeight
+        self.numFont = font
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let numAttrs: [NSAttributedString.Key: Any] = [
+            .font: numFont,
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]
+
+        for (i, line) in lines.enumerated() {
+            let y = CGFloat(i) * lineHeight
+            let rowRect = NSRect(x: 0, y: y, width: bounds.width, height: lineHeight)
+            guard dirtyRect.intersects(rowRect) else { continue }
+
+            // Background (match text area)
+            let bg = bgColor(line.type)
+            if bg != .clear {
+                bg.setFill()
+                rowRect.fill()
+            }
+
+            let num = isLeft ? line.oldLineNumber : line.newLineNumber
+            if let num = num {
+                let numStr = "\(num)"
+                let numSize = (numStr as NSString).size(withAttributes: numAttrs)
+                let numX = bounds.width - numSize.width - 4
+                let numY = y + (lineHeight - numSize.height) / 2
+                (numStr as NSString).draw(at: NSPoint(x: numX, y: numY), withAttributes: numAttrs)
+            }
+        }
+    }
+
+    private func bgColor(_ type: DiffLineType) -> NSColor {
+        switch type {
+        case .addition: return NSColor.systemGreen.withAlphaComponent(0.08)
+        case .deletion: return NSColor.systemRed.withAlphaComponent(0.08)
+        case .header:   return NSColor.systemCyan.withAlphaComponent(0.05)
+        case .context:  return .clear
         }
     }
 }

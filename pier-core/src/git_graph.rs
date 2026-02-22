@@ -171,7 +171,7 @@ pub fn graph_log(
     if let Some(ref branch_name) = filter.branch {
         cmd.arg(branch_name.as_str());
     } else {
-        cmd.arg("--all");
+        cmd.arg("--branches").arg("--remotes").arg("--tags");
     }
 
     // Path filter (must come after --)
