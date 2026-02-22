@@ -410,6 +410,31 @@
 "git.highlightMyCommits" = "我的提交";
 "git.highlightMerge" = "合并提交";
 "git.highlightBranch" = "当前分支";
+// Git 图形右键菜单
+"git.ctx.checkout" = "签出";
+"git.ctx.checkoutRevision" = "签出修订";
+"git.ctx.checkoutBranch" = "签出";
+"git.ctx.showAtRevision" = "在修订版中显示仓库";
+"git.ctx.compareWithLocal" = "与本地比较";
+"git.ctx.resetToHere" = "将当前分支重置到此处...";
+"git.ctx.revertCommit" = "还原提交";
+"git.ctx.undoCommit" = "撤销提交...";
+"git.ctx.editMessage" = "编辑提交消息...";
+"git.ctx.squashInto" = "压缩到...";
+"git.ctx.dropCommit" = "删除提交";
+"git.ctx.squashCommit" = "压缩提交...";
+"git.ctx.interactiveRebase" = "从这里进行交互式变基...";
+"git.ctx.pushUpTo" = "推送此前所有提交...";
+"git.ctx.branch" = "分支";
+"git.ctx.branchCheckout" = "签出";
+"git.ctx.branchDelete" = "删除";
+"git.ctx.branchRename" = "重命名...";
+"git.ctx.branchCompare" = "与当前分支比较";
+"git.ctx.newBranch" = "新建分支...";
+"git.ctx.newTag" = "新建标记...";
+"git.ctx.goToChild" = "转到子提交";
+"git.ctx.goToParent" = "转到父提交";
+"git.ctx.openInBrowser" = "在浏览器中查看";
 
 // MARK: - Batch 6: PostgreSQL
 

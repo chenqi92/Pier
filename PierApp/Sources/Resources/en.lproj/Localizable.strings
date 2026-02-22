@@ -410,6 +410,31 @@
 "git.highlightMyCommits" = "My Commits";
 "git.highlightMerge" = "Merge Commits";
 "git.highlightBranch" = "Current Branch";
+// Git Graph Context Menu
+"git.ctx.checkout" = "Checkout";
+"git.ctx.checkoutRevision" = "Checkout Revision";
+"git.ctx.checkoutBranch" = "Checkout";
+"git.ctx.showAtRevision" = "Show Repository at Revision";
+"git.ctx.compareWithLocal" = "Compare with Local";
+"git.ctx.resetToHere" = "Reset Current Branch to Here...";
+"git.ctx.revertCommit" = "Revert Commit";
+"git.ctx.undoCommit" = "Undo Commit...";
+"git.ctx.editMessage" = "Edit Commit Message...";
+"git.ctx.squashInto" = "Squash Into...";
+"git.ctx.dropCommit" = "Drop Commit";
+"git.ctx.squashCommit" = "Squash Commits...";
+"git.ctx.interactiveRebase" = "Interactively Rebase from Here...";
+"git.ctx.pushUpTo" = "Push All Commits Before...";
+"git.ctx.branch" = "Branch";
+"git.ctx.branchCheckout" = "Checkout";
+"git.ctx.branchDelete" = "Delete";
+"git.ctx.branchRename" = "Rename...";
+"git.ctx.branchCompare" = "Compare with Current";
+"git.ctx.newBranch" = "New Branch...";
+"git.ctx.newTag" = "New Tag...";
+"git.ctx.goToChild" = "Go to Child Commit";
+"git.ctx.goToParent" = "Go to Parent Commit";
+"git.ctx.openInBrowser" = "Open in Browser";
 
 // MARK: - Batch 6: PostgreSQL
 

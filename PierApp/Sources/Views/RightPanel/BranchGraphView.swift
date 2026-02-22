@@ -544,6 +544,7 @@ extension BranchGraphView {
                         .opacity(shouldDimRow(node) ? 0.3 : 1.0)
                         .contentShape(Rectangle())
                         .onTapGesture { toggleDetail(node.id) }
+                        .contextMenu { commitContextMenu(node) }
                         .onAppear {
                             // Preload: trigger loadMore at 50% scroll position
                             let threshold = max(1, Int(Double(gitViewModel.graphNodes.count) * 0.5))
@@ -593,6 +594,170 @@ extension BranchGraphView {
         case .myCommits: return LS("git.highlightMyCommits")
         case .mergeCommits: return LS("git.highlightMerge")
         case .currentBranch: return LS("git.highlightBranch")
+        }
+    }
+
+    // MARK: - Context Menu (IDEA-style)
+
+    /// Build the right-click context menu for a commit row.
+    @ViewBuilder
+    private func commitContextMenu(_ node: CommitNode) -> some View {
+        // ── Parse refs into categories ──
+        let localBranches = node.refs.filter {
+            !$0.hasPrefix("origin/") && !$0.hasPrefix("→ ") && !$0.hasPrefix("tag:") && $0 != "HEAD"
+        }
+        let remoteBranches = node.refs.filter { $0.hasPrefix("origin/") }
+        // HEAD branch: "→ main" → "main"
+        let headBranch = node.refs.first(where: { $0.hasPrefix("→ ") })?.replacingOccurrences(of: "→ ", with: "")
+        // Collect all displayable branch refs for the branch submenus
+        let allBranchRefs: [String] = {
+            var result: [String] = []
+            if let hb = headBranch { result.append(hb) }
+            result.append(contentsOf: localBranches)
+            result.append(contentsOf: remoteBranches)
+            return result
+        }()
+
+        // ── 1. Checkout submenu ──
+        Menu(LS("git.ctx.checkout")) {
+            // Always: checkout revision (detached HEAD)
+            Button(LS("git.ctx.checkoutRevision") + " \(node.shortHash)...") {
+                print("[TODO] Checkout revision \(node.id)")
+            }
+
+            // HEAD branch (if present)
+            if let hb = headBranch {
+                Button(LS("git.ctx.checkoutBranch") + " '\(hb)'") {
+                    print("[TODO] Checkout branch \(hb)")
+                }
+            }
+
+            // Local branches
+            ForEach(localBranches, id: \.self) { branch in
+                Button(LS("git.ctx.checkoutBranch") + " '\(branch)'") {
+                    print("[TODO] Checkout branch \(branch)")
+                }
+            }
+
+            // Remote branches
+            ForEach(remoteBranches, id: \.self) { branch in
+                Button(LS("git.ctx.checkoutBranch") + " '\(branch)'") {
+                    print("[TODO] Checkout remote branch \(branch)")
+                }
+            }
+        }
+
+        // ── 2. Show repository at revision ──
+        Button(LS("git.ctx.showAtRevision")) {
+            print("[TODO] Show repo at revision \(node.id)")
+        }
+
+        // ── 3. Compare with local ──
+        Button(LS("git.ctx.compareWithLocal")) {
+            print("[TODO] Compare \(node.id) with local")
+        }
+
+        Divider()
+
+        // ── 4. Reset current branch to here ──
+        Button(LS("git.ctx.resetToHere")) {
+            print("[TODO] Reset current branch to \(node.id)")
+        }
+
+        // ── 5. Revert commit ──
+        Button(LS("git.ctx.revertCommit")) {
+            print("[TODO] Revert commit \(node.id)")
+        }
+
+        // ── 6. Undo commit (cherry-pick reverse) ──
+        Button(LS("git.ctx.undoCommit")) {
+            print("[TODO] Undo commit \(node.id)")
+        }
+
+        Divider()
+
+        // ── 7. Edit commit message ──
+        Button(LS("git.ctx.editMessage")) {
+            print("[TODO] Edit commit message \(node.id)")
+        }
+
+        // ── 8. Fixup ──
+        Button("Fixup...") {
+            print("[TODO] Fixup \(node.id)")
+        }
+
+        // ── 9. Squash into ──
+        Button(LS("git.ctx.squashInto")) {
+            print("[TODO] Squash into \(node.id)")
+        }
+
+        // ── 10. Drop commit ──
+        Button(LS("git.ctx.dropCommit")) {
+            print("[TODO] Drop commit \(node.id)")
+        }
+
+        // ── 11. Squash commit ──
+        Button(LS("git.ctx.squashCommit")) {
+            print("[TODO] Squash commit \(node.id)")
+        }
+
+        // ── 12. Interactive rebase from here ──
+        Button(LS("git.ctx.interactiveRebase")) {
+            print("[TODO] Interactive rebase from \(node.id)")
+        }
+
+        // ── 13. Push all commits before this ──
+        Button(LS("git.ctx.pushUpTo")) {
+            print("[TODO] Push up to \(node.id)")
+        }
+
+        Divider()
+
+        // ── 14. Branch submenus — one per ref ──
+        ForEach(allBranchRefs, id: \.self) { branch in
+            Menu(LS("git.ctx.branch") + " '\(branch)'") {
+                Button(LS("git.ctx.branchCheckout")) {
+                    print("[TODO] Checkout branch \(branch)")
+                }
+                Button(LS("git.ctx.branchDelete")) {
+                    print("[TODO] Delete branch \(branch)")
+                }
+                Button(LS("git.ctx.branchRename")) {
+                    print("[TODO] Rename branch \(branch)")
+                }
+                Button(LS("git.ctx.branchCompare")) {
+                    print("[TODO] Compare with branch \(branch)")
+                }
+            }
+        }
+
+        // ── 15. New branch ──
+        Button(LS("git.ctx.newBranch")) {
+            print("[TODO] New branch from \(node.id)")
+        }
+
+        // ── 16. New tag ──
+        Button(LS("git.ctx.newTag")) {
+            print("[TODO] New tag at \(node.id)")
+        }
+
+        Divider()
+
+        // ── 17. Go to child commit ──
+        Button(LS("git.ctx.goToChild")) {
+            print("[TODO] Go to child of \(node.id)")
+        }
+
+        // ── 18. Go to parent commit ──
+        Button(LS("git.ctx.goToParent")) {
+            print("[TODO] Go to parent of \(node.id)")
+        }
+
+        Divider()
+
+        // ── 19. Open in browser ──
+        Button(LS("git.ctx.openInBrowser")) {
+            print("[TODO] Open \(node.id) in browser")
         }
     }
 
