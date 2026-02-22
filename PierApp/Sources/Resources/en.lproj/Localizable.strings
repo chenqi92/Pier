@@ -125,13 +125,24 @@
    ═══════════════════════════════════════ */
 
 "log.title" = "Log Viewer";
-"log.openFile" = "Open Log File";
+"log.fileViewer" = "File Viewer";
+"log.openFile" = "Open File";
 "log.autoScroll" = "Auto-scroll";
 "log.clear" = "Clear";
-"log.noFile" = "No Log File Opened";
-"log.noFileDesc" = "Open a log file or\npipe output from terminal";
+"log.noFile" = "No File Opened";
+"log.noFileDesc" = "Select a file from the list\nor open a local file";
 "log.openFileButton" = "Open File";
 "log.lineCount" = "%lld/%lld lines";
+"log.logMode" = "Log";
+"log.fileMode" = "File";
+"log.edit" = "Edit";
+"log.save" = "Save";
+"log.saving" = "Saving...";
+"log.saved" = "Saved";
+"log.saveFailed" = "Save Failed";
+"log.cancelEdit" = "Cancel Edit";
+"log.cwdFiles" = "CWD Files";
+"log.refresh" = "Refresh";
 
 /* ═══════════════════════════════════════
    SFTP Panel

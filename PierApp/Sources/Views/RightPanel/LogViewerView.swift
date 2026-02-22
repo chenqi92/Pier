@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Real-time log file viewer with filtering and highlighting.
+/// Combined file viewer and log viewer with editing support.
 struct LogViewerView: View {
     @StateObject private var viewModel = LogViewModel()
     var serviceManager: RemoteServiceManager?
@@ -8,25 +8,27 @@ struct LogViewerView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            logHeader
+            viewerHeader
 
             Divider()
 
-            // Filter bar
+            // Filter / search bar
             filterBar
 
             Divider()
 
-            if viewModel.logFilePath == nil {
+            if viewModel.viewMode == .empty {
                 emptyState
+            } else if viewModel.viewMode == .textFile && viewModel.isEditing {
+                // Edit mode: TextEditor
+                editorView
             } else {
-                // Log content
-                logContentView
+                // View mode: log lines or file lines
+                contentView
 
                 Divider()
 
-                // Status bar
-                logStatusBar
+                statusBar
             }
         }
         .onAppear {
@@ -47,7 +49,6 @@ struct LogViewerView: View {
             guard let info = notification.object as? [String: String],
                   let path = info["path"] else { return }
             viewModel.currentRemoteCwd = path
-            // Re-discover logs when terminal directory changes
             if viewModel.serviceManager?.isConnected == true {
                 viewModel.discoverRemoteLogFiles(cwdPath: path)
             }
@@ -56,43 +57,42 @@ struct LogViewerView: View {
 
     // MARK: - Header
 
-    private var logHeader: some View {
-        HStack {
-            Image(systemName: "doc.text.magnifyingglass")
+    private var viewerHeader: some View {
+        HStack(spacing: 6) {
+            // Title + mode badges
+            Image(systemName: viewModel.viewMode == .logFile || viewModel.viewMode == .processLog
+                  ? "doc.text.magnifyingglass" : "doc.text")
                 .foregroundColor(.green)
                 .font(.caption)
-            Text(LS("log.title"))
+            Text(LS("log.fileViewer"))
                 .font(.caption)
                 .fontWeight(.medium)
 
-            if viewModel.isRemoteMode {
-                Text(LS("log.remote"))
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Color.orange.opacity(0.15))
-                    .cornerRadius(3)
+            // Mode badge
+            switch viewModel.viewMode {
+            case .logFile:
+                modeBadge(LS("log.logMode"), color: .orange)
+            case .textFile:
+                modeBadge(LS("log.fileMode"), color: .blue)
+            case .processLog:
+                modeBadge(LS("log.processLog"), color: .purple)
+            case .empty:
+                EmptyView()
             }
 
-            if viewModel.activeProcess != nil {
-                Text(LS("log.processLog"))
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.purple)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Color.purple.opacity(0.15))
-                    .cornerRadius(3)
+            if viewModel.isRemoteMode {
+                modeBadge(LS("log.remote"), color: .cyan)
             }
 
             Spacer()
 
-            // Log files dropdown (CWD only)
+            // ---- File list dropdown ----
             if !viewModel.cwdLogFiles.isEmpty {
                 Menu {
                     ForEach(Array(zip(viewModel.cwdLogFiles, viewModel.cwdLogDisplayNames)), id: \.0) { path, displayName in
-                        Button(displayName) {
-                            viewModel.loadRemoteFile(path)
+                        Button(action: { viewModel.loadRemoteFile(path) }) {
+                            Label(displayName, systemImage: LogViewModel.isLogFile(path)
+                                  ? "doc.text" : "doc")
                         }
                     }
                 } label: {
@@ -102,22 +102,16 @@ struct LogViewerView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help(LS("log.remoteLogs"))
+                .help(LS("log.cwdFiles"))
             }
 
-            // Running processes dropdown
+            // ---- Process list dropdown ----
             if !viewModel.runningProcesses.isEmpty {
                 Menu {
                     ForEach(viewModel.runningProcesses) { process in
-                        Button(action: {
-                            viewModel.tailProcessLog(process)
-                        }) {
+                        Button(action: { viewModel.tailProcessLog(process) }) {
                             Label {
-                                VStack(alignment: .leading) {
-                                    Text(process.displayName)
-                                    Text("PID: \(process.pid)")
-                                        .font(.caption2)
-                                }
+                                Text(process.displayName)
                             } icon: {
                                 Image(systemName: process.type.icon)
                             }
@@ -133,24 +127,74 @@ struct LogViewerView: View {
                 .help(LS("log.processes"))
             }
 
+            // ---- Refresh ----
             Button(action: { viewModel.discoverRemoteLogFiles() }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help(LS("log.discoverFiles"))
+            .help(LS("log.refresh"))
 
-            // JSON toggle
-            Button(action: {
-                viewModel.isJsonMode.toggle()
-            }) {
-                Image(systemName: viewModel.isJsonMode ? "curlybraces.square.fill" : "curlybraces.square")
-                    .font(.caption)
-                    .foregroundColor(viewModel.isJsonMode ? .blue : .secondary)
+            // ---- Mode-specific buttons ----
+
+            // Log mode: JSON toggle
+            if viewModel.viewMode == .logFile || viewModel.viewMode == .processLog {
+                Button(action: { viewModel.isJsonMode.toggle() }) {
+                    Image(systemName: viewModel.isJsonMode ? "curlybraces.square.fill" : "curlybraces.square")
+                        .font(.caption)
+                        .foregroundColor(viewModel.isJsonMode ? .blue : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("JSON")
+
+                // Auto-scroll
+                Button(action: { viewModel.toggleAutoScroll() }) {
+                    Image(systemName: viewModel.autoScroll ? "arrow.down.to.line.compact" : "arrow.down.to.line")
+                        .font(.caption)
+                        .foregroundColor(viewModel.autoScroll ? .green : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .help(LS("log.autoScroll"))
             }
-            .buttonStyle(.borderless)
-            .help(LS("log.jsonMode"))
 
+            // Text file mode: Edit / Save
+            if viewModel.viewMode == .textFile {
+                if viewModel.isEditing {
+                    // Save button
+                    Button(action: { viewModel.saveRemoteFile() }) {
+                        HStack(spacing: 2) {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.caption)
+                            Text(LS("log.save"))
+                                .font(.system(size: 9))
+                        }
+                        .foregroundColor(.green)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(viewModel.isSaving)
+                    .help(LS("log.save"))
+
+                    // Cancel edit
+                    Button(action: { viewModel.isEditing = false }) {
+                        Image(systemName: "xmark.circle")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(LS("log.cancelEdit"))
+                } else {
+                    // Edit button
+                    Button(action: { viewModel.isEditing = true }) {
+                        Image(systemName: "pencil.circle")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(LS("log.edit"))
+                }
+            }
+
+            // ---- Open local file ----
             Button(action: { viewModel.openLogFile() }) {
                 Image(systemName: "folder")
                     .font(.caption)
@@ -158,14 +202,20 @@ struct LogViewerView: View {
             .buttonStyle(.borderless)
             .help(LS("log.openFile"))
 
-            Button(action: { viewModel.toggleAutoScroll() }) {
-                Image(systemName: viewModel.autoScroll ? "arrow.down.to.line.compact" : "arrow.down.to.line")
+            // ---- Export ----
+            Button(action: {
+                if let url = viewModel.exportLog() {
+                    NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+                }
+            }) {
+                Image(systemName: "square.and.arrow.up")
                     .font(.caption)
-                    .foregroundColor(viewModel.autoScroll ? .green : .secondary)
             }
             .buttonStyle(.borderless)
-            .help(LS("log.autoScroll"))
+            .disabled(viewModel.filteredLines.isEmpty)
+            .help(LS("db.export"))
 
+            // ---- Clear ----
             Button(action: { viewModel.clearLog() }) {
                 Image(systemName: "trash")
                     .font(.caption)
@@ -173,8 +223,18 @@ struct LogViewerView: View {
             .buttonStyle(.borderless)
             .help(LS("log.clear"))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+    }
+
+    private func modeBadge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(color)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(color.opacity(0.15))
+            .cornerRadius(3)
     }
 
     // MARK: - Filter Bar
@@ -192,7 +252,6 @@ struct LogViewerView: View {
             // Regex toggle
             Button(action: {
                 viewModel.isRegexFilter.toggle()
-                // Re-trigger filter
                 viewModel.filterText = viewModel.filterText
             }) {
                 Text(".*")
@@ -213,34 +272,36 @@ struct LogViewerView: View {
                     .help(error)
             }
 
-            // Log level filters
-            ForEach(LogLevel.allCases, id: \.self) { level in
-                Button(action: { viewModel.toggleLevel(level) }) {
-                    Text(level.badge)
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(viewModel.enabledLevels.contains(level)
-                            ? level.color.opacity(0.2) : Color.clear)
-                        .foregroundColor(viewModel.enabledLevels.contains(level)
-                            ? level.color : .secondary)
-                        .cornerRadius(3)
+            // Log level filters (only for log/process mode)
+            if viewModel.viewMode == .logFile || viewModel.viewMode == .processLog {
+                ForEach(LogLevel.allCases, id: \.self) { level in
+                    Button(action: { viewModel.toggleLevel(level) }) {
+                        Text(level.badge)
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(viewModel.enabledLevels.contains(level)
+                                ? level.color.opacity(0.2) : Color.clear)
+                            .foregroundColor(viewModel.enabledLevels.contains(level)
+                                ? level.color : .secondary)
+                            .cornerRadius(3)
+                    }
+                    .buttonStyle(.borderless)
                 }
-                .buttonStyle(.borderless)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
     }
 
-    // MARK: - Log Content
+    // MARK: - Content View (Read-only)
 
-    private var logContentView: some View {
+    private var contentView: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(viewModel.filteredLines) { line in
-                        logLineView(line)
+                        lineView(line)
                             .id(line.id)
                     }
                 }
@@ -250,7 +311,8 @@ struct LogViewerView: View {
             .font(.system(size: 11, design: .monospaced))
             .background(Color(nsColor: .textBackgroundColor))
             .onChange(of: viewModel.filteredLines.count) { _, _ in
-                if viewModel.autoScroll, let lastLine = viewModel.filteredLines.last {
+                if viewModel.autoScroll && (viewModel.viewMode == .logFile || viewModel.viewMode == .processLog),
+                   let lastLine = viewModel.filteredLines.last {
                     withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo(lastLine.id, anchor: .bottom)
                     }
@@ -259,7 +321,7 @@ struct LogViewerView: View {
         }
     }
 
-    private func logLineView(_ line: LogLine) -> some View {
+    private func lineView(_ line: LogLine) -> some View {
         HStack(alignment: .top, spacing: 4) {
             // Line number
             Text("\(line.lineNumber)")
@@ -267,28 +329,36 @@ struct LogViewerView: View {
                 .foregroundColor(.secondary)
                 .frame(width: 28, alignment: .trailing)
 
-            // Timestamp (show time part only to save space)
-            if let timestamp = line.timestamp {
-                Text(shortenTimestamp(timestamp))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .frame(width: 65, alignment: .leading)
-            }
+            if viewModel.viewMode == .logFile || viewModel.viewMode == .processLog {
+                // Timestamp (time-only)
+                if let timestamp = line.timestamp {
+                    Text(shortenTimestamp(timestamp))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray)
+                        .frame(width: 65, alignment: .leading)
+                }
 
-            // Level badge
-            if let level = line.level {
-                Text(level.badge)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundColor(level.color)
-                    .frame(width: 28)
-            }
+                // Level badge
+                if let level = line.level {
+                    Text(level.badge)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(level.color)
+                        .frame(width: 28)
+                }
 
-            // Message (with optional JSON formatting)
-            let displayText = viewModel.isJsonMode ? viewModel.formatJsonLine(line.message) : line.message
-            Text(highlightedText(displayText))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(line.level?.textColor ?? Color(nsColor: .labelColor))
-                .textSelection(.enabled)
+                // Message (with optional JSON formatting)
+                let displayText = viewModel.isJsonMode ? viewModel.formatJsonLine(line.message) : line.message
+                Text(highlightedText(displayText))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(line.level?.textColor ?? Color(nsColor: .labelColor))
+                    .textSelection(.enabled)
+            } else {
+                // Text file: just show the line with basic coloring
+                Text(highlightedText(line.message))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(textFileLineColor(line.message))
+                    .textSelection(.enabled)
+            }
         }
         .padding(.vertical, 1)
         .background(line.level == .error
@@ -296,10 +366,27 @@ struct LogViewerView: View {
             : Color.clear)
     }
 
-    /// Shorten timestamp to time-only portion (e.g. "21:44:04.816")
-    /// Strips the date prefix if present (e.g. "2026-02-22 21:44:04.816" → "21:44:04.816")
+    /// Basic syntax coloring for text files.
+    private func textFileLineColor(_ text: String) -> Color {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        // Comments
+        if trimmed.hasPrefix("#") || trimmed.hasPrefix("//") || trimmed.hasPrefix("--") {
+            return .gray
+        }
+        // YAML keys
+        if viewModel.fileExtension == "yml" || viewModel.fileExtension == "yaml" {
+            if trimmed.contains(":") && !trimmed.hasPrefix("-") {
+                return .blue
+            }
+        }
+        // Shell shebang
+        if trimmed.hasPrefix("#!") {
+            return .purple
+        }
+        return Color(nsColor: .labelColor)
+    }
+
     private func shortenTimestamp(_ ts: String) -> String {
-        // If timestamp contains date (yyyy-mm-dd), extract time portion
         if ts.count > 12, let spaceIdx = ts.firstIndex(where: { $0 == "T" || $0 == " " }) {
             let timeStart = ts.index(after: spaceIdx)
             if timeStart < ts.endIndex {
@@ -319,9 +406,67 @@ struct LogViewerView: View {
         return attributed
     }
 
+    // MARK: - Editor View
+
+    private var editorView: some View {
+        VStack(spacing: 0) {
+            TextEditor(text: $viewModel.fileContent)
+                .font(.system(size: 11, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .textBackgroundColor))
+
+            Divider()
+
+            // Editor status bar
+            HStack {
+                if let path = viewModel.logFilePath {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.blue)
+                    Text((path as NSString).lastPathComponent)
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                if viewModel.isSaving {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text(LS("log.saving"))
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                }
+
+                if let msg = viewModel.saveMessage {
+                    Text(msg)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(msg == LS("log.saved") ? .green : .red)
+                }
+
+                Spacer()
+
+                Text("\(viewModel.fileContent.components(separatedBy: "\n").count) lines")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+
+                // Keyboard hint
+                Text("⌘S " + LS("log.save"))
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(3)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .controlBackgroundColor))
+        }
+    }
+
     // MARK: - Status Bar
 
-    private var logStatusBar: some View {
+    private var statusBar: some View {
         HStack {
             if let process = viewModel.activeProcess {
                 Image(systemName: process.type.icon)
@@ -335,28 +480,28 @@ struct LogViewerView: View {
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(.secondary)
             } else if let path = viewModel.logFilePath {
-                Image(systemName: "doc.text")
+                Image(systemName: viewModel.viewMode == .textFile ? "doc" : "doc.text")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
                 Text((path as NSString).lastPathComponent)
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-            }
-            Spacer()
 
-            // Export button
-            Button(action: {
-                if let url = viewModel.exportLog() {
-                    NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+                if viewModel.viewMode == .textFile {
+                    Text("·")
+                        .foregroundColor(.secondary)
+                    Text(viewModel.fileExtension.uppercased())
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.1))
+                        .cornerRadius(2)
                 }
-            }) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 9))
             }
-            .buttonStyle(.borderless)
-            .help(LS("db.export"))
-            .disabled(viewModel.filteredLines.isEmpty)
+
+            Spacer()
 
             Text(String(format: LS("log.lineCount"), viewModel.filteredLines.count, viewModel.allLines.count))
                 .font(.system(size: 9))

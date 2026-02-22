@@ -87,6 +87,14 @@ struct RunningProcess: Identifiable, Hashable {
     }
 }
 
+/// View mode for the file/log viewer.
+enum FileViewMode {
+    case empty       // No file open
+    case logFile     // Log file with parsing, level filter, auto-scroll
+    case textFile    // Regular file with syntax display and editing
+    case processLog  // Running process stdout
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -105,13 +113,20 @@ class LogViewModel: ObservableObject {
     @Published var isRegexFilter = false
     @Published var regexError: String? = nil
 
+    // File/Log mode
+    @Published var viewMode: FileViewMode = .empty
+    @Published var fileContent: String = ""       // Raw file content for text mode
+    @Published var isEditing: Bool = false         // Edit mode active
+    @Published var isSaving: Bool = false
+    @Published var saveMessage: String? = nil      // "Saved" / error message
+
     private var fileMonitor: DispatchSourceFileSystemObject?
     private var lastReadOffset: UInt64 = 0
     private var remoteLineCount: Int = 0
     private var remotePollingTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
-    /// Optional reference to RemoteServiceManager for SSH log tailing.
+    /// Optional reference to RemoteServiceManager for SSH.
     weak var serviceManager: RemoteServiceManager?
 
     init() {
@@ -129,6 +144,23 @@ class LogViewModel: ObservableObject {
         remotePollingTimer?.invalidate()
     }
 
+    // MARK: - File Extension Helpers
+
+    /// File extension of the currently open file.
+    var fileExtension: String {
+        guard let path = logFilePath else { return "" }
+        return (path as NSString).pathExtension.lowercased()
+    }
+
+    /// Whether the current file should be treated as a log file.
+    static let logExtensions: Set<String> = ["log"]
+
+    /// Whether a file path should be opened in log mode.
+    static func isLogFile(_ path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        return logExtensions.contains(ext) || path.contains(".log.")
+    }
+
     // MARK: - Actions
 
     func openLogFile() {
@@ -136,7 +168,7 @@ class LogViewModel: ObservableObject {
         panel.allowedContentTypes = [.plainText, .log]
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.message = "Select a log file to view"
+        panel.message = "Select a file to view"
 
         if panel.runModal() == .OK, let url = panel.url {
             loadFile(url.path)
@@ -146,22 +178,29 @@ class LogViewModel: ObservableObject {
     func loadFile(_ path: String) {
         // Stop any existing monitor
         fileMonitor?.cancel()
+        remotePollingTimer?.invalidate()
         activeProcess = nil
+        isEditing = false
+        saveMessage = nil
 
         logFilePath = path
         allLines = []
         lastReadOffset = 0
 
-        // Read initial content
-        readFileContent()
-
-        // Set up file monitoring for tail -f behavior
-        startFileMonitor(path)
+        if Self.isLogFile(path) {
+            viewMode = .logFile
+            readFileContent()
+            startFileMonitor(path)
+        } else {
+            viewMode = .textFile
+            readFileContent()
+        }
     }
 
     func clearLog() {
         allLines = []
         filteredLines = []
+        fileContent = ""
         lastReadOffset = 0
     }
 
@@ -203,11 +242,16 @@ class LogViewModel: ObservableObject {
 
         guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return }
 
+        if viewMode == .textFile {
+            // Text mode: store raw content
+            fileContent += text
+        }
+        // Always parse into lines for display
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         let startNum = allLines.count + 1
 
         for (i, line) in lines.enumerated() {
-            if line.isEmpty && i == lines.count - 1 { continue } // skip trailing newline
+            if line.isEmpty && i == lines.count - 1 { continue }
             let parsed = parseLine(String(line), lineNumber: startNum + i)
             allLines.append(parsed)
         }
@@ -216,7 +260,6 @@ class LogViewModel: ObservableObject {
     }
 
     private func startFileMonitor(_ path: String) {
-        // Cancel any existing monitor first to avoid fd leaks (M3 fix)
         fileMonitor?.cancel()
         fileMonitor = nil
 
@@ -246,14 +289,16 @@ class LogViewModel: ObservableObject {
     // MARK: - Parsing
 
     private func parseLine(_ text: String, lineNumber: Int) -> LogLine {
+        // For text files, skip log-specific parsing
+        if viewMode == .textFile {
+            return LogLine(id: lineNumber, lineNumber: lineNumber, rawText: text,
+                           timestamp: nil, level: nil, message: text)
+        }
+
         var timestamp: String? = nil
         var level: LogLevel? = nil
         var message = text
 
-        // Try to extract timestamp (common formats)
-        // ISO 8601: 2024-01-15T12:34:56
-        // Common: 2024-01-15 12:34:56
-        // Short: 12:34:56
         let patterns: [(String, Int)] = [
             (#"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[\.\d]*"#, 0),
             (#"\d{2}:\d{2}:\d{2}[\.\d]*"#, 0),
@@ -267,7 +312,6 @@ class LogViewModel: ObservableObject {
             }
         }
 
-        // Try to extract log level
         let levelPatterns = [
             ("DEBUG", LogLevel.debug), ("DBG", .debug),
             ("INFO", .info), ("INF", .info),
@@ -278,7 +322,6 @@ class LogViewModel: ObservableObject {
 
         let upperMessage = message.uppercased()
         for (pat, lv) in levelPatterns {
-            // Check for [LEVEL] or LEVEL: or just LEVEL with word boundary
             if upperMessage.contains("[\(pat)]") || upperMessage.hasPrefix("\(pat) ") || upperMessage.hasPrefix("\(pat):") {
                 level = lv
                 break
@@ -298,7 +341,6 @@ class LogViewModel: ObservableObject {
     // MARK: - Filtering
 
     private func applyFilter() {
-        // Compile regex if needed
         var regex: NSRegularExpression?
         if isRegexFilter && !filterText.isEmpty {
             do {
@@ -306,7 +348,6 @@ class LogViewModel: ObservableObject {
                 regexError = nil
             } catch {
                 regexError = error.localizedDescription
-                // Fall back to plain text search on invalid regex
                 regex = nil
             }
         } else {
@@ -314,12 +355,12 @@ class LogViewModel: ObservableObject {
         }
 
         filteredLines = allLines.filter { line in
-            // Level filter
-            if let level = line.level, !enabledLevels.contains(level) {
-                return false
+            if viewMode == .logFile {
+                if let level = line.level, !enabledLevels.contains(level) {
+                    return false
+                }
             }
 
-            // Text / Regex filter
             if !filterText.isEmpty {
                 if isRegexFilter, let regex = regex {
                     let range = NSRange(line.rawText.startIndex..., in: line.rawText)
@@ -333,28 +374,77 @@ class LogViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Remote Log Support
+    // MARK: - Remote Log / File Support
 
-    /// Load a remote log file via SSH exec (tail -n 500).
+    /// Load a remote file via SSH. Auto-detects log vs text mode.
     func loadRemoteFile(_ path: String) {
         guard let sm = serviceManager, sm.isConnected else { return }
 
-        // Stop local monitoring
+        // Stop any existing monitor
         fileMonitor?.cancel()
         remotePollingTimer?.invalidate()
         activeProcess = nil
+        isEditing = false
+        saveMessage = nil
 
         isRemoteMode = true
         logFilePath = path
         allLines = []
+        fileContent = ""
         remoteLineCount = 0
 
+        let isLog = Self.isLogFile(path)
+        viewMode = isLog ? .logFile : .textFile
+
         Task {
-            let (exitCode, stdout) = await sm.exec("tail -n 500 '\(path)'", timeout: 60)
-            if exitCode == 0 {
+            let command: String
+            if isLog {
+                // For log files, tail last 500 lines
+                command = "tail -n 500 \(shellEscape(path))"
+            } else {
+                // For text files, cat the entire file
+                command = "cat \(shellEscape(path))"
+            }
+
+            let (exitCode, stdout) = await sm.exec(command, timeout: 60)
+            if exitCode == 0 || !stdout.isEmpty {
+                if viewMode == .textFile {
+                    fileContent = stdout
+                }
                 appendText(stdout)
                 remoteLineCount = allLines.count
-                startRemotePolling(path: path)
+                if isLog {
+                    startRemotePolling(path: path)
+                }
+            }
+        }
+    }
+
+    /// Save the current file content to remote.
+    func saveRemoteFile() {
+        guard let sm = serviceManager, sm.isConnected,
+              let path = logFilePath, viewMode == .textFile else { return }
+
+        isSaving = true
+        saveMessage = nil
+
+        Task {
+            let command = "cat > \(shellEscape(path)) << 'PIER_EOF'\n\(fileContent)\nPIER_EOF"
+            let (exitCode, _) = await sm.exec(command, timeout: 30)
+
+            isSaving = false
+            if exitCode == 0 {
+                saveMessage = LS("log.saved")
+                isEditing = false
+                // Clear message after 2 seconds
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if saveMessage == LS("log.saved") {
+                        saveMessage = nil
+                    }
+                }
+            } else {
+                saveMessage = LS("log.saveFailed")
             }
         }
     }
@@ -366,7 +456,7 @@ class LogViewModel: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, let sm = self.serviceManager, sm.isConnected else { return }
                 let skipLines = self.remoteLineCount
-                let (exitCode, stdout) = await sm.exec("tail -n +\(skipLines + 1) '\(path)' 2>/dev/null")
+                let (exitCode, stdout) = await sm.exec("tail -n +\(skipLines + 1) \(self.shellEscape(path)) 2>/dev/null", timeout: 15)
                 if exitCode == 0 && !stdout.isEmpty {
                     self.appendText(stdout)
                     self.remoteLineCount = self.allLines.count
@@ -384,7 +474,6 @@ class LogViewModel: ObservableObject {
 
             let searchDir = cwdPath ?? currentRemoteCwd
             if let cwd = searchDir, !cwd.isEmpty {
-                // Find *.log and *.log.* recursively up to 3 levels
                 let (ec1, stdout1) = await sm.exec(
                     "find \(shellEscape(cwd)) -maxdepth 3 \\( -name '*.log' -o -name '*.log.*' \\) -type f 2>/dev/null | head -50",
                     timeout: 15
@@ -393,7 +482,6 @@ class LogViewModel: ObservableObject {
                     let found = stdout1.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
                     paths.append(contentsOf: found)
                 }
-                // Also list files directly in CWD (non-directories)
                 let (ec2, stdout2) = await sm.exec(
                     "ls -1p \(shellEscape(cwd)) 2>/dev/null | grep -v '/'",
                     timeout: 10
@@ -411,7 +499,6 @@ class LogViewModel: ObservableObject {
             }
 
             cwdLogFiles = paths
-            // Build display names: relative to CWD
             let cwd = searchDir ?? currentRemoteCwd ?? ""
             cwdLogDisplayNames = paths.map { path in
                 if !cwd.isEmpty && path.hasPrefix(cwd + "/") {
@@ -420,15 +507,12 @@ class LogViewModel: ObservableObject {
                 return (path as NSString).lastPathComponent
             }
 
-            // Also discover running processes
             discoverRunningProcesses(cwdPath: cwdPath)
         }
     }
 
     // MARK: - Running Process Discovery
 
-    /// Discover running processes related to the current CWD.
-    /// Detects java/jar, python, node, and docker containers.
     func discoverRunningProcesses(cwdPath: String? = nil) {
         guard let sm = serviceManager, sm.isConnected else { return }
 
@@ -436,7 +520,6 @@ class LogViewModel: ObservableObject {
             var processes: [RunningProcess] = []
             let cwd = cwdPath ?? currentRemoteCwd ?? ""
 
-            // 1. Detect java/python/node processes related to CWD
             if !cwd.isEmpty {
                 let (ec, stdout) = await sm.exec(
                     "ps aux 2>/dev/null | grep -E '(java|python|node|ruby|go run)' | grep -v grep | grep \(shellEscape(cwd))",
@@ -452,19 +535,14 @@ class LogViewModel: ObservableObject {
                         let type = detectProcessType(cmd)
                         let name = abbreviateCommand(cmd, cwd: cwd)
                         processes.append(RunningProcess(
-                            id: pid,
-                            pid: pid,
-                            command: cmd,
-                            type: type,
-                            displayName: name
+                            id: pid, pid: pid, command: cmd,
+                            type: type, displayName: name
                         ))
                     }
                 }
             }
 
-            // 2. Also search without CWD filter for common server processes
             if processes.isEmpty && !cwd.isEmpty {
-                // Broaden: find processes whose working directory matches CWD
                 let (ec2, stdout2) = await sm.exec(
                     "ls -l /proc/*/cwd 2>/dev/null | grep \(shellEscape(cwd)) | awk -F'/' '{print $3}'",
                     timeout: 15
@@ -476,16 +554,12 @@ class LogViewModel: ObservableObject {
                         if ec3 == 0 && !cmdline.isEmpty {
                             let cmd = cmdline.trimmingCharacters(in: .whitespacesAndNewlines)
                             let type = detectProcessType(cmd)
-                            // Skip shell/sshd/system processes
                             if type == .other && !cmd.contains("python") && !cmd.contains("node") { continue }
                             let name = abbreviateCommand(cmd, cwd: cwd)
                             if !processes.contains(where: { $0.pid == pid }) {
                                 processes.append(RunningProcess(
-                                    id: pid,
-                                    pid: pid,
-                                    command: cmd,
-                                    type: type,
-                                    displayName: name
+                                    id: pid, pid: pid, command: cmd,
+                                    type: type, displayName: name
                                 ))
                             }
                         }
@@ -493,7 +567,6 @@ class LogViewModel: ObservableObject {
                 }
             }
 
-            // 3. Detect docker containers
             let (ecDocker, dockerOut) = await sm.exec(
                 "docker ps --format '{{.ID}}\\t{{.Names}}\\t{{.Image}}\\t{{.Status}}' 2>/dev/null",
                 timeout: 15
@@ -507,10 +580,8 @@ class LogViewModel: ObservableObject {
                     let name = parts[1]
                     let image = parts[2]
                     processes.append(RunningProcess(
-                        id: "docker-\(containerId)",
-                        pid: containerId,
-                        command: "docker: \(image)",
-                        type: .docker,
+                        id: "docker-\(containerId)", pid: containerId,
+                        command: "docker: \(image)", type: .docker,
                         displayName: name
                     ))
                 }
@@ -520,7 +591,6 @@ class LogViewModel: ObservableObject {
         }
     }
 
-    /// Detect the type of a running process from its command line.
     private func detectProcessType(_ cmd: String) -> RunningProcess.ProcessType {
         let lower = cmd.lowercased()
         if lower.contains("java") || lower.contains(".jar") { return .java }
@@ -530,42 +600,37 @@ class LogViewModel: ObservableObject {
         return .other
     }
 
-    /// Abbreviate a long command line for display.
     private func abbreviateCommand(_ cmd: String, cwd: String) -> String {
         var display = cmd
-        // Remove CWD prefix for brevity
         if !cwd.isEmpty {
             display = display.replacingOccurrences(of: cwd + "/", with: "")
             display = display.replacingOccurrences(of: cwd, with: ".")
         }
-        // Truncate if too long
         if display.count > 60 {
             display = String(display.prefix(57)) + "..."
         }
         return display
     }
 
-    /// Tail the stdout/stderr of a running process in real time.
+    /// Tail process stdout in real time.
     func tailProcessLog(_ process: RunningProcess) {
         guard let sm = serviceManager, sm.isConnected else { return }
 
-        // Stop any existing monitoring
         fileMonitor?.cancel()
         remotePollingTimer?.invalidate()
 
         isRemoteMode = true
         activeProcess = process
+        viewMode = .processLog
+        isEditing = false
         allLines = []
         remoteLineCount = 0
 
         let tailCommand: String
         if process.type == .docker {
-            // Docker: use docker logs
             tailCommand = "docker logs --tail 500 \(process.pid) 2>&1"
             logFilePath = "docker://\(process.displayName)"
         } else {
-            // Regular process: try /proc/<pid>/fd/1 (stdout) + fd/2 (stderr)
-            // Fall back to strace if /proc fd is not readable
             tailCommand = "tail -n 500 /proc/\(process.pid)/fd/1 2>/dev/null || " +
                           "strace -p \(process.pid) -e trace=write -s 1024 2>&1 | head -500"
             logFilePath = "process://\(process.pid)"
@@ -581,7 +646,6 @@ class LogViewModel: ObservableObject {
         }
     }
 
-    /// Periodically poll process output for new lines (every 2 seconds).
     private func startProcessPolling(_ process: RunningProcess) {
         remotePollingTimer?.invalidate()
         remotePollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
@@ -592,13 +656,12 @@ class LogViewModel: ObservableObject {
                 let skipLines = self.remoteLineCount
                 let pollCommand: String
                 if process.type == .docker {
-                    // Docker: get new lines since last poll
                     pollCommand = "docker logs --tail 100 \(process.pid) 2>&1 | tail -n +\(skipLines + 1)"
                 } else {
                     pollCommand = "tail -n +\(skipLines + 1) /proc/\(process.pid)/fd/1 2>/dev/null"
                 }
 
-                let (exitCode, stdout) = await sm.exec(pollCommand)
+                let (exitCode, stdout) = await sm.exec(pollCommand, timeout: 15)
                 if exitCode == 0 && !stdout.isEmpty {
                     self.appendText(stdout)
                     self.remoteLineCount = self.allLines.count
@@ -607,15 +670,12 @@ class LogViewModel: ObservableObject {
         }
     }
 
-    /// Current terminal working directory (updated via notification).
     var currentRemoteCwd: String?
 
-    /// Shell-escape a path for remote commands.
     private func shellEscape(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    /// Stop remote log polling.
     func stopRemotePolling() {
         remotePollingTimer?.invalidate()
         remotePollingTimer = nil
@@ -625,14 +685,12 @@ class LogViewModel: ObservableObject {
 
     @Published var isJsonMode = false
 
-    /// Auto-detect if log lines appear to be JSON.
     func detectJsonLog() {
         let sample = allLines.prefix(10)
         let jsonCount = sample.filter { $0.rawText.trimmingCharacters(in: .whitespaces).hasPrefix("{") }.count
         isJsonMode = jsonCount > sample.count / 2
     }
 
-    /// Format a JSON log line as pretty-printed string.
     func formatJsonLine(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("{"),
@@ -647,7 +705,6 @@ class LogViewModel: ObservableObject {
 
     // MARK: - Log Export
 
-    /// Export filtered log lines to ~/Downloads. Returns file URL on success.
     func exportLog() -> URL? {
         guard !filteredLines.isEmpty else { return nil }
 
@@ -662,4 +719,7 @@ class LogViewModel: ObservableObject {
         try? data.write(to: url, options: .atomic)
         return url
     }
+
+    /// Backward compat
+    var remoteLogFiles: [String] { cwdLogFiles }
 }

@@ -192,9 +192,9 @@ class SSHControlMaster: ObservableObject {
                     if process.isRunning {
                         process.terminate()
                     }
-                    // Try to read any partial output collected before timeout
-                    let partialData = try? stdoutPipe.fileHandleForReading.availableData
-                    let partialOutput = partialData.flatMap { String(data: $0, encoding: .utf8) }?
+                    // Read any partial output collected before timeout
+                    let partialData = stdoutPipe.fileHandleForReading.availableData
+                    let partialOutput = String(data: partialData, encoding: .utf8)?
                         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     continuation.resume(returning: (-1, partialOutput))
                 }

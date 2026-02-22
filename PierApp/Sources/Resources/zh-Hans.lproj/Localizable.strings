@@ -125,13 +125,24 @@
    ═══════════════════════════════════════ */
 
 "log.title" = "日志查看器";
-"log.openFile" = "打开日志文件";
+"log.fileViewer" = "文件查看器";
+"log.openFile" = "打开文件";
 "log.autoScroll" = "自动滚动";
 "log.clear" = "清除";
-"log.noFile" = "未打开日志文件";
-"log.noFileDesc" = "打开日志文件或\n从终端导入输出";
+"log.noFile" = "未打开文件";
+"log.noFileDesc" = "从文件列表选择文件\n或打开本地文件";
 "log.openFileButton" = "打开文件";
 "log.lineCount" = "%lld/%lld 行";
+"log.logMode" = "日志";
+"log.fileMode" = "文件";
+"log.edit" = "编辑";
+"log.save" = "保存";
+"log.saving" = "保存中...";
+"log.saved" = "已保存";
+"log.saveFailed" = "保存失败";
+"log.cancelEdit" = "取消编辑";
+"log.cwdFiles" = "当前目录文件";
+"log.refresh" = "刷新";
 
 /* ═══════════════════════════════════════
    SFTP 面板
