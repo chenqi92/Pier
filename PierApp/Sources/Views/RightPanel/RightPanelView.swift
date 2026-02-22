@@ -497,6 +497,8 @@ struct SidebarModeButton: View {
 struct MarkdownPreviewView: View {
     let filePath: String?
     @State private var markdownContent: String = ""
+    @State private var editingContent: String = ""
+    @State private var isEditing: Bool = false
     @State private var fileWatcher: DispatchSourceFileSystemObject?
 
     var body: some View {
@@ -506,8 +508,16 @@ struct MarkdownPreviewView: View {
                 markdownToolbar(path: path)
                 Divider()
 
-                // Full Markdown rendering via WKWebView
-                MarkdownWebView(content: markdownContent, fontSize: 14)
+                if isEditing {
+                    // Edit mode: plain text editor
+                    TextEditor(text: $editingContent)
+                        .font(.system(size: 13, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .background(Color(nsColor: .textBackgroundColor))
+                } else {
+                    // Preview mode: rendered Markdown
+                    MarkdownWebView(content: markdownContent, fontSize: 14)
+                }
             }
             .onAppear {
                 loadMarkdown(path)
@@ -515,6 +525,7 @@ struct MarkdownPreviewView: View {
             }
             .onChange(of: filePath) { _, newPath in
                 stopWatching()
+                isEditing = false
                 if let p = newPath {
                     loadMarkdown(p)
                     startWatching(p)
@@ -537,21 +548,68 @@ struct MarkdownPreviewView: View {
 
     private func markdownToolbar(path: String) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: "doc.text.fill")
+            Image(systemName: isEditing ? "pencil.circle.fill" : "doc.text.fill")
                 .font(.caption)
-                .foregroundColor(.blue)
+                .foregroundColor(isEditing ? .orange : .blue)
             Text((path as NSString).lastPathComponent)
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
-            Spacer()
-            Button(action: {
-                NSWorkspace.shared.open(URL(fileURLWithPath: path))
-            }) {
-                Image(systemName: "square.and.pencil")
-                    .font(.caption)
+
+            if isEditing {
+                Text(LS("md.editing"))
+                    .font(.system(size: 9))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.orange.opacity(0.12))
+                    .cornerRadius(3)
             }
-            .buttonStyle(.borderless)
-            .help(LS("files.openInEditor"))
+
+            Spacer()
+
+            if isEditing {
+                // Save & exit edit mode
+                Button(action: {
+                    saveMarkdown(path)
+                    isEditing = false
+                }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                        Text(LS("md.done"))
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor)
+                    .cornerRadius(4)
+                }
+                .buttonStyle(.borderless)
+                .help(LS("md.saveAndPreview"))
+
+                // Cancel editing
+                Button(action: {
+                    isEditing = false
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help(LS("md.cancelEdit"))
+            } else {
+                // Enter edit mode
+                Button(action: {
+                    editingContent = markdownContent
+                    isEditing = true
+                }) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help(LS("md.edit"))
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -563,6 +621,16 @@ struct MarkdownPreviewView: View {
             markdownContent = try String(contentsOfFile: path, encoding: .utf8)
         } catch {
             markdownContent = "Error loading file: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveMarkdown(_ path: String) {
+        do {
+            try editingContent.write(toFile: path, atomically: true, encoding: .utf8)
+            markdownContent = editingContent
+        } catch {
+            // Save failed — keep editing content so user doesn't lose work
+            print("Failed to save markdown: \(error.localizedDescription)")
         }
     }
 
@@ -579,7 +647,10 @@ struct MarkdownPreviewView: View {
             queue: .main
         )
         source.setEventHandler { [path] in
-            loadMarkdown(path)
+            // Don't reload from disk while user is editing
+            if !isEditing {
+                loadMarkdown(path)
+            }
         }
         source.setCancelHandler {
             close(fd)

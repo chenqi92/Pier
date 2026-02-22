@@ -927,3 +927,11 @@
 // Window → Full Screen Tile submenu
 "sysMenu.leftOfScreen" = "Left of Screen";
 "sysMenu.rightOfScreen" = "Right of Screen";
+
+// MARK: - Markdown Edit Mode
+
+"md.editing" = "Editing";
+"md.done" = "Done";
+"md.edit" = "Edit";
+"md.saveAndPreview" = "Save and preview";
+"md.cancelEdit" = "Cancel editing";

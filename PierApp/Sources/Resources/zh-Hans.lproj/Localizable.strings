@@ -927,3 +927,11 @@
 // Window → Full Screen Tile submenu
 "sysMenu.leftOfScreen" = "屏幕左侧";
 "sysMenu.rightOfScreen" = "屏幕右侧";
+
+// MARK: - Markdown Edit Mode
+
+"md.editing" = "编辑中";
+"md.done" = "完成";
+"md.edit" = "编辑";
+"md.saveAndPreview" = "保存并预览";
+"md.cancelEdit" = "取消编辑";
