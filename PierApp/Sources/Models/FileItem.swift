@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// File item model for the local file browser tree.
-class FileItem: Identifiable, ObservableObject {
+class FileItem: Identifiable, ObservableObject, @unchecked Sendable {
     let id = UUID()
     let name: String
     let path: String

@@ -30,9 +30,10 @@ class FileViewModel: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            let path = MainActor.assumeIsolated { self.currentPath.path }
             NotificationCenter.default.post(
                 name: .localDirectoryChanged,
-                object: self.currentPath.path
+                object: path
             )
         }
     }
@@ -161,7 +162,7 @@ class FileViewModel: ObservableObject {
         }
     }
 
-    private func buildFileTree(at path: String, depth: Int, maxDepth: Int) -> [FileItem] {
+    nonisolated private func buildFileTree(at path: String, depth: Int, maxDepth: Int) -> [FileItem] {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(atPath: path) else {
             return []

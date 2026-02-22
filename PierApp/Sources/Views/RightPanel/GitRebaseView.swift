@@ -55,7 +55,7 @@ struct GitRebaseView: View {
                         }
                         .pickerStyle(.segmented)
                         .frame(width: 180)
-                        .onChange(of: commitCount) { _ in loadItems() }
+                        .onChange(of: commitCount) { loadItems() }
 
                         Spacer()
 

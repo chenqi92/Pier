@@ -35,6 +35,15 @@ struct CommitNode: Identifiable {
     var rawRefs: String = ""       // original refs decoration string for round-tripping
 }
 
+// MARK: - Highlight Mode
+
+enum GraphHighlightMode: String, CaseIterable {
+    case none
+    case myCommits
+    case mergeCommits
+    case currentBranch
+}
+
 // MARK: - Graph Layout (IDEA-style)
 //
 // The graph layout computation (DFS layoutIndex, active edges, column positioning,
@@ -67,6 +76,7 @@ struct BranchGraphView: View {
     @State private var selectedDetail: GitCommitDetail?
     @State private var showingPathPicker = false
     @State private var pathPickerSelection: Set<String> = []
+    @State private var highlightMode: GraphHighlightMode = .none
 
     // Column widths — resizable by dragging handle on each column's right edge
     @State private var hashColumnWidth: CGFloat = 62
@@ -94,11 +104,11 @@ struct BranchGraphView: View {
         }
 
         .sheet(isPresented: $showingPathPicker) { pathPickerSheet }
-        .onChange(of: gitViewModel.graphGeneration) { _ in
+        .onChange(of: gitViewModel.graphGeneration) {
             // Full reload: recalculate graph width from scratch
             cachedGraphWidth = computeGraphColumnWidth()
         }
-        .onChange(of: gitViewModel.graphNodes.count) { _ in
+        .onChange(of: gitViewModel.graphNodes.count) {
             // loadMore: only grow, never shrink (prevents horizontal scroll jump)
             let newWidth = computeGraphColumnWidth()
             if newWidth > cachedGraphWidth {
@@ -350,6 +360,22 @@ struct BranchGraphView: View {
 
                 Divider()
 
+                // Highlight section
+                Section(LS("git.highlight")) {
+                    ForEach(GraphHighlightMode.allCases, id: \.self) { mode in
+                        Button {
+                            highlightMode = mode
+                        } label: {
+                            HStack {
+                                Text(highlightLabel(mode))
+                                if highlightMode == mode { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
                 // Display section — zebra stripes
                 Section(LS("git.display")) {
                     Button {
@@ -515,6 +541,7 @@ extension BranchGraphView {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .frame(height: Self.rowH)
                         .background(rowBackground(index: index, nodeId: node.id))
+                        .opacity(shouldDimRow(node) ? 0.3 : 1.0)
                         .contentShape(Rectangle())
                         .onTapGesture { toggleDetail(node.id) }
                         .onAppear {
@@ -541,6 +568,32 @@ extension BranchGraphView {
             return Color(nsColor: .textColor).opacity(0.03)
         }
         return .clear
+    }
+
+    /// Whether this row should be dimmed based on current highlight mode.
+    private func shouldDimRow(_ node: CommitNode) -> Bool {
+        switch highlightMode {
+        case .none:
+            return false
+        case .myCommits:
+            let gitUser = gitViewModel.graphGitUserName
+            if gitUser.isEmpty { return false }
+            return node.author != gitUser
+        case .mergeCommits:
+            return !node.isMerge
+        case .currentBranch:
+            return node.colorIndex != 0
+        }
+    }
+
+    /// Localized label for highlight mode.
+    private func highlightLabel(_ mode: GraphHighlightMode) -> String {
+        switch mode {
+        case .none: return LS("git.highlightNone")
+        case .myCommits: return LS("git.highlightMyCommits")
+        case .mergeCommits: return LS("git.highlightMerge")
+        case .currentBranch: return LS("git.highlightBranch")
+        }
     }
 
     // MARK: - Commit Label (columns)
@@ -656,7 +709,7 @@ extension BranchGraphView {
         VStack(alignment: .leading, spacing: 6) {
             // Hash + Author + Date on same line, all selectable
             HStack(spacing: 8) {
-                Text(String(d.hash.prefix(7)))
+                Text(String(d.hash.prefix(8)))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.blue)
                     .textSelection(.enabled)

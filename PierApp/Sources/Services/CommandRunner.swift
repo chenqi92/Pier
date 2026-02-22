@@ -109,7 +109,7 @@ actor CommandRunner {
 
             // Track whether the continuation has resumed to prevent double-resume
             let resumed = NSLock()
-            var hasResumed = false
+            nonisolated(unsafe) var hasResumed = false
 
             // Timeout: kill the process if it runs too long
             let timeoutWork = DispatchWorkItem { [weak process] in

@@ -2051,7 +2051,7 @@ class TerminalNSView: NSView {
     /// Called by TerminalScrollView when the viewport size changes
     /// (e.g., HSplitView divider dragged, window resized).
     func handleViewportSizeChanged(_ visibleSize: NSSize) {
-        guard let handle = terminalHandle else { return }
+        guard terminalHandle != nil else { return }
 
         let newCols = max(1, Int(visibleSize.width / cellWidth))
         let newRows = max(1, Int(visibleSize.height / cellHeight))

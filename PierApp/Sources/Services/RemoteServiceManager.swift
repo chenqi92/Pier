@@ -253,8 +253,9 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
         // Dispatch blocking FFI call off the main thread.
         // The Rust side has a 5s disconnect timeout, so this won't block forever.
+        nonisolated(unsafe) let safeHandle = handle
         DispatchQueue.global(qos: .utility).async {
-            pier_ssh_disconnect(handle)
+            pier_ssh_disconnect(safeHandle)
         }
     }
 
@@ -273,8 +274,9 @@ class RemoteServiceManager: ObservableObject, Identifiable {
             let jsonPtr: UnsafeMutablePointer<CChar>? = await withCheckedContinuation { continuation in
                 let guard_ = ContinuationGuard()
 
+                nonisolated(unsafe) let safeHandle = handle
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let ptr = pier_ssh_detect_services(handle)
+                    let ptr = pier_ssh_detect_services(safeHandle)
                     Task { @MainActor in
                         if await guard_.tryResume() {
                             continuation.resume(returning: ptr)
@@ -324,13 +326,14 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         guard let handle = sshHandle else { return }
         let services = detectedServices.filter(\.isRunning)
 
+        nonisolated(unsafe) let safeHandle = handle
         DispatchQueue.global(qos: .userInitiated).async {
             var tunnels: [ServiceTunnel] = []
             for service in services {
                 guard let mapping = ServiceTunnel.defaultMappings[service.name] else { continue }
 
                 let result = "127.0.0.1".withCString { hostC in
-                    pier_ssh_forward_port(handle, mapping.localPort, hostC, mapping.remotePort)
+                    pier_ssh_forward_port(safeHandle, mapping.localPort, hostC, mapping.remotePort)
                 }
 
                 if result == 0 {
@@ -436,9 +439,10 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
             // Fire-and-forget: blocking FFI runs in a fully detached task.
             // If it finishes after the timeout, the result is simply discarded.
+            nonisolated(unsafe) let safeHandle = handle
             DispatchQueue.global(qos: .userInitiated).async {
                 let resultPtr = command.withCString { cmdC in
-                    pier_ssh_exec(handle, cmdC)
+                    pier_ssh_exec(safeHandle, cmdC)
                 }
 
                 guard let resultPtr else {
@@ -510,8 +514,9 @@ class RemoteServiceManager: ObservableObject, Identifiable {
     deinit {
         if let handle = sshHandle {
             // Fire-and-forget: don't block deinit on disconnect
+            nonisolated(unsafe) let safeHandle = handle
             DispatchQueue.global(qos: .utility).async {
-                pier_ssh_disconnect(handle)
+                pier_ssh_disconnect(safeHandle)
             }
         }
     }

@@ -123,7 +123,7 @@ struct AISettingsView: View {
         .padding()
         .onAppear {
             // Load existing key (show placeholder dots, not actual value)
-            if let key = try? KeychainService.shared.load(key: "llm_api_key"), key != nil {
+            if let _ = try? KeychainService.shared.load(key: "llm_api_key") {
                 apiKeyField = "••••••••"
             }
         }

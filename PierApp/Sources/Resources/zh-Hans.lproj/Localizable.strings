@@ -405,6 +405,11 @@
 "git.columnMessage" = "提交信息";
 "git.columnAuthor" = "作者";
 "git.columnDate" = "日期";
+"git.highlight" = "高亮";
+"git.highlightNone" = "无高亮";
+"git.highlightMyCommits" = "我的提交";
+"git.highlightMerge" = "合并提交";
+"git.highlightBranch" = "当前分支";
 
 // MARK: - Batch 6: PostgreSQL
 

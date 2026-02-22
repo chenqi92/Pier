@@ -141,6 +141,7 @@ class GitViewModel: ObservableObject {
     @Published var graphShowDate = true                 // show date column
     @Published var graphShowZebraStripes = true         // alternating row background
     @Published var graphGeneration = 0                  // increments on full reload only (not loadMore)
+    @Published var graphGitUserName = ""                 // current git user.name for highlight
 
     // MARK: - Private
 
@@ -572,9 +573,10 @@ class GitViewModel: ObservableObject {
         cachedCommitsJSON = "[]"
         guard !repoPath.isEmpty else { graphNodes = []; return }
 
-        // Run branches + authors concurrently for UI pickers.
+        // Run branches + authors + git user concurrently for UI pickers.
         async let branchTask: Void = fetchGraphBranches()
         async let authorTask: Void = fetchGraphAuthors()
+        async let userTask: Void = fetchGitUserName()
 
         // Capture values for background work
         let path = repoPath
@@ -618,7 +620,7 @@ class GitViewModel: ObservableObject {
             return (json, fpJSON, layout)
         }.value
 
-        _ = await (branchTask, authorTask)
+        _ = await (branchTask, authorTask, userTask)
 
         guard let (json, fpJSON, layoutResult) = result else { graphNodes = []; return }
         mainChainJSON = fpJSON
@@ -724,6 +726,25 @@ class GitViewModel: ObservableObject {
             }
         }
         graphAuthors = []
+    }
+
+    /// Fetch the current git user.name for highlight feature.
+    private func fetchGitUserName() async {
+        guard !repoPath.isEmpty else { graphGitUserName = ""; return }
+        let result = await Task.detached(priority: .utility) { [path = self.repoPath] () -> String in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            proc.arguments = ["config", "user.name"]
+            proc.currentDirectoryURL = URL(fileURLWithPath: path)
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = Pipe()
+            try? proc.run()
+            proc.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }.value
+        graphGitUserName = result
     }
 
     /// Fetch tracked files via FFI.

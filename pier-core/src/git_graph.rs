@@ -218,7 +218,7 @@ pub fn graph_log(
             continue;
         }
 
-        let short_hash = hash[..7.min(hash.len())].to_string();
+        let short_hash = hash[..8.min(hash.len())].to_string();
         let commit_oid = git2::Oid::from_str(&hash).ok();
         let refs_str = commit_oid
             .map(|oid| build_ref_decoration(&repo, oid))

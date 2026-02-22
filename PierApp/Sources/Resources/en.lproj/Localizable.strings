@@ -405,6 +405,11 @@
 "git.columnMessage" = "Message";
 "git.columnAuthor" = "Author";
 "git.columnDate" = "Date";
+"git.highlight" = "Highlight";
+"git.highlightNone" = "No Highlight";
+"git.highlightMyCommits" = "My Commits";
+"git.highlightMerge" = "Merge Commits";
+"git.highlightBranch" = "Current Branch";
 
 // MARK: - Batch 6: PostgreSQL
 

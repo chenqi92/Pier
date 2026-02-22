@@ -49,7 +49,7 @@ struct GitConfigView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
-            .onChange(of: selectedScope) { _ in refresh() }
+            .onChange(of: selectedScope) { refresh() }
 
             // Filter
             HStack(spacing: 4) {
