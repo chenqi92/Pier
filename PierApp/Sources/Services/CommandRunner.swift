@@ -202,4 +202,9 @@ struct CommandResult: Sendable {
     var output: String? {
         stdout.isEmpty ? nil : stdout
     }
+
+    /// Combined stdout + stderr, trimmed.
+    var combinedOutput: String {
+        (stdout + stderr).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

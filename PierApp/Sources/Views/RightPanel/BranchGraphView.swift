@@ -78,6 +78,19 @@ struct BranchGraphView: View {
     @State private var pathPickerSelection: Set<String> = []
     @State private var highlightMode: GraphHighlightMode = .none
 
+    // Context menu dialog state
+    @State private var ctxTargetNode: CommitNode?
+    @State private var showNewBranchDialog = false
+    @State private var showNewTagDialog = false
+    @State private var showResetDialog = false
+    @State private var newBranchName = ""
+    @State private var newTagName = ""
+    @State private var resetMode = "mixed" // soft, mixed, hard
+    @State private var showDiffSheet = false
+    @State private var diffOutput = ""
+    @State private var showEditMessageDialog = false
+    @State private var editMessageText = ""
+
     // Column widths — resizable by dragging handle on each column's right edge
     @State private var hashColumnWidth: CGFloat = 62
     @State private var messageColumnWidth: CGFloat = 300
@@ -104,6 +117,79 @@ struct BranchGraphView: View {
         }
 
         .sheet(isPresented: $showingPathPicker) { pathPickerSheet }
+        .alert(LS("git.ctx.newBranch"), isPresented: $showNewBranchDialog) {
+            TextField(LS("git.ctx.branchNamePlaceholder"), text: $newBranchName)
+            Button(LS("git.ctx.create")) {
+                guard let node = ctxTargetNode, !newBranchName.isEmpty else { return }
+                Task { await performNewBranch(name: newBranchName, from: node.id) }
+            }
+            Button(LS("git.ctx.cancel"), role: .cancel) { newBranchName = "" }
+        } message: {
+            if let node = ctxTargetNode {
+                Text(LS("git.ctx.newBranchMsg") + " \(node.shortHash)")
+            }
+        }
+        .alert(LS("git.ctx.newTag"), isPresented: $showNewTagDialog) {
+            TextField(LS("git.ctx.tagNamePlaceholder"), text: $newTagName)
+            Button(LS("git.ctx.create")) {
+                guard let node = ctxTargetNode, !newTagName.isEmpty else { return }
+                Task { await performNewTag(name: newTagName, at: node.id) }
+            }
+            Button(LS("git.ctx.cancel"), role: .cancel) { newTagName = "" }
+        } message: {
+            if let node = ctxTargetNode {
+                Text(LS("git.ctx.newTagMsg") + " \(node.shortHash)")
+            }
+        }
+        .confirmationDialog(LS("git.ctx.resetToHere"), isPresented: $showResetDialog) {
+            Button("Soft") {
+                guard let node = ctxTargetNode else { return }
+                Task { await performReset(to: node.id, mode: "soft") }
+            }
+            Button("Mixed") {
+                guard let node = ctxTargetNode else { return }
+                Task { await performReset(to: node.id, mode: "mixed") }
+            }
+            Button("Hard", role: .destructive) {
+                guard let node = ctxTargetNode else { return }
+                Task { await performReset(to: node.id, mode: "hard") }
+            }
+            Button(LS("git.ctx.cancel"), role: .cancel) {}
+        } message: {
+            if let node = ctxTargetNode {
+                Text(LS("git.ctx.resetMsg") + " \(node.shortHash)")
+            }
+        }
+        .sheet(isPresented: $showDiffSheet) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text(LS("git.ctx.compareWithLocal")).font(.headline)
+                    Spacer()
+                    Button(LS("git.ctx.close")) { showDiffSheet = false }
+                        .buttonStyle(.plain)
+                }
+                .padding()
+                Divider()
+                ScrollView {
+                    Text(diffOutput)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
+            }
+            .frame(minWidth: 700, minHeight: 500)
+        }
+        .alert(LS("git.ctx.editMessage"), isPresented: $showEditMessageDialog) {
+            TextField(LS("git.ctx.messagePlaceholder"), text: $editMessageText)
+            Button(LS("git.ctx.save")) {
+                guard let node = ctxTargetNode, !editMessageText.isEmpty else { return }
+                Task { await performEditMessage(hash: node.id, newMessage: editMessageText) }
+            }
+            Button(LS("git.ctx.cancel"), role: .cancel) { editMessageText = "" }
+        } message: {
+            Text(LS("git.ctx.editMessageMsg"))
+        }
         .onChange(of: gitViewModel.graphGeneration) {
             // Full reload: recalculate graph width from scratch
             cachedGraphWidth = computeGraphColumnWidth()
@@ -609,155 +695,213 @@ extension BranchGraphView {
         let remoteBranches = node.refs.filter { $0.hasPrefix("origin/") }
         // HEAD branch: "→ main" → "main"
         let headBranch = node.refs.first(where: { $0.hasPrefix("→ ") })?.replacingOccurrences(of: "→ ", with: "")
-        // Collect all displayable branch refs for the branch submenus
-        let allBranchRefs: [String] = {
-            var result: [String] = []
-            if let hb = headBranch { result.append(hb) }
-            result.append(contentsOf: localBranches)
-            result.append(contentsOf: remoteBranches)
-            return result
-        }()
 
-        // ── 1. Checkout submenu ──
-        Menu(LS("git.ctx.checkout")) {
-            // Always: checkout revision (detached HEAD)
+        // Total checkout options beyond revision
+        let extraOptions = (headBranch != nil ? 1 : 0) + localBranches.count + remoteBranches.count
+
+        // ── 1. Checkout ──
+        if extraOptions == 0 {
+            // Only revision — direct button, no submenu
             Button(LS("git.ctx.checkoutRevision") + " \(node.shortHash)...") {
-                print("[TODO] Checkout revision \(node.id)")
+                Task { await performCheckout(target: node.id) }
             }
-
-            // HEAD branch (if present)
-            if let hb = headBranch {
-                Button(LS("git.ctx.checkoutBranch") + " '\(hb)'") {
-                    print("[TODO] Checkout branch \(hb)")
+        } else {
+            // Multiple options — submenu
+            Menu(LS("git.ctx.checkout")) {
+                Button(LS("git.ctx.checkoutRevision") + " \(node.shortHash)...") {
+                    Task { await performCheckout(target: node.id) }
                 }
-            }
-
-            // Local branches
-            ForEach(localBranches, id: \.self) { branch in
-                Button(LS("git.ctx.checkoutBranch") + " '\(branch)'") {
-                    print("[TODO] Checkout branch \(branch)")
+                if let hb = headBranch {
+                    Button(LS("git.ctx.checkoutBranch") + " '\(hb)'") {
+                        Task { await performCheckout(target: hb) }
+                    }
                 }
-            }
-
-            // Remote branches
-            ForEach(remoteBranches, id: \.self) { branch in
-                Button(LS("git.ctx.checkoutBranch") + " '\(branch)'") {
-                    print("[TODO] Checkout remote branch \(branch)")
+                ForEach(localBranches, id: \.self) { branch in
+                    Button(LS("git.ctx.checkoutBranch") + " '\(branch)'") {
+                        Task { await performCheckout(target: branch) }
+                    }
+                }
+                ForEach(remoteBranches, id: \.self) { branch in
+                    Button(LS("git.ctx.checkoutBranch") + " '\(branch)'") {
+                        let localName = branch.replacingOccurrences(of: "origin/", with: "")
+                        Task { await performCheckout(target: localName, tracking: branch) }
+                    }
                 }
             }
         }
 
-        // ── 2. Show repository at revision ──
-        Button(LS("git.ctx.showAtRevision")) {
-            print("[TODO] Show repo at revision \(node.id)")
-        }
-
-        // ── 3. Compare with local ──
+        // ── 2. Compare with local ──
         Button(LS("git.ctx.compareWithLocal")) {
-            print("[TODO] Compare \(node.id) with local")
+            Task { await performCompareWithLocal(hash: node.id) }
         }
 
         Divider()
 
-        // ── 4. Reset current branch to here ──
+        // ── 3. Reset current branch to here ──
         Button(LS("git.ctx.resetToHere")) {
-            print("[TODO] Reset current branch to \(node.id)")
+            ctxTargetNode = node
+            showResetDialog = true
         }
 
-        // ── 5. Revert commit ──
-        Button(LS("git.ctx.revertCommit")) {
-            print("[TODO] Revert commit \(node.id)")
-        }
+        Divider()
 
-        // ── 6. Undo commit (cherry-pick reverse) ──
+        // ── Unpushed-only actions (grayed out for pushed commits) ──
+        let isUnpushed = gitViewModel.graphUnpushedHashes.contains(node.id)
+
+        // ── 4. Undo commit ──
         Button(LS("git.ctx.undoCommit")) {
-            print("[TODO] Undo commit \(node.id)")
+            Task { await performUndoCommit(hash: node.id) }
         }
+        .disabled(!isUnpushed)
 
-        Divider()
-
-        // ── 7. Edit commit message ──
+        // ── 5. Edit commit message ──
         Button(LS("git.ctx.editMessage")) {
-            print("[TODO] Edit commit message \(node.id)")
+            ctxTargetNode = node
+            editMessageText = node.message
+            showEditMessageDialog = true
         }
+        .disabled(!isUnpushed)
 
-        // ── 8. Fixup ──
-        Button("Fixup...") {
-            print("[TODO] Fixup \(node.id)")
+        // ── 6. Drop commit ──
+        Button(LS("git.ctx.dropCommit"), role: .destructive) {
+            Task { await performDropCommit(node: node) }
         }
-
-        // ── 9. Squash into ──
-        Button(LS("git.ctx.squashInto")) {
-            print("[TODO] Squash into \(node.id)")
-        }
-
-        // ── 10. Drop commit ──
-        Button(LS("git.ctx.dropCommit")) {
-            print("[TODO] Drop commit \(node.id)")
-        }
-
-        // ── 11. Squash commit ──
-        Button(LS("git.ctx.squashCommit")) {
-            print("[TODO] Squash commit \(node.id)")
-        }
-
-        // ── 12. Interactive rebase from here ──
-        Button(LS("git.ctx.interactiveRebase")) {
-            print("[TODO] Interactive rebase from \(node.id)")
-        }
-
-        // ── 13. Push all commits before this ──
-        Button(LS("git.ctx.pushUpTo")) {
-            print("[TODO] Push up to \(node.id)")
-        }
+        .disabled(!isUnpushed)
 
         Divider()
 
-        // ── 14. Branch submenus — one per ref ──
-        ForEach(allBranchRefs, id: \.self) { branch in
-            Menu(LS("git.ctx.branch") + " '\(branch)'") {
-                Button(LS("git.ctx.branchCheckout")) {
-                    print("[TODO] Checkout branch \(branch)")
-                }
-                Button(LS("git.ctx.branchDelete")) {
-                    print("[TODO] Delete branch \(branch)")
-                }
-                Button(LS("git.ctx.branchRename")) {
-                    print("[TODO] Rename branch \(branch)")
-                }
-                Button(LS("git.ctx.branchCompare")) {
-                    print("[TODO] Compare with branch \(branch)")
-                }
+        // ── 7. New branch ──
+        Button(LS("git.ctx.newBranch")) {
+            ctxTargetNode = node
+            newBranchName = ""
+            showNewBranchDialog = true
+        }
+
+        // ── 8. New tag ──
+        Button(LS("git.ctx.newTag")) {
+            ctxTargetNode = node
+            newTagName = ""
+            showNewTagDialog = true
+        }
+
+        // ── 9. Open in browser (only for GitHub/GitLab repos) ──
+        if let commitURL = gitViewModel.commitBrowserURL(hash: node.id) {
+            Divider()
+            Button(LS("git.ctx.openInBrowser")) {
+                NSWorkspace.shared.open(commitURL)
             }
         }
+    }
 
-        // ── 15. New branch ──
-        Button(LS("git.ctx.newBranch")) {
-            print("[TODO] New branch from \(node.id)")
+    // MARK: - Context Menu Actions
+
+    private func performCheckout(target: String, tracking: String? = nil) async {
+        var args = ["checkout"]
+        if let tracking {
+            args += ["-b", target, tracking]
+        } else {
+            args.append(target)
         }
-
-        // ── 16. New tag ──
-        Button(LS("git.ctx.newTag")) {
-            print("[TODO] New tag at \(node.id)")
+        let result = await gitViewModel.runGitFull(args)
+        if result.succeeded {
+            gitViewModel.setOperationStatus(.success(message: LS("git.ctx.checkoutSuccess") + " '\(target)'"))
+            await gitViewModel.loadGraphHistory()
+        } else {
+            gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.checkoutFailed"), detail: result.combinedOutput))
         }
+    }
 
-        Divider()
+    private func performCompareWithLocal(hash: String) async {
+        let result = await gitViewModel.runGitFull(["diff", hash])
+        diffOutput = result.combinedOutput.isEmpty ? LS("git.ctx.noDifferences") : result.combinedOutput
+        showDiffSheet = true
+    }
 
-        // ── 17. Go to child commit ──
-        Button(LS("git.ctx.goToChild")) {
-            print("[TODO] Go to child of \(node.id)")
+    private func performReset(to hash: String, mode: String) async {
+        let result = await gitViewModel.runGitFull(["reset", "--\(mode)", hash])
+        if result.succeeded {
+            gitViewModel.setOperationStatus(.success(message: LS("git.ctx.resetSuccess") + " (\(mode))"))
+            await gitViewModel.loadGraphHistory()
+        } else {
+            gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.resetFailed"), detail: result.combinedOutput))
         }
+    }
 
-        // ── 18. Go to parent commit ──
-        Button(LS("git.ctx.goToParent")) {
-            print("[TODO] Go to parent of \(node.id)")
+    private func performNewBranch(name: String, from hash: String) async {
+        let result = await gitViewModel.runGitFull(["branch", name, hash])
+        if result.succeeded {
+            gitViewModel.setOperationStatus(.success(message: LS("git.ctx.branchCreated") + " '\(name)'"))
+            await gitViewModel.loadGraphHistory()
+        } else {
+            gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.branchFailed"), detail: result.combinedOutput))
         }
+        newBranchName = ""
+    }
 
-        Divider()
+    private func performNewTag(name: String, at hash: String) async {
+        let result = await gitViewModel.runGitFull(["tag", name, hash])
+        if result.succeeded {
+            gitViewModel.setOperationStatus(.success(message: LS("git.ctx.tagCreated") + " '\(name)'"))
+            await gitViewModel.loadGraphHistory()
+        } else {
+            gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.tagFailed"), detail: result.combinedOutput))
+        }
+        newTagName = ""
+    }
 
-        // ── 19. Open in browser ──
-        Button(LS("git.ctx.openInBrowser")) {
-            print("[TODO] Open \(node.id) in browser")
+    private func performUndoCommit(hash: String) async {
+        // git reset --soft <hash>~1 — keeps changes staged
+        let result = await gitViewModel.runGitFull(["reset", "--soft", "\(hash)~1"])
+        if result.succeeded {
+            gitViewModel.setOperationStatus(.success(message: LS("git.ctx.undoSuccess")))
+            await gitViewModel.loadGraphHistory()
+        } else {
+            gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.undoFailed"), detail: result.combinedOutput))
+        }
+    }
+
+    private func performEditMessage(hash: String, newMessage: String) async {
+        // Only works for HEAD commit: git commit --amend -m "new message"
+        let isHead = gitViewModel.graphNodes.first?.id == hash
+        if isHead {
+            let result = await gitViewModel.runGitFull(["commit", "--amend", "-m", newMessage])
+            if result.succeeded {
+                gitViewModel.setOperationStatus(.success(message: LS("git.ctx.editSuccess")))
+                await gitViewModel.loadGraphHistory()
+            } else {
+                gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.editFailed"), detail: result.combinedOutput))
+            }
+        } else {
+            // Non-HEAD: inform user this only works for HEAD
+            gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.editOnlyHead"), detail: nil))
+        }
+        editMessageText = ""
+    }
+
+    private func performDropCommit(node: CommitNode) async {
+        let isHead = gitViewModel.graphNodes.first?.id == node.id
+        if isHead {
+            // HEAD commit: git reset --hard HEAD~1
+            let result = await gitViewModel.runGitFull(["reset", "--hard", "HEAD~1"])
+            if result.succeeded {
+                gitViewModel.setOperationStatus(.success(message: LS("git.ctx.dropSuccess")))
+                await gitViewModel.loadGraphHistory()
+            } else {
+                gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.dropFailed"), detail: result.combinedOutput))
+            }
+        } else {
+            // Non-HEAD: git rebase --onto <parent> <commit> HEAD
+            guard let parent = node.parents.first else {
+                gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.dropFailed"), detail: "No parent commit"))
+                return
+            }
+            let result = await gitViewModel.runGitFull(["rebase", "--onto", parent, node.id])
+            if result.succeeded {
+                gitViewModel.setOperationStatus(.success(message: LS("git.ctx.dropSuccess")))
+                await gitViewModel.loadGraphHistory()
+            } else {
+                gitViewModel.setOperationStatus(.failure(message: LS("git.ctx.dropFailed"), detail: result.combinedOutput))
+            }
         }
     }
 

@@ -435,6 +435,33 @@
 "git.ctx.goToChild" = "Go to Child Commit";
 "git.ctx.goToParent" = "Go to Parent Commit";
 "git.ctx.openInBrowser" = "Open in Browser";
+"git.ctx.branchNamePlaceholder" = "Branch name";
+"git.ctx.tagNamePlaceholder" = "Tag name";
+"git.ctx.create" = "Create";
+"git.ctx.cancel" = "Cancel";
+"git.ctx.close" = "Close";
+"git.ctx.newBranchMsg" = "Create new branch from commit";
+"git.ctx.newTagMsg" = "Create tag at commit";
+"git.ctx.resetMsg" = "Select reset mode for commit";
+"git.ctx.checkoutSuccess" = "Checked out";
+"git.ctx.checkoutFailed" = "Checkout failed";
+"git.ctx.noDifferences" = "No differences with working tree.";
+"git.ctx.resetSuccess" = "Reset successful";
+"git.ctx.resetFailed" = "Reset failed";
+"git.ctx.branchCreated" = "Branch created";
+"git.ctx.branchFailed" = "Create branch failed";
+"git.ctx.tagCreated" = "Tag created";
+"git.ctx.tagFailed" = "Create tag failed";
+"git.ctx.undoSuccess" = "Commit undone (changes staged)";
+"git.ctx.undoFailed" = "Undo commit failed";
+"git.ctx.editSuccess" = "Commit message updated";
+"git.ctx.editFailed" = "Edit message failed";
+"git.ctx.editOnlyHead" = "Edit message only works for HEAD commit";
+"git.ctx.dropSuccess" = "Commit dropped";
+"git.ctx.dropFailed" = "Drop commit failed";
+"git.ctx.save" = "Save";
+"git.ctx.messagePlaceholder" = "New commit message";
+"git.ctx.editMessageMsg" = "Enter new commit message";
 
 // MARK: - Batch 6: PostgreSQL
 

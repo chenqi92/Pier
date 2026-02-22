@@ -435,6 +435,33 @@
 "git.ctx.goToChild" = "转到子提交";
 "git.ctx.goToParent" = "转到父提交";
 "git.ctx.openInBrowser" = "在浏览器中查看";
+"git.ctx.branchNamePlaceholder" = "分支名称";
+"git.ctx.tagNamePlaceholder" = "标记名称";
+"git.ctx.create" = "创建";
+"git.ctx.cancel" = "取消";
+"git.ctx.close" = "关闭";
+"git.ctx.newBranchMsg" = "从提交创建新分支";
+"git.ctx.newTagMsg" = "在提交处创建标记";
+"git.ctx.resetMsg" = "选择重置模式";
+"git.ctx.checkoutSuccess" = "已签出";
+"git.ctx.checkoutFailed" = "签出失败";
+"git.ctx.noDifferences" = "与工作区无差异。";
+"git.ctx.resetSuccess" = "重置成功";
+"git.ctx.resetFailed" = "重置失败";
+"git.ctx.branchCreated" = "分支已创建";
+"git.ctx.branchFailed" = "创建分支失败";
+"git.ctx.tagCreated" = "标记已创建";
+"git.ctx.tagFailed" = "创建标记失败";
+"git.ctx.undoSuccess" = "已撤销提交（更改保留在暂存区）";
+"git.ctx.undoFailed" = "撤销提交失败";
+"git.ctx.editSuccess" = "提交消息已更新";
+"git.ctx.editFailed" = "编辑消息失败";
+"git.ctx.editOnlyHead" = "编辑消息仅支持 HEAD 提交";
+"git.ctx.dropSuccess" = "提交已删除";
+"git.ctx.dropFailed" = "删除提交失败";
+"git.ctx.save" = "保存";
+"git.ctx.messagePlaceholder" = "新提交消息";
+"git.ctx.editMessageMsg" = "输入新的提交消息";
 
 // MARK: - Batch 6: PostgreSQL
 

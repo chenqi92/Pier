@@ -142,6 +142,8 @@ class GitViewModel: ObservableObject {
     @Published var graphShowZebraStripes = true         // alternating row background
     @Published var graphGeneration = 0                  // increments on full reload only (not loadMore)
     @Published var graphGitUserName = ""                 // current git user.name for highlight
+    @Published var graphRemoteURL = ""                    // origin remote URL (for "Open in Browser")
+    @Published var graphUnpushedHashes: Set<String> = []   // commits ahead of upstream (not yet pushed)
 
     // MARK: - Private
 
@@ -573,10 +575,12 @@ class GitViewModel: ObservableObject {
         cachedCommitsJSON = "[]"
         guard !repoPath.isEmpty else { graphNodes = []; return }
 
-        // Run branches + authors + git user concurrently for UI pickers.
+        // Run branches + authors + git user + remote URL + unpushed hashes concurrently.
         async let branchTask: Void = fetchGraphBranches()
         async let authorTask: Void = fetchGraphAuthors()
         async let userTask: Void = fetchGitUserName()
+        async let remoteTask: Void = fetchRemoteURL()
+        async let unpushedTask: Void = fetchUnpushedHashes()
 
         // Capture values for background work
         let path = repoPath
@@ -620,7 +624,7 @@ class GitViewModel: ObservableObject {
             return (json, fpJSON, layout)
         }.value
 
-        _ = await (branchTask, authorTask, userTask)
+        _ = await (branchTask, authorTask, userTask, remoteTask, unpushedTask)
 
         guard let (json, fpJSON, layoutResult) = result else { graphNodes = []; return }
         mainChainJSON = fpJSON
@@ -745,6 +749,95 @@ class GitViewModel: ObservableObject {
             return (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         }.value
         graphGitUserName = result
+    }
+
+    /// Fetch the origin remote URL for "Open in Browser" feature.
+    private func fetchRemoteURL() async {
+        guard !repoPath.isEmpty else { graphRemoteURL = ""; return }
+        let result = await Task.detached(priority: .utility) { [path = self.repoPath] () -> String in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            proc.arguments = ["remote", "get-url", "origin"]
+            proc.currentDirectoryURL = URL(fileURLWithPath: path)
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = Pipe()
+            try? proc.run()
+            proc.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }.value
+        graphRemoteURL = result
+    }
+
+    /// Convert git remote URL to a browser-friendly base URL.
+    /// Supports: git@github.com:user/repo.git, https://github.com/user/repo.git, etc.
+    var graphRemoteBrowserBaseURL: String? {
+        let url = graphRemoteURL
+        guard !url.isEmpty else { return nil }
+
+        var base: String
+        if url.hasPrefix("git@") {
+            // git@github.com:user/repo.git → https://github.com/user/repo
+            // Only replace the FIRST colon (between host and path), not protocol colons
+            let withoutPrefix = String(url.dropFirst(4)) // "github.com:user/repo.git"
+            if let colonIdx = withoutPrefix.firstIndex(of: ":") {
+                var result = withoutPrefix
+                result.replaceSubrange(colonIdx...colonIdx, with: "/")
+                base = "https://" + result
+            } else {
+                base = "https://" + withoutPrefix
+            }
+        } else {
+            base = url
+        }
+        // Remove .git suffix
+        if base.hasSuffix(".git") {
+            base = String(base.dropLast(4))
+        }
+
+        // Only support GitHub / GitLab URLs
+        if base.contains("github.com") || base.contains("gitlab.com") {
+            return base
+        }
+        return nil
+    }
+
+    /// Build the full commit URL for a given hash.
+    /// GitHub: <base>/commit/<hash>
+    /// GitLab: <base>/-/commit/<hash>
+    func commitBrowserURL(hash: String) -> URL? {
+        guard let base = graphRemoteBrowserBaseURL else { return nil }
+        let path: String
+        if base.contains("gitlab.com") {
+            path = "\(base)/-/commit/\(hash)"
+        } else {
+            path = "\(base)/commit/\(hash)"
+        }
+        return URL(string: path)
+    }
+
+    /// Fetch hashes of commits not yet pushed to upstream.
+    private func fetchUnpushedHashes() async {
+        guard !repoPath.isEmpty else { graphUnpushedHashes = []; return }
+        let result = await Task.detached(priority: .utility) { [path = self.repoPath] () -> Set<String> in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            // Try @{upstream}..HEAD first; if no upstream is set, this will fail gracefully
+            proc.arguments = ["log", "--format=%H", "@{u}..HEAD"]
+            proc.currentDirectoryURL = URL(fileURLWithPath: path)
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = Pipe()
+            try? proc.run()
+            proc.waitUntilExit()
+            guard proc.terminationStatus == 0 else { return [] }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            let hashes = output.split(separator: "\n").map(String.init)
+            return Set(hashes)
+        }.value
+        graphUnpushedHashes = result
     }
 
     /// Fetch tracked files via FFI.
