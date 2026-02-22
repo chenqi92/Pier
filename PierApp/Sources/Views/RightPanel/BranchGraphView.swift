@@ -678,11 +678,29 @@ extension BranchGraphView {
             ctx.stroke(chev, with: .color(color), lineWidth: 2.0)
         }
 
-        // Commit dot
+        // Commit dot — concentric circle for HEAD (current checkout), IDEA-style
         let dx = CGFloat(node.lane) * Self.laneW + Self.laneW / 2 + 4
         let r = Self.dotR
-        ctx.fill(Path(ellipseIn: CGRect(x: dx - r, y: cy - r, width: r * 2, height: r * 2)),
-                 with: .color(col(node.colorIndex)))
+        let dotColor = col(node.colorIndex)
+
+        // HEAD = commit with "→ branchName" (attached) or "HEAD" (detached) in refs
+        let isHead = node.refs.contains(where: { $0.hasPrefix("→ ") || $0 == "HEAD" })
+
+        if isHead {
+            // Concentric circle: outer ring + inner filled dot
+            let outerR = r + 2.0
+            ctx.stroke(Path(ellipseIn: CGRect(x: dx - outerR, y: cy - outerR,
+                                              width: outerR * 2, height: outerR * 2)),
+                       with: .color(dotColor), lineWidth: 1.5)
+            ctx.fill(Path(ellipseIn: CGRect(x: dx - r, y: cy - r,
+                                            width: r * 2, height: r * 2)),
+                     with: .color(dotColor))
+        } else {
+            // Normal filled dot
+            ctx.fill(Path(ellipseIn: CGRect(x: dx - r, y: cy - r,
+                                            width: r * 2, height: r * 2)),
+                     with: .color(dotColor))
+        }
     }
 
     // MARK: - Footer
