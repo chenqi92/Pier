@@ -60,6 +60,7 @@ class TerminalScrollView: NSScrollView {
     override func keyDown(with event: NSEvent) {
         // Forward all keyboard events to the terminal view
         if let terminalView = documentView as? TerminalNSView {
+            TerminalNSView.debugLog("[ScrollView] forwarding keyDown keyCode=\(event.keyCode) to TerminalNSView")
             terminalView.keyDown(with: event)
         } else {
             super.keyDown(with: event)
@@ -101,6 +102,22 @@ struct TerminalCell: Equatable {
 
 /// AppKit NSView for high-performance terminal rendering.
 class TerminalNSView: NSView {
+
+    // MARK: - Debug File Logger
+    private static let debugLogPath = "/Users/chenqi/Projects/workspace-freq/Pier/pier_debug.log"
+    private static var debugLogHandle: FileHandle? = {
+        FileManager.default.createFile(atPath: debugLogPath, contents: nil)
+        return FileHandle(forWritingAtPath: debugLogPath)
+    }()
+
+    static func debugLog(_ message: String) {
+        let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        let line = "[\(ts)] \(message)\n"
+        if let data = line.data(using: .utf8) {
+            debugLogHandle?.seekToEndOfFile()
+            debugLogHandle?.write(data)
+        }
+    }
     var session: TerminalSessionInfo?
 
     // Use top-left origin (standard for terminal rendering)
@@ -138,6 +155,36 @@ class TerminalNSView: NSView {
     /// Whether SSH auth success has been notified for this session
     private var sshAuthSuccessNotified = false
 
+    // MARK: - Alternate Screen Buffer
+    /// Whether we are in alternate screen mode (nano, vim, less, etc.)
+    private var useAlternateScreen = false
+    /// Saved main screen buffer when switching to alternate screen
+    private var savedMainScreen: [[TerminalCell]] = []
+    private var savedMainScrollback: [[TerminalCell]] = []
+    private var savedMainScreenWrapped: [Bool] = []
+    private var savedMainScrollbackWrapped: [Bool] = []
+    private var savedMainCursorX: Int = 0
+    private var savedMainCursorY: Int = 0
+    private var savedMainAttr: CellAttr = .default
+
+    // MARK: - DEC Private Modes
+    /// Application cursor key mode (DECCKM): when true, arrow keys send ESC O A instead of ESC [ A
+    private var applicationCursorKeys = false
+    /// Cursor visible (DECTCEM ?25): when false, cursor is hidden by the application
+    private var cursorHidden = false
+    /// Bracketed paste mode (?2004)
+    private var bracketedPasteMode = false
+
+    // MARK: - Scroll Region (DECSTBM)
+    /// Top row of scroll region (0-based). 0 = top of screen.
+    private var scrollRegionTop: Int = 0
+    /// Bottom row of scroll region (0-based). 0 = use last row of screen.
+    private var scrollRegionBottom: Int = 0
+    /// Effective bottom of scroll region (computed)
+    private var effectiveScrollBottom: Int {
+        scrollRegionBottom > 0 ? scrollRegionBottom : (visibleRows - 1)
+    }
+
     // MARK: - PTY Cache (persists across tab switches)
 
     /// Cached PTY state for a terminal session.
@@ -154,6 +201,20 @@ class TerminalNSView: NSView {
         var savedCursorX: Int
         var savedCursorY: Int
         var currentAttr: CellAttr
+        // Alternate screen state
+        var useAlternateScreen: Bool
+        var savedMainScreen: [[TerminalCell]]
+        var savedMainScrollback: [[TerminalCell]]
+        var savedMainScreenWrapped: [Bool]
+        var savedMainScrollbackWrapped: [Bool]
+        var savedMainCursorX: Int
+        var savedMainCursorY: Int
+        var savedMainAttr: CellAttr
+        // DEC modes
+        var applicationCursorKeys: Bool
+        var cursorHidden: Bool
+        var scrollRegionTop: Int
+        var scrollRegionBottom: Int
     }
 
     /// Static cache: session ID → PTY state. Persists across view re-creation.
@@ -509,6 +570,18 @@ class TerminalNSView: NSView {
             savedCursorX = cached.savedCursorX
             savedCursorY = cached.savedCursorY
             currentAttr = cached.currentAttr
+            useAlternateScreen = cached.useAlternateScreen
+            savedMainScreen = cached.savedMainScreen
+            savedMainScrollback = cached.savedMainScrollback
+            savedMainScreenWrapped = cached.savedMainScreenWrapped
+            savedMainScrollbackWrapped = cached.savedMainScrollbackWrapped
+            savedMainCursorX = cached.savedMainCursorX
+            savedMainCursorY = cached.savedMainCursorY
+            savedMainAttr = cached.savedMainAttr
+            applicationCursorKeys = cached.applicationCursorKeys
+            cursorHidden = cached.cursorHidden
+            scrollRegionTop = cached.scrollRegionTop
+            scrollRegionBottom = cached.scrollRegionBottom
             startReadLoop()
             needsDisplay = true
         } else {
@@ -549,7 +622,19 @@ class TerminalNSView: NSView {
             ptyRows: ptyRows,
             savedCursorX: savedCursorX,
             savedCursorY: savedCursorY,
-            currentAttr: currentAttr
+            currentAttr: currentAttr,
+            useAlternateScreen: useAlternateScreen,
+            savedMainScreen: savedMainScreen,
+            savedMainScrollback: savedMainScrollback,
+            savedMainScreenWrapped: savedMainScreenWrapped,
+            savedMainScrollbackWrapped: savedMainScrollbackWrapped,
+            savedMainCursorX: savedMainCursorX,
+            savedMainCursorY: savedMainCursorY,
+            savedMainAttr: savedMainAttr,
+            applicationCursorKeys: applicationCursorKeys,
+            cursorHidden: cursorHidden,
+            scrollRegionTop: scrollRegionTop,
+            scrollRegionBottom: scrollRegionBottom
         )
         TerminalNSView.ptyCache[sessionId] = entry
         // Detach handle from this view (cache now owns it)
@@ -912,14 +997,30 @@ class TerminalNSView: NSView {
         if cursorX + charWidth > cols {
             cursorX = 0
             cursorY += 1
-            if cursorY >= visibleRows {
-                if !screen.isEmpty {
-                    scrollback.append(screen.removeFirst())
-                    scrollbackLineWrapped.append(screenLineWrapped.isEmpty ? false : screenLineWrapped.removeFirst())
+            let bottom = effectiveScrollBottom
+            let top = scrollRegionTop
+            if cursorY > bottom {
+                // Need to scroll within scroll region
+                if useAlternateScreen || (top > 0 || bottom < visibleRows - 1) {
+                    // Inside scroll region or alternate screen: scroll only the region
+                    if top < screen.count {
+                        screen.remove(at: top)
+                        screen.insert(Array(repeating: .blank, count: cols), at: bottom)
+                        if top < screenLineWrapped.count {
+                            screenLineWrapped.remove(at: top)
+                            screenLineWrapped.insert(true, at: min(bottom, screenLineWrapped.count))
+                        }
+                    }
+                } else {
+                    // Normal mode: push to scrollback
+                    if !screen.isEmpty {
+                        scrollback.append(screen.removeFirst())
+                        scrollbackLineWrapped.append(screenLineWrapped.isEmpty ? false : screenLineWrapped.removeFirst())
+                    }
+                    screen.append(Array(repeating: .blank, count: cols))
+                    screenLineWrapped.append(true)
                 }
-                screen.append(Array(repeating: .blank, count: cols))
-                screenLineWrapped.append(true)  // soft wrap: continuation of previous line
-                cursorY = visibleRows - 1
+                cursorY = bottom
             }
             while cursorY >= screen.count {
                 screen.append(Array(repeating: .blank, count: cols))
@@ -1013,25 +1114,44 @@ class TerminalNSView: NSView {
             case 0x1B: // ESC
                 ansiState = .escape
             case 0x0A: // LF (\n)
-                cursorY += 1
-                if cursorY >= visibleRows {
-                    // Scroll: move top line to scrollback
-                    if !screen.isEmpty {
-                        scrollback.append(screen.removeFirst())
-                        scrollbackLineWrapped.append(screenLineWrapped.isEmpty ? false : screenLineWrapped.removeFirst())
+                let bottom = effectiveScrollBottom
+                let top = scrollRegionTop
+                if cursorY == bottom {
+                    // Cursor is at the bottom of scroll region — scroll region up
+                    if useAlternateScreen || (top > 0 || bottom < visibleRows - 1) {
+                        // Inside scroll region or alternate screen: scroll only the region
+                        if top < screen.count {
+                            screen.remove(at: top)
+                            screen.insert(Array(repeating: .blank, count: cols), at: bottom)
+                            if top < screenLineWrapped.count {
+                                screenLineWrapped.remove(at: top)
+                                screenLineWrapped.insert(false, at: min(bottom, screenLineWrapped.count))
+                            }
+                        }
+                    } else {
+                        // Normal mode, full-screen scroll region: push to scrollback
+                        if !screen.isEmpty {
+                            scrollback.append(screen.removeFirst())
+                            scrollbackLineWrapped.append(screenLineWrapped.isEmpty ? false : screenLineWrapped.removeFirst())
+                        }
+                        screen.append(Array(repeating: .blank, count: cols))
+                        screenLineWrapped.append(false)
+                        if scrollback.count > maxScrollback {
+                            scrollback.removeFirst(scrollback.count - maxScrollback)
+                            if !scrollbackLineWrapped.isEmpty { scrollbackLineWrapped.removeFirst() }
+                        }
                     }
-                    screen.append(Array(repeating: .blank, count: cols))
-                    screenLineWrapped.append(false)  // hard wrap (LF)
+                    // Cursor stays at bottom
+                } else if cursorY >= visibleRows - 1 {
+                    // Beyond screen — shouldn't normally happen but handle defensively
                     cursorY = visibleRows - 1
-                    if scrollback.count > maxScrollback {
-                        scrollback.removeFirst(scrollback.count - maxScrollback)
-                        if !scrollbackLineWrapped.isEmpty { scrollbackLineWrapped.removeFirst() }
-                    }
+                } else {
+                    cursorY += 1
                 }
                 // Ensure screen has enough rows
                 while cursorY >= screen.count {
                     screen.append(Array(repeating: .blank, count: cols))
-                    screenLineWrapped.append(false)  // hard wrap (LF)
+                    screenLineWrapped.append(false)
                 }
             case 0x0D: // CR (\r)
                 cursorX = 0
@@ -1066,14 +1186,23 @@ class TerminalNSView: NSView {
                     cursorY = savedCursorY
                     ansiState = .normal
                 case 0x4D: // 'M' -> Reverse Index (scroll down / cursor up)
-                    if cursorY > 0 {
+                    if cursorY > scrollRegionTop {
                         cursorY -= 1
-                    } else {
-                        // Scroll down: insert blank line at top
-                        screen.insert(Array(repeating: .blank, count: cols), at: 0)
-                        if screen.count > visibleRows {
-                            screen.removeLast()
+                    } else if cursorY == scrollRegionTop {
+                        // Scroll down within scroll region: insert blank line at top of region
+                        let bottom = effectiveScrollBottom
+                        if bottom < screen.count {
+                            screen.remove(at: bottom)
                         }
+                        screen.insert(Array(repeating: .blank, count: cols), at: scrollRegionTop)
+                        if scrollRegionTop < screenLineWrapped.count {
+                            if bottom < screenLineWrapped.count {
+                                screenLineWrapped.remove(at: bottom)
+                            }
+                            screenLineWrapped.insert(false, at: scrollRegionTop)
+                        }
+                    } else if cursorY > 0 {
+                        cursorY -= 1
                     }
                     ansiState = .normal
                 default:
@@ -1211,8 +1340,17 @@ class TerminalNSView: NSView {
         case 0x6D: // 'm' — SGR (Select Graphic Rendition)
             handleSGR(params: params)
 
-        case 0x68, 0x6C: // 'h'/'l' — Set/Reset Mode (e.g., ?2004h for bracketed paste)
-            break // Ignore mode set/reset
+        case 0x68, 0x6C: // 'h'/'l' — Set/Reset Mode
+            let isSet = (finalByte == 0x68) // 'h' = set, 'l' = reset
+            if params.hasPrefix("?") {
+                // DEC Private Mode sequences
+                let modeStr = String(params.dropFirst())
+                let modes = modeStr.split(separator: ";").compactMap { Int($0) }
+                for mode in modes {
+                    handleDECPrivateMode(mode, set: isSet)
+                }
+            }
+            // Non-private modes (without ?) are ignored for now
 
         case 0x73: // 's' — Save Cursor Position
             savedCursorX = cursorX
@@ -1270,11 +1408,159 @@ class TerminalNSView: NSView {
             }
 
         case 0x72: // 'r' — Set Scrolling Region (DECSTBM)
-            break // Consume but don't implement scroll regions yet
+            if params.isEmpty {
+                // Reset scroll region to full screen
+                scrollRegionTop = 0
+                scrollRegionBottom = 0
+            } else {
+                let top = max(1, p1) - 1
+                let bottom = max(1, p2) - 1
+                if top < bottom && bottom < visibleRows {
+                    scrollRegionTop = top
+                    scrollRegionBottom = bottom
+                } else {
+                    scrollRegionTop = 0
+                    scrollRegionBottom = 0
+                }
+            }
+            // DECSTBM resets cursor to home position
+            cursorX = 0
+            cursorY = scrollRegionTop
 
         default:
             break // Ignore unknown CSI sequences
         }
+    }
+
+    // MARK: - DEC Private Modes
+
+    /// Handle DEC Private Mode set/reset (CSI ? Pn h/l).
+    private func handleDECPrivateMode(_ mode: Int, set: Bool) {
+        Self.debugLog("[Mode] DEC Private Mode ?\(mode) \(set ? "SET" : "RESET")")
+        switch mode {
+        case 1:  // DECCKM — Application Cursor Keys
+            applicationCursorKeys = set
+
+        case 7:  // DECAWM — Auto Wrap Mode
+            break // Already handled implicitly by placeCharacter wrap logic
+
+        case 12: // Cursor blink (att610)
+            break // Handled by app settings
+
+        case 25: // DECTCEM — Text Cursor Enable Mode
+            cursorHidden = !set
+
+        case 47:  // Alternate Screen Buffer (legacy)
+            if set {
+                enterAlternateScreen()
+            } else {
+                leaveAlternateScreen()
+            }
+
+        case 1047: // Alternate Screen Buffer (xterm)
+            if set {
+                enterAlternateScreen()
+            } else {
+                leaveAlternateScreen()
+            }
+
+        case 1048: // Save/Restore Cursor (xterm)
+            if set {
+                savedCursorX = cursorX
+                savedCursorY = cursorY
+            } else {
+                cursorX = savedCursorX
+                cursorY = savedCursorY
+            }
+
+        case 1049: // Save cursor + switch to alternate screen + clear (xterm, most common)
+            if set {
+                savedCursorX = cursorX
+                savedCursorY = cursorY
+                enterAlternateScreen()
+                // Clear the alternate screen
+                let cols = visibleCols
+                for y in 0..<screen.count {
+                    screen[y] = Array(repeating: .blank, count: cols)
+                }
+                cursorX = 0
+                cursorY = 0
+            } else {
+                leaveAlternateScreen()
+                cursorX = savedCursorX
+                cursorY = savedCursorY
+            }
+
+        case 2004: // Bracketed Paste Mode
+            bracketedPasteMode = set
+
+        default:
+            break // Ignore unknown DEC private modes
+        }
+    }
+
+    // MARK: - Alternate Screen Buffer
+
+    /// Switch to alternate screen buffer (used by nano, vim, less, etc.)
+    private func enterAlternateScreen() {
+        guard !useAlternateScreen else { return }
+        Self.debugLog("[AltScreen] ENTERING alternate screen (cols=\(visibleCols) rows=\(visibleRows) cursor=\(cursorX),\(cursorY))")
+        useAlternateScreen = true
+
+        // Save main screen state
+        savedMainScreen = screen
+        savedMainScrollback = scrollback
+        savedMainScreenWrapped = screenLineWrapped
+        savedMainScrollbackWrapped = scrollbackLineWrapped
+        savedMainCursorX = cursorX
+        savedMainCursorY = cursorY
+        savedMainAttr = currentAttr
+
+        // Create fresh alternate screen (no scrollback)
+        let cols = visibleCols
+        let rows = visibleRows
+        screen = Array(repeating: Array(repeating: .blank, count: cols), count: rows)
+        screenLineWrapped = Array(repeating: false, count: rows)
+        scrollback = []
+        scrollbackLineWrapped = []
+        cursorX = 0
+        cursorY = 0
+        scrollRegionTop = 0
+        scrollRegionBottom = 0
+
+        // Fix document size to viewport (no scrollbar in alternate screen)
+        updateDocumentSize()
+        needsDisplay = true
+    }
+
+    /// Return to main screen buffer.
+    private func leaveAlternateScreen() {
+        guard useAlternateScreen else { return }
+        Self.debugLog("[AltScreen] LEAVING alternate screen (restoring cursor to \(savedMainCursorX),\(savedMainCursorY))")
+        useAlternateScreen = false
+
+        // Restore main screen state
+        screen = savedMainScreen
+        scrollback = savedMainScrollback
+        screenLineWrapped = savedMainScreenWrapped
+        scrollbackLineWrapped = savedMainScrollbackWrapped
+        cursorX = savedMainCursorX
+        cursorY = savedMainCursorY
+        currentAttr = savedMainAttr
+
+        // Clear saved state
+        savedMainScreen = []
+        savedMainScrollback = []
+        savedMainScreenWrapped = []
+        savedMainScrollbackWrapped = []
+
+        // Reset scroll region
+        scrollRegionTop = 0
+        scrollRegionBottom = 0
+        applicationCursorKeys = false
+
+        updateDocumentSize()
+        needsDisplay = true
     }
 
     // MARK: - SGR (Select Graphic Rendition) Parser
@@ -1430,6 +1716,19 @@ class TerminalNSView: NSView {
     }
 
     private func updateDocumentSize() {
+        if useAlternateScreen {
+            // In alternate screen mode: fixed viewport size, no scrollback
+            let visibleSize = enclosingScrollView?.contentView.bounds.size ?? bounds.size
+            let width = CGFloat(ptyCols) * cellWidth
+            super.setFrameSize(NSSize(width: width, height: visibleSize.height))
+            // Ensure scroll position is at top (no scrollback to scroll through)
+            if let scrollView = enclosingScrollView {
+                scrollView.contentView.scroll(to: NSPoint(x: 0, y: 0))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+            return
+        }
+
         let totalLines = scrollback.count + screen.count
         let visibleHeight = enclosingScrollView?.contentView.bounds.height ?? bounds.height
         let requiredHeight = max(visibleHeight, CGFloat(totalLines) * cellHeight)
@@ -1665,8 +1964,8 @@ class TerminalNSView: NSView {
             }
         }
 
-        // Render cursor (only in screen area, not scrollback)
-        if cursorVisible {
+        // Render cursor (only in screen area, not scrollback, and respect DECTCEM)
+        if cursorVisible && !cursorHidden {
             let cursorAbsRow = scrollbackCount + cursorY
             let x = CGFloat(cursorX) * cellWidth + 2
             let y = CGFloat(cursorAbsRow) * cellHeight
@@ -1914,9 +2213,57 @@ class TerminalNSView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// Timestamp of the last handled key event, for deduplication.
+    /// macOS may deliver the same event via both performKeyEquivalent AND keyDown;
+    /// this prevents processing it twice.
+    private var lastHandledEventTimestamp: TimeInterval = 0
+
+    /// Intercept key equivalents to prevent the menu system or parent SwiftUI views
+    /// from consuming keys that should go to the terminal PTY.
+    /// This is called BEFORE keyDown in the responder chain.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Let ⌘-based shortcuts through to the menu system (⌘Q, ⌘T, etc.)
+        // EXCEPT ⌘C and ⌘V which we handle ourselves
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+            if terminalHandle != nil {
+                if event.charactersIgnoringModifiers == "c" {
+                    if let text = selectedText() {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                        return true
+                    }
+                    return super.performKeyEquivalent(with: event)
+                }
+                if event.charactersIgnoringModifiers == "v" {
+                    handleKeyEvent(event)
+                    return true
+                }
+            }
+            return super.performKeyEquivalent(with: event)
+        }
+        // All non-⌘ keys: handle in the terminal (prevents SwiftUI/menu interception)
+        handleKeyEvent(event)
+        return true
+    }
+
     override func keyDown(with event: NSEvent) {
+        handleKeyEvent(event)
+    }
+
+    /// Unified key event handler. Called from both performKeyEquivalent and keyDown.
+    /// Uses timestamp-based deduplication to prevent double-processing.
+    private func handleKeyEvent(_ event: NSEvent) {
+        // Deduplicate: macOS may deliver the same event via both
+        // performKeyEquivalent and keyDown (or via TerminalScrollView forwarding)
+        guard event.timestamp != lastHandledEventTimestamp else {
+            Self.debugLog("[Key] SKIP duplicate event ts=\(String(format: "%.4f", event.timestamp)) keyCode=\(event.keyCode)")
+            return
+        }
+        lastHandledEventTimestamp = event.timestamp
+
         // ⌘C: copy selection
-        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "c" {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
+            && event.charactersIgnoringModifiers == "c" {
             if let text = selectedText() {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(text, forType: .string)
@@ -1924,12 +2271,22 @@ class TerminalNSView: NSView {
             }
         }
 
-        // ⌘V: paste
-        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+        // ⌘V: paste (with bracketed paste support)
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
+            && event.charactersIgnoringModifiers == "v" {
             if let text = NSPasteboard.general.string(forType: .string) {
-                let bytes = Array(text.utf8)
-                if let handle = terminalHandle, !bytes.isEmpty {
-                    pier_terminal_write(handle, bytes, UInt(bytes.count))
+                if let handle = terminalHandle, !text.isEmpty {
+                    if bracketedPasteMode {
+                        let prefix: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]
+                        let suffix: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]
+                        pier_terminal_write(handle, prefix, UInt(prefix.count))
+                        let bytes = Array(text.utf8)
+                        pier_terminal_write(handle, bytes, UInt(bytes.count))
+                        pier_terminal_write(handle, suffix, UInt(suffix.count))
+                    } else {
+                        let bytes = Array(text.utf8)
+                        pier_terminal_write(handle, bytes, UInt(bytes.count))
+                    }
                 }
                 return
             }
@@ -1939,44 +2296,74 @@ class TerminalNSView: NSView {
 
         var bytes: [UInt8] = []
 
-        if let chars = event.characters {
-            // Handle special keys
-            switch event.keyCode {
-            case 36: // Return
-                detectSSHCommand()
-                bytes = [0x0D]
-            case 51: // Backspace
-                bytes = [0x7F]
-            case 53: // Escape
-                bytes = [0x1B]
-            case 123: // Left arrow
-                bytes = [0x1B, 0x5B, 0x44]
-            case 124: // Right arrow
-                bytes = [0x1B, 0x5B, 0x43]
-            case 125: // Down arrow
-                bytes = [0x1B, 0x5B, 0x42]
-            case 126: // Up arrow
-                bytes = [0x1B, 0x5B, 0x41]
-            case 48: // Tab
-                bytes = [0x09]
-            default:
-                // Ctrl+key shortcuts
-                if event.modifierFlags.contains(.control) {
-                    let lower = chars.lowercased()
-                    if let ch = lower.first, ch >= "a" && ch <= "z" {
-                        bytes = [UInt8(ch.asciiValue! - 96)]  // Ctrl+A = 0x01, etc.
-                    }
+        let chars = event.characters ?? ""
+        let keyCode = event.keyCode
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // Handle special keys by keyCode
+        switch keyCode {
+        case 36: // Return
+            detectSSHCommand()
+            bytes = [0x0D]
+        case 51: // Backspace
+            bytes = [0x7F]
+        case 53: // Escape
+            bytes = [0x1B]
+        case 123: // Left arrow
+            bytes = applicationCursorKeys ? [0x1B, 0x4F, 0x44] : [0x1B, 0x5B, 0x44]
+        case 124: // Right arrow
+            bytes = applicationCursorKeys ? [0x1B, 0x4F, 0x43] : [0x1B, 0x5B, 0x43]
+        case 125: // Down arrow
+            bytes = applicationCursorKeys ? [0x1B, 0x4F, 0x42] : [0x1B, 0x5B, 0x42]
+        case 126: // Up arrow
+            bytes = applicationCursorKeys ? [0x1B, 0x4F, 0x41] : [0x1B, 0x5B, 0x41]
+        case 48: // Tab
+            bytes = [0x09]
+        case 115: // Home
+            bytes = [0x1B, 0x5B, 0x48]
+        case 119: // End
+            bytes = [0x1B, 0x5B, 0x46]
+        case 117: // Forward Delete
+            bytes = [0x1B, 0x5B, 0x33, 0x7E]
+        case 116: // Page Up
+            bytes = [0x1B, 0x5B, 0x35, 0x7E]
+        case 121: // Page Down
+            bytes = [0x1B, 0x5B, 0x36, 0x7E]
+        // Function keys F1-F12
+        case 122: bytes = [0x1B, 0x4F, 0x50]
+        case 120: bytes = [0x1B, 0x4F, 0x51]
+        case 99:  bytes = [0x1B, 0x4F, 0x52]
+        case 118: bytes = [0x1B, 0x4F, 0x53]
+        case 96:  bytes = [0x1B, 0x5B, 0x31, 0x35, 0x7E]
+        case 97:  bytes = [0x1B, 0x5B, 0x31, 0x37, 0x7E]
+        case 98:  bytes = [0x1B, 0x5B, 0x31, 0x38, 0x7E]
+        case 100: bytes = [0x1B, 0x5B, 0x31, 0x39, 0x7E]
+        case 101: bytes = [0x1B, 0x5B, 0x32, 0x30, 0x7E]
+        case 109: bytes = [0x1B, 0x5B, 0x32, 0x31, 0x7E]
+        case 103: bytes = [0x1B, 0x5B, 0x32, 0x33, 0x7E]
+        case 111: bytes = [0x1B, 0x5B, 0x32, 0x34, 0x7E]
+        default:
+            // Ctrl+key shortcuts
+            if modifiers.contains(.control) {
+                if let raw = event.charactersIgnoringModifiers?.lowercased(),
+                   let ch = raw.first, ch >= "a" && ch <= "z" {
+                    bytes = [UInt8(ch.asciiValue! - 96)]
                 } else {
                     bytes = Array(chars.utf8)
                 }
+            } else if !chars.isEmpty {
+                bytes = Array(chars.utf8)
             }
         }
 
         if !bytes.isEmpty {
-            // Clear selection on typing
+            let hexBytes = bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+            Self.debugLog("[Key] keyCode=\(keyCode) chars='\(chars)' modifiers=0x\(String(modifiers.rawValue, radix: 16)) bytes=\(hexBytes) altScreen=\(useAlternateScreen ? 1 : 0)")
             selectionStart = nil
             selectionEnd = nil
             pier_terminal_write(handle, bytes, UInt(bytes.count))
+        } else {
+            Self.debugLog("[Key] keyCode=\(keyCode) chars='\(chars)' modifiers=0x\(String(modifiers.rawValue, radix: 16)) -> NO BYTES (dropped)")
         }
     }
 
@@ -2040,7 +2427,34 @@ class TerminalNSView: NSView {
     // MARK: - Scroll
 
     override func scrollWheel(with event: NSEvent) {
-        super.scrollWheel(with: event)
+        if useAlternateScreen {
+            // In alternate screen mode: convert scroll events to arrow key presses
+            // sent to the PTY, so nano/vim/less can handle them
+            guard let handle = terminalHandle else { return }
+            let delta = event.scrollingDeltaY
+            guard abs(delta) > 0.5 else { return }
+
+            // Calculate number of lines to scroll
+            let lines: Int
+            if event.hasPreciseScrollingDeltas {
+                // Trackpad: delta is in points, convert to lines
+                lines = max(1, Int(abs(delta) / cellHeight))
+            } else {
+                // Mouse wheel: delta is in lines
+                lines = max(1, Int(abs(delta)))
+            }
+
+            let arrowBytes: [UInt8] = delta > 0
+                ? (applicationCursorKeys ? [0x1B, 0x4F, 0x41] : [0x1B, 0x5B, 0x41])  // Up
+                : (applicationCursorKeys ? [0x1B, 0x4F, 0x42] : [0x1B, 0x5B, 0x42])  // Down
+
+            for _ in 0..<lines {
+                pier_terminal_write(handle, arrowBytes, UInt(arrowBytes.count))
+            }
+        } else {
+            // Normal mode: standard NSScrollView scrolling
+            super.scrollWheel(with: event)
+        }
     }
 
     // MARK: - Resize
@@ -2244,7 +2658,19 @@ class TerminalNSView: NSView {
                 ptyRows: ptyRows,
                 savedCursorX: savedCursorX,
                 savedCursorY: savedCursorY,
-                currentAttr: currentAttr
+                currentAttr: currentAttr,
+                useAlternateScreen: useAlternateScreen,
+                savedMainScreen: savedMainScreen,
+                savedMainScrollback: savedMainScrollback,
+                savedMainScreenWrapped: savedMainScreenWrapped,
+                savedMainScrollbackWrapped: savedMainScrollbackWrapped,
+                savedMainCursorX: savedMainCursorX,
+                savedMainCursorY: savedMainCursorY,
+                savedMainAttr: savedMainAttr,
+                applicationCursorKeys: applicationCursorKeys,
+                cursorHidden: cursorHidden,
+                scrollRegionTop: scrollRegionTop,
+                scrollRegionBottom: scrollRegionBottom
             )
             TerminalNSView.ptyCache[sessionId] = entry
         }
