@@ -88,6 +88,10 @@ struct BranchGraphView: View {
     @State private var resetMode = "mixed" // soft, mixed, hard
     @State private var showDiffSheet = false
     @State private var diffOutput = ""
+    @State private var diffFiles: [String] = []           // changed file paths for compare
+    @State private var selectedDiffFile: String?          // currently selected file
+    @State private var diffFileContent: String = ""        // diff content of selected file
+    @State private var diffCommitHash: String = ""         // commit hash being compared
     @State private var showEditMessageDialog = false
     @State private var editMessageText = ""
 
@@ -161,34 +165,107 @@ struct BranchGraphView: View {
             }
         }
         .sheet(isPresented: $showDiffSheet) {
+            HSplitView {
+                // Left: changed file list
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(LS("git.ctx.changedFiles")).font(.headline)
+                        Spacer()
+                        Text("\(diffFiles.count)").font(.caption).foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    Divider()
+                    List(diffFiles, id: \.self, selection: $selectedDiffFile) { file in
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.text")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text((file as NSString).lastPathComponent)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .listStyle(.sidebar)
+                }
+                .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
+
+                // Right: diff view for selected file
+                VStack(spacing: 0) {
+                    HStack {
+                        if let file = selectedDiffFile {
+                            Text(file).font(.system(size: 11, design: .monospaced)).lineLimit(1)
+                        } else {
+                            Text(LS("git.ctx.selectFile")).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button(LS("git.ctx.close")) { showDiffSheet = false }
+                            .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    Divider()
+                    if !diffFileContent.isEmpty {
+                        DiffView(diffText: diffFileContent)
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "arrow.left.circle")
+                                .font(.system(size: 30))
+                                .foregroundColor(.secondary)
+                            Text(LS("git.ctx.selectFileHint"))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+            }
+            .frame(minWidth: 900, minHeight: 600)
+            .onChange(of: selectedDiffFile) {
+                guard let file = selectedDiffFile else { diffFileContent = ""; return }
+                Task {
+                    let result = await gitViewModel.runGitFull(["diff", diffCommitHash, "--", file])
+                    diffFileContent = result.combinedOutput
+                }
+            }
+        }
+        .sheet(isPresented: $showEditMessageDialog) {
             VStack(spacing: 0) {
                 HStack {
-                    Text(LS("git.ctx.compareWithLocal")).font(.headline)
+                    Text(LS("git.ctx.editMessage")).font(.headline)
                     Spacer()
-                    Button(LS("git.ctx.close")) { showDiffSheet = false }
-                        .buttonStyle(.plain)
                 }
-                .padding()
-                Divider()
-                ScrollView {
-                    Text(diffOutput)
-                        .font(.system(size: 11, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+
+                TextEditor(text: $editMessageText)
+                    .font(.system(size: 12, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .cornerRadius(6)
+                    .padding(.horizontal, 16)
+
+                HStack {
+                    Spacer()
+                    Button(LS("git.ctx.cancel")) {
+                        editMessageText = ""
+                        showEditMessageDialog = false
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    Button(LS("git.ctx.save")) {
+                        guard let node = ctxTargetNode, !editMessageText.isEmpty else { return }
+                        showEditMessageDialog = false
+                        Task { await performEditMessage(hash: node.id, newMessage: editMessageText) }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(editMessageText.isEmpty)
                 }
+                .padding(16)
             }
-            .frame(minWidth: 700, minHeight: 500)
-        }
-        .alert(LS("git.ctx.editMessage"), isPresented: $showEditMessageDialog) {
-            TextField(LS("git.ctx.messagePlaceholder"), text: $editMessageText)
-            Button(LS("git.ctx.save")) {
-                guard let node = ctxTargetNode, !editMessageText.isEmpty else { return }
-                Task { await performEditMessage(hash: node.id, newMessage: editMessageText) }
-            }
-            Button(LS("git.ctx.cancel"), role: .cancel) { editMessageText = "" }
-        } message: {
-            Text(LS("git.ctx.editMessageMsg"))
+            .frame(minWidth: 500, minHeight: 300)
         }
         .onChange(of: gitViewModel.graphGeneration) {
             // Full reload: recalculate graph width from scratch
@@ -757,8 +834,12 @@ extension BranchGraphView {
         // ── 5. Edit commit message ──
         Button(LS("git.ctx.editMessage")) {
             ctxTargetNode = node
-            editMessageText = node.message
-            showEditMessageDialog = true
+            Task {
+                // Fetch full commit message (subject + body) via git log
+                let result = await gitViewModel.runGitFull(["log", "-1", "--format=%B", node.id])
+                editMessageText = result.combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                showEditMessageDialog = true
+            }
         }
         .disabled(!isUnpushed)
 
@@ -812,9 +893,20 @@ extension BranchGraphView {
     }
 
     private func performCompareWithLocal(hash: String) async {
-        let result = await gitViewModel.runGitFull(["diff", hash])
-        diffOutput = result.combinedOutput.isEmpty ? LS("git.ctx.noDifferences") : result.combinedOutput
-        showDiffSheet = true
+        // Get list of changed files
+        let nameResult = await gitViewModel.runGitFull(["diff", "--name-only", hash])
+        let files = nameResult.combinedOutput.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+        diffFiles = files
+        diffCommitHash = hash
+        selectedDiffFile = nil
+        diffFileContent = ""
+        if files.isEmpty {
+            gitViewModel.setOperationStatus(.success(message: LS("git.ctx.noDifferences")))
+        } else {
+            showDiffSheet = true
+            // Auto-select first file
+            selectedDiffFile = files.first
+        }
     }
 
     private func performReset(to hash: String, mode: String) async {

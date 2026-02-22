@@ -462,6 +462,9 @@
 "git.ctx.save" = "Save";
 "git.ctx.messagePlaceholder" = "New commit message";
 "git.ctx.editMessageMsg" = "Enter new commit message";
+"git.ctx.changedFiles" = "Changed Files";
+"git.ctx.selectFile" = "Select a file to view diff";
+"git.ctx.selectFileHint" = "Select a file from the left panel";
 
 // MARK: - Batch 6: PostgreSQL
 

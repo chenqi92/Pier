@@ -462,6 +462,9 @@
 "git.ctx.save" = "保存";
 "git.ctx.messagePlaceholder" = "新提交消息";
 "git.ctx.editMessageMsg" = "输入新的提交消息";
+"git.ctx.changedFiles" = "变更的文件";
+"git.ctx.selectFile" = "选择文件查看差异";
+"git.ctx.selectFileHint" = "从左侧面板选择文件";
 
 // MARK: - Batch 6: PostgreSQL
 
