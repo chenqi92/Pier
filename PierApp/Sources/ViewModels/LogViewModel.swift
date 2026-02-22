@@ -50,6 +50,43 @@ struct LogLine: Identifiable {
     let message: String
 }
 
+/// Represents a running process detected on the remote server.
+struct RunningProcess: Identifiable, Hashable {
+    let id: String  // PID or container ID
+    let pid: String
+    let command: String
+    let type: ProcessType
+    let displayName: String
+
+    enum ProcessType: String {
+        case java = "java"
+        case python = "python"
+        case node = "node"
+        case docker = "docker"
+        case other = "other"
+
+        var icon: String {
+            switch self {
+            case .java:   return "cup.and.saucer.fill"
+            case .python: return "chevron.left.forwardslash.chevron.right"
+            case .node:   return "diamond.fill"
+            case .docker: return "shippingbox.fill"
+            case .other:  return "gearshape.fill"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .java:   return .orange
+            case .python: return .yellow
+            case .node:   return .green
+            case .docker: return .blue
+            case .other:  return .secondary
+            }
+        }
+    }
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -61,7 +98,10 @@ class LogViewModel: ObservableObject {
     @Published var allLines: [LogLine] = []
     @Published var filteredLines: [LogLine] = []
     @Published var isRemoteMode = false
-    @Published var remoteLogFiles: [String] = []
+    @Published var cwdLogFiles: [String] = []          // Full paths
+    @Published var cwdLogDisplayNames: [String] = []   // Relative/short names for UI
+    @Published var runningProcesses: [RunningProcess] = []
+    @Published var activeProcess: RunningProcess? = nil
     @Published var isRegexFilter = false
     @Published var regexError: String? = nil
 
@@ -106,6 +146,7 @@ class LogViewModel: ObservableObject {
     func loadFile(_ path: String) {
         // Stop any existing monitor
         fileMonitor?.cancel()
+        activeProcess = nil
 
         logFilePath = path
         allLines = []
@@ -301,6 +342,7 @@ class LogViewModel: ObservableObject {
         // Stop local monitoring
         fileMonitor?.cancel()
         remotePollingTimer?.invalidate()
+        activeProcess = nil
 
         isRemoteMode = true
         logFilePath = path
@@ -308,7 +350,7 @@ class LogViewModel: ObservableObject {
         remoteLineCount = 0
 
         Task {
-            let (exitCode, stdout) = await sm.exec("tail -n 500 '\(path)'")
+            let (exitCode, stdout) = await sm.exec("tail -n 500 '\(path)'", timeout: 60)
             if exitCode == 0 {
                 appendText(stdout)
                 remoteLineCount = allLines.count
@@ -333,39 +375,235 @@ class LogViewModel: ObservableObject {
         }
     }
 
-    /// Discover log files on the remote server.
-    /// Searches the current terminal CWD first, then /var/log and /opt.
+    /// Discover log files in the current terminal CWD only.
     func discoverRemoteLogFiles(cwdPath: String? = nil) {
         guard let sm = serviceManager, sm.isConnected else { return }
 
         Task {
-            var allPaths: [String] = []
+            var paths: [String] = []
 
-            // 1. Search the current terminal working directory first
             let searchDir = cwdPath ?? currentRemoteCwd
             if let cwd = searchDir, !cwd.isEmpty {
+                // Find *.log and *.log.* recursively up to 3 levels
                 let (ec1, stdout1) = await sm.exec(
-                    "find \(shellEscape(cwd)) -maxdepth 3 -name '*.log' -type f 2>/dev/null | head -20"
+                    "find \(shellEscape(cwd)) -maxdepth 3 \\( -name '*.log' -o -name '*.log.*' \\) -type f 2>/dev/null | head -50",
+                    timeout: 15
                 )
                 if ec1 == 0 {
-                    let cwdLogs = stdout1.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
-                    allPaths.append(contentsOf: cwdLogs)
+                    let found = stdout1.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+                    paths.append(contentsOf: found)
+                }
+                // Also list files directly in CWD (non-directories)
+                let (ec2, stdout2) = await sm.exec(
+                    "ls -1p \(shellEscape(cwd)) 2>/dev/null | grep -v '/'",
+                    timeout: 10
+                )
+                if ec2 == 0 {
+                    let directFiles = stdout2.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+                    let existing = Set(paths.map { ($0 as NSString).lastPathComponent })
+                    for file in directFiles {
+                        if !existing.contains(file) {
+                            let fullPath = (cwd as NSString).appendingPathComponent(file)
+                            paths.append(fullPath)
+                        }
+                    }
                 }
             }
 
-            // 2. Then search standard log directories
-            let (ec2, stdout2) = await sm.exec(
-                "find /var/log -name '*.log' -type f 2>/dev/null | head -30; " +
-                "find /opt -name '*.log' -type f -maxdepth 4 2>/dev/null | head -20"
-            )
-            if ec2 == 0 {
-                let stdLogs = stdout2.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
-                // Add only those not already discovered from CWD
-                let existing = Set(allPaths)
-                allPaths.append(contentsOf: stdLogs.filter { !existing.contains($0) })
+            cwdLogFiles = paths
+            // Build display names: relative to CWD
+            let cwd = searchDir ?? currentRemoteCwd ?? ""
+            cwdLogDisplayNames = paths.map { path in
+                if !cwd.isEmpty && path.hasPrefix(cwd + "/") {
+                    return String(path.dropFirst(cwd.count + 1))
+                }
+                return (path as NSString).lastPathComponent
             }
 
-            remoteLogFiles = allPaths
+            // Also discover running processes
+            discoverRunningProcesses(cwdPath: cwdPath)
+        }
+    }
+
+    // MARK: - Running Process Discovery
+
+    /// Discover running processes related to the current CWD.
+    /// Detects java/jar, python, node, and docker containers.
+    func discoverRunningProcesses(cwdPath: String? = nil) {
+        guard let sm = serviceManager, sm.isConnected else { return }
+
+        Task {
+            var processes: [RunningProcess] = []
+            let cwd = cwdPath ?? currentRemoteCwd ?? ""
+
+            // 1. Detect java/python/node processes related to CWD
+            if !cwd.isEmpty {
+                let (ec, stdout) = await sm.exec(
+                    "ps aux 2>/dev/null | grep -E '(java|python|node|ruby|go run)' | grep -v grep | grep \(shellEscape(cwd))",
+                    timeout: 15
+                )
+                if ec == 0 && !stdout.isEmpty {
+                    let lines = stdout.split(separator: "\n").map(String.init)
+                    for line in lines {
+                        let parts = line.split(separator: " ", maxSplits: 10, omittingEmptySubsequences: true)
+                        guard parts.count >= 11 else { continue }
+                        let pid = String(parts[1])
+                        let cmd = parts[10...].joined(separator: " ")
+                        let type = detectProcessType(cmd)
+                        let name = abbreviateCommand(cmd, cwd: cwd)
+                        processes.append(RunningProcess(
+                            id: pid,
+                            pid: pid,
+                            command: cmd,
+                            type: type,
+                            displayName: name
+                        ))
+                    }
+                }
+            }
+
+            // 2. Also search without CWD filter for common server processes
+            if processes.isEmpty && !cwd.isEmpty {
+                // Broaden: find processes whose working directory matches CWD
+                let (ec2, stdout2) = await sm.exec(
+                    "ls -l /proc/*/cwd 2>/dev/null | grep \(shellEscape(cwd)) | awk -F'/' '{print $3}'",
+                    timeout: 15
+                )
+                if ec2 == 0 && !stdout2.isEmpty {
+                    let pids = stdout2.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+                    for pid in pids.prefix(10) {
+                        let (ec3, cmdline) = await sm.exec("cat /proc/\(pid)/cmdline 2>/dev/null | tr '\\0' ' '", timeout: 10)
+                        if ec3 == 0 && !cmdline.isEmpty {
+                            let cmd = cmdline.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let type = detectProcessType(cmd)
+                            // Skip shell/sshd/system processes
+                            if type == .other && !cmd.contains("python") && !cmd.contains("node") { continue }
+                            let name = abbreviateCommand(cmd, cwd: cwd)
+                            if !processes.contains(where: { $0.pid == pid }) {
+                                processes.append(RunningProcess(
+                                    id: pid,
+                                    pid: pid,
+                                    command: cmd,
+                                    type: type,
+                                    displayName: name
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Detect docker containers
+            let (ecDocker, dockerOut) = await sm.exec(
+                "docker ps --format '{{.ID}}\\t{{.Names}}\\t{{.Image}}\\t{{.Status}}' 2>/dev/null",
+                timeout: 15
+            )
+            if ecDocker == 0 && !dockerOut.isEmpty {
+                let lines = dockerOut.split(separator: "\n").map(String.init)
+                for line in lines {
+                    let parts = line.split(separator: "\t", maxSplits: 3).map(String.init)
+                    guard parts.count >= 3 else { continue }
+                    let containerId = parts[0]
+                    let name = parts[1]
+                    let image = parts[2]
+                    processes.append(RunningProcess(
+                        id: "docker-\(containerId)",
+                        pid: containerId,
+                        command: "docker: \(image)",
+                        type: .docker,
+                        displayName: name
+                    ))
+                }
+            }
+
+            runningProcesses = processes
+        }
+    }
+
+    /// Detect the type of a running process from its command line.
+    private func detectProcessType(_ cmd: String) -> RunningProcess.ProcessType {
+        let lower = cmd.lowercased()
+        if lower.contains("java") || lower.contains(".jar") { return .java }
+        if lower.contains("python") { return .python }
+        if lower.contains("node") { return .node }
+        if lower.contains("docker") { return .docker }
+        return .other
+    }
+
+    /// Abbreviate a long command line for display.
+    private func abbreviateCommand(_ cmd: String, cwd: String) -> String {
+        var display = cmd
+        // Remove CWD prefix for brevity
+        if !cwd.isEmpty {
+            display = display.replacingOccurrences(of: cwd + "/", with: "")
+            display = display.replacingOccurrences(of: cwd, with: ".")
+        }
+        // Truncate if too long
+        if display.count > 60 {
+            display = String(display.prefix(57)) + "..."
+        }
+        return display
+    }
+
+    /// Tail the stdout/stderr of a running process in real time.
+    func tailProcessLog(_ process: RunningProcess) {
+        guard let sm = serviceManager, sm.isConnected else { return }
+
+        // Stop any existing monitoring
+        fileMonitor?.cancel()
+        remotePollingTimer?.invalidate()
+
+        isRemoteMode = true
+        activeProcess = process
+        allLines = []
+        remoteLineCount = 0
+
+        let tailCommand: String
+        if process.type == .docker {
+            // Docker: use docker logs
+            tailCommand = "docker logs --tail 500 \(process.pid) 2>&1"
+            logFilePath = "docker://\(process.displayName)"
+        } else {
+            // Regular process: try /proc/<pid>/fd/1 (stdout) + fd/2 (stderr)
+            // Fall back to strace if /proc fd is not readable
+            tailCommand = "tail -n 500 /proc/\(process.pid)/fd/1 2>/dev/null || " +
+                          "strace -p \(process.pid) -e trace=write -s 1024 2>&1 | head -500"
+            logFilePath = "process://\(process.pid)"
+        }
+
+        Task {
+            let (exitCode, stdout) = await sm.exec(tailCommand, timeout: 60)
+            if exitCode == 0 || !stdout.isEmpty {
+                appendText(stdout)
+                remoteLineCount = allLines.count
+                startProcessPolling(process)
+            }
+        }
+    }
+
+    /// Periodically poll process output for new lines (every 2 seconds).
+    private func startProcessPolling(_ process: RunningProcess) {
+        remotePollingTimer?.invalidate()
+        remotePollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let sm = self.serviceManager, sm.isConnected else { return }
+                guard self.activeProcess?.id == process.id else { return }
+
+                let skipLines = self.remoteLineCount
+                let pollCommand: String
+                if process.type == .docker {
+                    // Docker: get new lines since last poll
+                    pollCommand = "docker logs --tail 100 \(process.pid) 2>&1 | tail -n +\(skipLines + 1)"
+                } else {
+                    pollCommand = "tail -n +\(skipLines + 1) /proc/\(process.pid)/fd/1 2>/dev/null"
+                }
+
+                let (exitCode, stdout) = await sm.exec(pollCommand)
+                if exitCode == 0 && !stdout.isEmpty {
+                    self.appendText(stdout)
+                    self.remoteLineCount = self.allLines.count
+                }
+            }
         }
     }
 

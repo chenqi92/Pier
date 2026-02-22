@@ -75,27 +75,66 @@ struct LogViewerView: View {
                     .cornerRadius(3)
             }
 
+            if viewModel.activeProcess != nil {
+                Text(LS("log.processLog"))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.purple)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.purple.opacity(0.15))
+                    .cornerRadius(3)
+            }
+
             Spacer()
 
-            // Remote logs dropdown
-            if !viewModel.remoteLogFiles.isEmpty {
+            // Log files dropdown (CWD only)
+            if !viewModel.cwdLogFiles.isEmpty {
                 Menu {
-                    ForEach(viewModel.remoteLogFiles, id: \.self) { path in
-                        Button((path as NSString).lastPathComponent) {
+                    ForEach(Array(zip(viewModel.cwdLogFiles, viewModel.cwdLogDisplayNames)), id: \.0) { path, displayName in
+                        Button(displayName) {
                             viewModel.loadRemoteFile(path)
                         }
                     }
                 } label: {
-                    Image(systemName: "server.rack")
+                    Image(systemName: "doc.text")
                         .font(.caption)
+                        .frame(width: 14, height: 14)
                 }
                 .menuStyle(.borderlessButton)
-                .frame(width: 20)
+                .fixedSize()
                 .help(LS("log.remoteLogs"))
             }
 
+            // Running processes dropdown
+            if !viewModel.runningProcesses.isEmpty {
+                Menu {
+                    ForEach(viewModel.runningProcesses) { process in
+                        Button(action: {
+                            viewModel.tailProcessLog(process)
+                        }) {
+                            Label {
+                                VStack(alignment: .leading) {
+                                    Text(process.displayName)
+                                    Text("PID: \(process.pid)")
+                                        .font(.caption2)
+                                }
+                            } icon: {
+                                Image(systemName: process.type.icon)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "play.circle")
+                        .font(.caption)
+                        .frame(width: 14, height: 14)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(LS("log.processes"))
+            }
+
             Button(action: { viewModel.discoverRemoteLogFiles() }) {
-                Image(systemName: "magnifyingglass.circle")
+                Image(systemName: "arrow.clockwise")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
@@ -221,18 +260,19 @@ struct LogViewerView: View {
     }
 
     private func logLineView(_ line: LogLine) -> some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: 4) {
             // Line number
             Text("\(line.lineNumber)")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.secondary)
-                .frame(width: 30, alignment: .trailing)
+                .frame(width: 28, alignment: .trailing)
 
-            // Timestamp
+            // Timestamp (show time part only to save space)
             if let timestamp = line.timestamp {
-                Text(timestamp)
+                Text(shortenTimestamp(timestamp))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.gray)
+                    .frame(width: 65, alignment: .leading)
             }
 
             // Level badge
@@ -240,11 +280,12 @@ struct LogViewerView: View {
                 Text(level.badge)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundColor(level.color)
-                    .frame(width: 32)
+                    .frame(width: 28)
             }
 
-            // Message
-            Text(highlightedText(line.message))
+            // Message (with optional JSON formatting)
+            let displayText = viewModel.isJsonMode ? viewModel.formatJsonLine(line.message) : line.message
+            Text(highlightedText(displayText))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(line.level?.textColor ?? Color(nsColor: .labelColor))
                 .textSelection(.enabled)
@@ -253,6 +294,19 @@ struct LogViewerView: View {
         .background(line.level == .error
             ? Color.red.opacity(0.05)
             : Color.clear)
+    }
+
+    /// Shorten timestamp to time-only portion (e.g. "21:44:04.816")
+    /// Strips the date prefix if present (e.g. "2026-02-22 21:44:04.816" → "21:44:04.816")
+    private func shortenTimestamp(_ ts: String) -> String {
+        // If timestamp contains date (yyyy-mm-dd), extract time portion
+        if ts.count > 12, let spaceIdx = ts.firstIndex(where: { $0 == "T" || $0 == " " }) {
+            let timeStart = ts.index(after: spaceIdx)
+            if timeStart < ts.endIndex {
+                return String(ts[timeStart...])
+            }
+        }
+        return ts
     }
 
     private func highlightedText(_ text: String) -> AttributedString {
@@ -269,7 +323,18 @@ struct LogViewerView: View {
 
     private var logStatusBar: some View {
         HStack {
-            if let path = viewModel.logFilePath {
+            if let process = viewModel.activeProcess {
+                Image(systemName: process.type.icon)
+                    .font(.system(size: 9))
+                    .foregroundColor(process.type.color)
+                Text(process.displayName)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Text("PID: \(process.pid)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.secondary)
+            } else if let path = viewModel.logFilePath {
                 Image(systemName: "doc.text")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)

@@ -39,7 +39,7 @@ class TerminalViewModel: ObservableObject {
             .store(in: &cancellables)
 
         // Listen for SSH auth success (user typed password manually in terminal)
-        // Retry the per-tab service manager connection using key-based auth.
+        // The ControlMaster socket will now be available for the right panel.
         NotificationCenter.default.publisher(for: .terminalSSHAuthSuccess)
             .sink { [weak self] notification in
                 guard let self = self,
@@ -48,22 +48,9 @@ class TerminalViewModel: ObservableObject {
                       let sm = session.remoteServiceManager,
                       !sm.isConnected && !sm.isConnecting,
                       let profile = session.connectedProfile else { return }
-                // Retry with key-based auth (no password available)
+                // ControlMaster socket should now be ready — trigger connection
                 Task { @MainActor in
-                    let home = NSHomeDirectory()
-                    let keyFiles = [
-                        "\(home)/.ssh/id_rsa",
-                        "\(home)/.ssh/id_ed25519",
-                        "\(home)/.ssh/id_ecdsa",
-                    ]
-                    for keyPath in keyFiles {
-                        if FileManager.default.fileExists(atPath: keyPath) {
-                            sm.connectWithKey(host: profile.host, port: profile.port, username: profile.username, keyPath: keyPath)
-                            return
-                        }
-                    }
-                    // No key files found — show password prompt pattern in right panel
-                    // The terminalSSHDetected handler in RightPanelView will handle this
+                    sm.connect(host: profile.host, port: profile.port, username: profile.username)
                 }
             }
             .store(in: &cancellables)

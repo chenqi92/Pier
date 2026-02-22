@@ -246,6 +246,13 @@ struct NewTabChooserView: View {
         args.append("\(profile.port)")
         args.append("-o")
         args.append("StrictHostKeyChecking=no")
+        // ControlMaster: allow the right panel to multiplex over this connection
+        args.append("-o")
+        args.append("ControlMaster=auto")
+        args.append("-o")
+        args.append("ControlPath=/tmp/pier-ssh-%r@%h:%p")
+        args.append("-o")
+        args.append("ControlPersist=600")
 
         if profile.authType == .keyFile, let keyPath = profile.keyFilePath {
             args.append("-i")

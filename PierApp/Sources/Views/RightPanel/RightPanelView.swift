@@ -107,52 +107,12 @@ struct RightPanelView: View {
                   let username = info["username"] else { return }
             let port = UInt16(info["port"] ?? "22") ?? 22
 
-            // Find matching saved profile by host
-            if let profile = serviceManager.savedProfiles.first(where: {
-                $0.host == host && $0.username == username && $0.port == port
-            }) ?? serviceManager.savedProfiles.first(where: { $0.host == host }) {
-                // Load password ONCE from Keychain
-                let password: String? = profile.authType == .password
-                    ? (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)"))
-                    : nil
+            // Start waiting for the ControlMaster socket.
+            // The terminal SSH process will create the socket once authenticated.
+            serviceManager.connect(host: host, port: port, username: username)
 
-                // Connect right panel with pre-loaded password (no extra Keychain access)
-                serviceManager.connect(profile: profile, preloadedPassword: password)
-
-                // Auto-type password into terminal
-                if let password = password, !password.isEmpty {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        NotificationCenter.default.post(
-                            name: .terminalInput,
-                            object: ["text": password + "\n"]
-                        )
-                    }
-                }
-                return
-            }
-
-            // Store detected info for potential password fallback
-            detectedSSHHost = host
-            detectedSSHUser = username
-            detectedSSHPort = port
-            sshPasswordInput = ""
-
-            // Auto-try SSH key files
-            let home = NSHomeDirectory()
-            let keyFiles = [
-                "\(home)/.ssh/id_rsa",
-                "\(home)/.ssh/id_ed25519",
-                "\(home)/.ssh/id_ecdsa"
-            ]
-            if let keyPath = keyFiles.first(where: { FileManager.default.fileExists(atPath: $0) }) {
-                serviceManager.connectWithKey(host: host, port: port, username: username, keyPath: keyPath)
-            }
-        }
-        // If key-based auth succeeded, clear the password prompt
-        .onChange(of: serviceManager.isConnected) { _, connected in
-            if connected && detectedSSHHost != nil {
-                detectedSSHHost = nil
-            }
+            // Clear any previous inline SSH prompt
+            detectedSSHHost = nil
         }
     }
 

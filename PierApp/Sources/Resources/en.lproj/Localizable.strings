@@ -272,6 +272,10 @@
 "log.discoverFiles" = "Discover Log Files";
 "log.noRemoteLogs" = "No remote log files found";
 "log.remote" = "(Remote)";
+"log.cwdLogs" = "Current Directory";
+"log.systemLogs" = "System Logs";
+"log.processes" = "Running Processes";
+"log.processLog" = "Process Log";
 
 /* ═══════════════════════════════════════
    Diff View

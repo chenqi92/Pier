@@ -272,6 +272,10 @@
 "log.discoverFiles" = "发现日志文件";
 "log.noRemoteLogs" = "未找到远程日志文件";
 "log.remote" = "（远程）";
+"log.cwdLogs" = "当前目录";
+"log.systemLogs" = "系统日志";
+"log.processes" = "运行进程";
+"log.processLog" = "进程日志";
 
 /* ═══════════════════════════════════════
    差异视图

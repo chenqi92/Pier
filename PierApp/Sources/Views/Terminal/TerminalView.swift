@@ -2352,7 +2352,12 @@ class TerminalNSView: NSView {
                     bytes = Array(chars.utf8)
                 }
             } else if !chars.isEmpty {
-                bytes = Array(chars.utf8)
+                // Normalize fullwidth CJK punctuation to ASCII halfwidth equivalents.
+                // Chinese/Japanese input methods often produce fullwidth versions of
+                // shell-critical characters (e.g. ｜ instead of |), which shells cannot
+                // interpret as operators.
+                let normalized = Self.normalizeFullwidthChars(chars)
+                bytes = Array(normalized.utf8)
             }
         }
 
@@ -2365,6 +2370,50 @@ class TerminalNSView: NSView {
         } else {
             Self.debugLog("[Key] keyCode=\(keyCode) chars='\(chars)' modifiers=0x\(String(modifiers.rawValue, radix: 16)) -> NO BYTES (dropped)")
         }
+    }
+
+    // MARK: - Fullwidth → Halfwidth Normalization
+
+    /// Map of fullwidth CJK punctuation to their ASCII halfwidth equivalents.
+    /// These characters are commonly produced by Chinese/Japanese input methods
+    /// and will break shell commands if sent as-is.
+    private static let fullwidthToHalfwidth: [Character: Character] = [
+        "｜": "|",   // pipe
+        "＞": ">",   // redirect
+        "＜": "<",   // redirect
+        "；": ";",   // command separator
+        "＆": "&",   // background / logical AND
+        "（": "(",   // subshell
+        "）": ")",
+        "｛": "{",   // brace expansion
+        "｝": "}",
+        "［": "[",   // test
+        "］": "]",
+        "＇": "'",   // single quote
+        "＂": "\"",  // double quote
+        "～": "~",   // home directory
+        "＄": "$",   // variable
+        "＃": "#",   // comment
+        "＊": "*",   // glob
+        "？": "?",   // glob
+        "！": "!",   // history
+        "＝": "=",   // assignment
+        "＋": "+",   // arithmetic
+        "＠": "@",   // user@host
+        "＼": "\\",  // escape
+        "／": "/",   // path separator
+        "：": ":",   // PATH separator
+        "．": ".",   // hidden file / current dir
+        "，": ",",   // argument separator
+    ]
+
+    /// Replace fullwidth CJK characters with their halfwidth ASCII equivalents.
+    static func normalizeFullwidthChars(_ input: String) -> String {
+        // Fast path: if no characters need conversion, return as-is
+        guard input.contains(where: { fullwidthToHalfwidth[$0] != nil }) else {
+            return input
+        }
+        return String(input.map { fullwidthToHalfwidth[$0] ?? $0 })
     }
 
     // MARK: - SSH Command Detection

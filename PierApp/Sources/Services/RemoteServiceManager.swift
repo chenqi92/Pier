@@ -1,5 +1,4 @@
 import Foundation
-import CPierCore
 
 /// A service detected on a remote server via SSH.
 struct DetectedService: Codable, Identifiable {
@@ -45,9 +44,10 @@ struct DetectedService: Codable, Identifiable {
 
 /// Manages SSH connections and detected remote services.
 ///
-/// When connected to a server, this manager probes for installed services
-/// (MySQL, Redis, PostgreSQL, Docker) and publishes the results so the
-/// right panel can dynamically show only the available tool tabs.
+/// Uses SSH ControlMaster multiplexing: the terminal PTY establishes the
+/// SSH connection with ControlMaster=auto, and this manager piggybacks
+/// on the same TCP connection via the control socket to execute commands
+/// and detect services.
 @MainActor
 class RemoteServiceManager: ObservableObject, Identifiable {
 
@@ -71,10 +71,12 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     // MARK: - Private
 
-    /// Opaque handle to the Rust SSH session.
-    private var sshHandle: OpaquePointer?
+    /// SSH ControlMaster for executing commands via the terminal's connection.
+    private var controlMaster: SSHControlMaster?
     /// Currently connected profile ID (if any).
     private var currentProfileId: UUID?
+    /// Task that polls for ControlMaster socket readiness.
+    private var socketWaitTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -83,151 +85,63 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         savedGroups = ServerGroup.loadAll()
     }
 
-    // MARK: - Connection
+    // MARK: - Connection (via ControlMaster)
 
     /// Connect using a saved profile.
     /// - Parameters:
     ///   - profile: The connection profile.
-    ///   - preloadedPassword: Optional pre-loaded password to avoid extra Keychain access.
+    ///   - preloadedPassword: Optional pre-loaded password (unused in new arch, kept for API compat).
     func connect(profile: ConnectionProfile, preloadedPassword: String? = nil, keychainDenied: Bool = false) {
         currentProfileId = profile.id
-        if profile.authType == .keyFile, let keyPath = profile.keyFilePath {
-            connectWithKey(host: profile.host, port: profile.port, username: profile.username, keyPath: keyPath)
-        } else {
-            // Use pre-loaded password if provided; skip Keychain if denied earlier
-            let password: String
-            if let pwd = preloadedPassword {
-                password = pwd
-            } else if keychainDenied {
-                // Keychain was denied — don't attempt SSH with empty password
-                // (would block for SSH timeout). Wait for SSH auth success in terminal.
-                connectionStatus = ""
-                return
-            } else {
-                password = (try? KeychainService.shared.load(key: "ssh_\(profile.id.uuidString)")) ?? ""
-            }
-            connect(host: profile.host, port: profile.port, username: profile.username, password: password)
-        }
+        connectViaControlMaster(host: profile.host, port: profile.port, username: profile.username)
     }
 
     /// Retry connection with a specific password (e.g. after user typed it in terminal).
     func retryConnect(profile: ConnectionProfile, password: String) {
-        // Disconnect any failed / partial connection first
-        if sshHandle != nil { disconnect() }
+        if controlMaster != nil { disconnect() }
         currentProfileId = profile.id
-        connect(host: profile.host, port: profile.port, username: profile.username, password: password)
+        connectViaControlMaster(host: profile.host, port: profile.port, username: profile.username)
     }
 
-    /// Connect to a remote server and detect services.
-    func connect(host: String, port: UInt16, username: String, password: String) {
-        guard !isConnecting else { return }
-
-        isConnecting = true
-        print("[SSH] connect(host:\(host) port:\(port) user:\(username)) starting")
-        connectionStatus = String(localized: "ssh.connecting")
-        errorMessage = nil
-        detectedServices = []
-
-        let connectTimeout: TimeInterval = 15
-
-        Task {
-            let handle: OpaquePointer? = await withCheckedContinuation { continuation in
-                let guard_ = ContinuationGuard()
-
-                // Fire-and-forget: blocking FFI runs on a GCD thread.
-                // Using DispatchQueue instead of Task.detached because Tokio's
-                // reactor thread-local can leak across Swift cooperative threads,
-                // causing "no reactor running" panics on subsequent block_on() calls.
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let h = host.withCString { hostC in
-                        username.withCString { userC in
-                            password.withCString { passC in
-                                print("[SSH] calling pier_ssh_connect...")
-                                let result = pier_ssh_connect(hostC, port, userC, 0, passC)
-                                print("[SSH] pier_ssh_connect returned: \(result == nil ? "nil" : "handle")")
-                                return result
-                            }
-                        }
-                    }
-                    Task { @MainActor in
-                        if await guard_.tryResume() {
-                            continuation.resume(returning: h)
-                        }
-                    }
-                }
-
-                // Timeout: resume with nil if FFI hasn't finished
-                Task {
-                    try? await Task.sleep(nanoseconds: UInt64(connectTimeout * 1_000_000_000))
-                    if await guard_.tryResume() {
-                        continuation.resume(returning: nil)
-                    }
-                }
-            }
-
-            if let handle {
-                print("[SSH] connection succeeded, detecting services...")
-                self.sshHandle = handle
-                self.isConnected = true
-                self.isConnecting = false
-                self.connectedHost = "\(host):\(port)"
-                self.connectionStatus = String(localized: "ssh.connected")
-                self.detectServices()
-            } else {
-                print("[SSH] connection failed or timed out")
-                self.isConnected = false
-                self.isConnecting = false
-                self.connectionStatus = String(localized: "ssh.disconnected")
-                self.errorMessage = String(localized: "ssh.connectFailed")
-            }
-        }
+    /// Connect to a remote server by waiting for the ControlMaster socket.
+    /// The terminal SSH process creates the socket after successful authentication.
+    func connect(host: String, port: UInt16, username: String, password: String = "") {
+        connectViaControlMaster(host: host, port: port, username: username)
     }
 
-    /// Connect using a key file.
+    /// Connect using a key file (same as connect — the terminal handles auth).
     func connectWithKey(host: String, port: UInt16, username: String, keyPath: String) {
+        connectViaControlMaster(host: host, port: port, username: username)
+    }
+
+    /// Core connection method: create SSHControlMaster and wait for the socket.
+    private func connectViaControlMaster(host: String, port: UInt16, username: String) {
         guard !isConnecting else { return }
+
+        // Cancel any previous wait task
+        socketWaitTask?.cancel()
 
         isConnecting = true
         connectionStatus = String(localized: "ssh.connecting")
         errorMessage = nil
         detectedServices = []
 
-        let connectTimeout: TimeInterval = 15
+        let cm = SSHControlMaster(host: host, port: port, username: username)
+        controlMaster = cm
 
-        Task {
-            let handle: OpaquePointer? = await withCheckedContinuation { continuation in
-                let guard_ = ContinuationGuard()
+        socketWaitTask = Task { [weak self] in
+            // Wait up to 60 seconds for the terminal to establish the ControlMaster socket
+            let connected = await cm.waitForSocket(maxWait: 60, checkInterval: 0.5)
 
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let h = host.withCString { hostC in
-                        username.withCString { userC in
-                            keyPath.withCString { keyC in
-                                pier_ssh_connect(hostC, port, userC, 1, keyC)
-                            }
-                        }
-                    }
-                    Task { @MainActor in
-                        if await guard_.tryResume() {
-                            continuation.resume(returning: h)
-                        }
-                    }
-                }
+            guard !Task.isCancelled else { return }
+            guard let self = self else { return }
 
-                Task {
-                    try? await Task.sleep(nanoseconds: UInt64(connectTimeout * 1_000_000_000))
-                    if await guard_.tryResume() {
-                        continuation.resume(returning: nil)
-                    }
-                }
-            }
-
-            if let handle {
-                self.sshHandle = handle
+            if connected {
                 self.isConnected = true
                 self.isConnecting = false
                 self.connectedHost = "\(host):\(port)"
                 self.connectionStatus = String(localized: "ssh.connected")
-                self.detectServices()
+                await self.detectServices()
             } else {
                 self.isConnected = false
                 self.isConnecting = false
@@ -239,136 +153,110 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     /// Disconnect from the remote server.
     func disconnect() {
-        // Stop all port forwards first
+        socketWaitTask?.cancel()
+        socketWaitTask = nil
+
+        // Stop all port forwards
         stopAllTunnels()
 
-        guard let handle = sshHandle else { return }
-        // Clear handle immediately to prevent further use
-        sshHandle = nil
         isConnected = false
         detectedServices = []
         connectedHost = ""
         connectionStatus = String(localized: "ssh.disconnected")
         currentProfileId = nil
-
-        // Dispatch blocking FFI call off the main thread.
-        // The Rust side has a 5s disconnect timeout, so this won't block forever.
-        nonisolated(unsafe) let safeHandle = handle
-        DispatchQueue.global(qos: .utility).async {
-            pier_ssh_disconnect(safeHandle)
-        }
+        // Note: we do NOT call controlMaster.cleanup() — the terminal still owns the SSH connection.
+        // The ControlPersist setting keeps the socket alive.
+        controlMaster = nil
     }
 
     // MARK: - Service Detection
 
-    /// Probe the remote server for installed services.
-    private func detectServices() {
-        guard let handle = sshHandle else { return }
+    /// Probe the remote server for installed services via ControlMaster.
+    private func detectServices() async {
+        guard let cm = controlMaster else { return }
 
         isDetecting = true
         connectionStatus = String(localized: "ssh.detectingServices")
 
-        let detectTimeout: TimeInterval = 35
+        let serviceInfos = await cm.detectAllServices()
 
-        Task {
-            let jsonPtr: UnsafeMutablePointer<CChar>? = await withCheckedContinuation { continuation in
-                let guard_ = ContinuationGuard()
+        guard !Task.isCancelled else { return }
 
-                nonisolated(unsafe) let safeHandle = handle
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let ptr = pier_ssh_detect_services(safeHandle)
-                    Task { @MainActor in
-                        if await guard_.tryResume() {
-                            continuation.resume(returning: ptr)
-                        }
-                    }
-                }
-
-                Task {
-                    try? await Task.sleep(nanoseconds: UInt64(detectTimeout * 1_000_000_000))
-                    if await guard_.tryResume() {
-                        continuation.resume(returning: nil)
-                    }
-                }
-            }
-
-            self.isDetecting = false
-
-            guard let jsonPtr else {
-                self.connectionStatus = String(localized: "ssh.connected")
-                return
-            }
-
-            let jsonString = String(cString: jsonPtr)
-            pier_string_free(jsonPtr)
-
-            if let data = jsonString.data(using: .utf8),
-               let services = try? JSONDecoder().decode([DetectedService].self, from: data) {
-                self.detectedServices = services
-                let runningCount = services.filter(\.isRunning).count
-                self.connectionStatus = String(localized: "ssh.servicesDetected \(services.count) \(runningCount)")
-                self.autoEstablishTunnels()
-            } else {
-                self.connectionStatus = String(localized: "ssh.connected")
-            }
+        let services = serviceInfos.map { info in
+            DetectedService(name: info.name, version: info.version, status: info.status, port: info.port)
         }
+
+        self.detectedServices = services
+        let runningCount = services.filter(\.isRunning).count
+        self.connectionStatus = String(localized: "ssh.servicesDetected \(services.count) \(runningCount)")
+        self.isDetecting = false
+
+        // Auto-establish port tunnels
+        await autoEstablishTunnels()
     }
 
     /// Re-detect services (e.g., after user starts/stops a service).
     func refreshServices() {
-        detectServices()
+        Task { await detectServices() }
     }
 
-    // MARK: - Port Forwarding / Tunnels
+    // MARK: - Port Forwarding (via ControlMaster)
 
     /// Auto-establish tunnels for running services that have default port mappings.
-    private func autoEstablishTunnels() {
-        guard let handle = sshHandle else { return }
+    private func autoEstablishTunnels() async {
+        guard let cm = controlMaster else { return }
         let services = detectedServices.filter(\.isRunning)
 
-        nonisolated(unsafe) let safeHandle = handle
-        DispatchQueue.global(qos: .userInitiated).async {
-            var tunnels: [ServiceTunnel] = []
-            for service in services {
-                guard let mapping = ServiceTunnel.defaultMappings[service.name] else { continue }
+        for service in services {
+            guard let mapping = ServiceTunnel.defaultMappings[service.name] else { continue }
 
-                let result = "127.0.0.1".withCString { hostC in
-                    pier_ssh_forward_port(safeHandle, mapping.localPort, hostC, mapping.remotePort)
-                }
+            let success = await cm.startPortForward(
+                localPort: mapping.localPort,
+                remoteHost: "127.0.0.1",
+                remotePort: mapping.remotePort
+            )
 
-                if result == 0 {
-                    tunnels.append(ServiceTunnel(
-                        serviceName: service.name,
-                        localPort: mapping.localPort,
-                        remoteHost: "127.0.0.1",
-                        remotePort: mapping.remotePort
-                    ))
-                }
-            }
-            Task { @MainActor [weak self] in
-                self?.activeTunnels.append(contentsOf: tunnels)
+            if success {
+                activeTunnels.append(ServiceTunnel(
+                    serviceName: service.name,
+                    localPort: mapping.localPort,
+                    remoteHost: "127.0.0.1",
+                    remotePort: mapping.remotePort
+                ))
             }
         }
     }
 
     /// Stop all active tunnels.
     func stopAllTunnels() {
-        guard let handle = sshHandle else {
+        guard let cm = controlMaster else {
             activeTunnels.removeAll()
             return
         }
         for tunnel in activeTunnels {
-            pier_ssh_stop_forward(handle, tunnel.localPort)
+            Task {
+                _ = await cm.stopPortForward(
+                    localPort: tunnel.localPort,
+                    remoteHost: tunnel.remoteHost,
+                    remotePort: tunnel.remotePort
+                )
+            }
         }
         activeTunnels.removeAll()
     }
 
     /// Stop a single tunnel by service name.
     func stopTunnel(for serviceName: String) {
-        guard let handle = sshHandle,
+        guard let cm = controlMaster,
               let idx = activeTunnels.firstIndex(where: { $0.serviceName == serviceName }) else { return }
         let tunnel = activeTunnels[idx]
-        pier_ssh_stop_forward(handle, tunnel.localPort)
+        Task {
+            _ = await cm.stopPortForward(
+                localPort: tunnel.localPort,
+                remoteHost: tunnel.remoteHost,
+                remotePort: tunnel.remotePort
+            )
+        }
         activeTunnels.remove(at: idx)
     }
 
@@ -423,69 +311,14 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         }
     }
 
-    // MARK: - Remote Execution
+    // MARK: - Remote Execution (via ControlMaster)
 
     /// Execute a command on the remote server with a timeout.
-    ///
-    /// Uses a fire-and-forget pattern for the blocking FFI call so the
-    /// timeout actually works even when `pier_ssh_exec` blocks indefinitely.
     func exec(_ command: String, timeout: TimeInterval = 30) async -> (exitCode: Int, stdout: String) {
-        guard let handle = sshHandle else {
+        guard let cm = controlMaster, isConnected else {
             return (-1, "Not connected")
         }
-
-        return await withCheckedContinuation { continuation in
-            let guard_ = ContinuationGuard()
-
-            // Fire-and-forget: blocking FFI runs in a fully detached task.
-            // If it finishes after the timeout, the result is simply discarded.
-            nonisolated(unsafe) let safeHandle = handle
-            DispatchQueue.global(qos: .userInitiated).async {
-                let resultPtr = command.withCString { cmdC in
-                    pier_ssh_exec(safeHandle, cmdC)
-                }
-
-                guard let resultPtr else {
-                    Task { @MainActor in
-                        if await guard_.tryResume() {
-                            continuation.resume(returning: (-1, "Exec failed"))
-                        }
-                    }
-                    return
-                }
-
-                let jsonString = String(cString: resultPtr)
-                pier_string_free(resultPtr)
-
-                var parsed: (Int, String) = (-1, jsonString)
-                if let data = jsonString.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    let exitCode: Int
-                    if let code = json["exit_code"] as? Int {
-                        exitCode = code
-                    } else if let codeStr = json["exit_code"] as? String, let code = Int(codeStr) {
-                        exitCode = code
-                    } else {
-                        exitCode = -1
-                    }
-                    parsed = (exitCode, json["stdout"] as? String ?? "")
-                }
-
-                Task { @MainActor in
-                    if await guard_.tryResume() {
-                        continuation.resume(returning: parsed)
-                    }
-                }
-            }
-
-            // Timeout: if FFI hasn't finished, resume with error
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                if await guard_.tryResume() {
-                    continuation.resume(returning: (-1, "Command timed out"))
-                }
-            }
-        }
+        return await cm.exec(command, timeout: timeout)
     }
 
     // MARK: - Panel Mode Filtering
@@ -507,33 +340,5 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         }
 
         return modes
-    }
-
-    // MARK: - Cleanup
-
-    deinit {
-        if let handle = sshHandle {
-            // Fire-and-forget: don't block deinit on disconnect
-            nonisolated(unsafe) let safeHandle = handle
-            DispatchQueue.global(qos: .utility).async {
-                pier_ssh_disconnect(safeHandle)
-            }
-        }
-    }
-}
-
-// MARK: - Continuation Guard (thread-safe single-resume)
-
-/// Ensures a `CheckedContinuation` is resumed exactly once when racing
-/// a blocking FFI call against a timeout.
-private actor ContinuationGuard {
-    private var resumed = false
-
-    /// Returns `true` if this is the first call (caller should resume).
-    /// Returns `false` if already resumed (caller should discard).
-    func tryResume() -> Bool {
-        if resumed { return false }
-        resumed = true
-        return true
     }
 }
