@@ -485,6 +485,13 @@ struct ServerListPanelView: View {
         args.append("\(profile.port)")
         args.append("-o")
         args.append("StrictHostKeyChecking=no")
+        // Don't forward locale variables — remote servers may not have en_US.UTF-8 installed,
+        // causing "setlocale: LC_ALL: cannot change locale" warning.
+        // macOS /etc/ssh/ssh_config defaults to "SendEnv LANG LC_*", we explicitly override it.
+        args.append("-o")
+        args.append("SendEnv=-LC_*")
+        args.append("-o")
+        args.append("SetEnv=LC_ALL=C.UTF-8")
         // ControlMaster: allow the right panel to multiplex over this connection
         args.append("-o")
         args.append("ControlMaster=auto")

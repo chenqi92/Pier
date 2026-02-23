@@ -126,8 +126,8 @@ class TerminalNSView: NSView {
     // Terminal display configuration
     private var fontSize: CGFloat = AppThemeManager.shared.fontSize
     private var fontFamily = AppThemeManager.shared.fontFamily
-    private var cellWidth: CGFloat = 8
-    private var cellHeight: CGFloat = 16
+    private(set) var cellWidth: CGFloat = 8
+    private(set) var cellHeight: CGFloat = 16
     private var cursorVisible = true
 
     // Theme (replaces hardcoded colors)
@@ -136,7 +136,7 @@ class TerminalNSView: NSView {
     }
 
     // PTY handle from Rust
-    private var terminalHandle: OpaquePointer?
+    private(set) var terminalHandle: OpaquePointer?
     private var readTimer: Timer?
     /// Debounce work item for PTY resize — avoids flooding the shell with SIGWINCH during drag.
     private var resizeWorkItem: DispatchWorkItem?
@@ -157,7 +157,7 @@ class TerminalNSView: NSView {
 
     // MARK: - Alternate Screen Buffer
     /// Whether we are in alternate screen mode (nano, vim, less, etc.)
-    private var useAlternateScreen = false
+    private(set) var useAlternateScreen = false
     /// Saved main screen buffer when switching to alternate screen
     private var savedMainScreen: [[TerminalCell]] = []
     private var savedMainScrollback: [[TerminalCell]] = []
@@ -169,11 +169,11 @@ class TerminalNSView: NSView {
 
     // MARK: - DEC Private Modes
     /// Application cursor key mode (DECCKM): when true, arrow keys send ESC O A instead of ESC [ A
-    private var applicationCursorKeys = false
+    private(set) var applicationCursorKeys = false
     /// Cursor visible (DECTCEM ?25): when false, cursor is hidden by the application
     private var cursorHidden = false
     /// Bracketed paste mode (?2004)
-    private var bracketedPasteMode = false
+    private(set) var bracketedPasteMode = false
 
     // MARK: - Scroll Region (DECSTBM)
     /// Top row of scroll region (0-based). 0 = top of screen.
@@ -245,8 +245,8 @@ class TerminalNSView: NSView {
     /// `true` = soft wrap (line overflow), `false` = hard wrap (real newline or first line).
     private var screenLineWrapped: [Bool] = []
     private var scrollbackLineWrapped: [Bool] = []
-    private var cursorX: Int = 0
-    private var cursorY: Int = 0
+    private(set) var cursorX: Int = 0
+    private(set) var cursorY: Int = 0
 
     // Current SGR state (applied to each new character)
     private var currentAttr = CellAttr.default
@@ -2182,7 +2182,7 @@ class TerminalNSView: NSView {
     }
 
     /// Get the selected text as a string.
-    private func selectedText() -> String? {
+    func selectedText() -> String? {
         guard let start = selectionStart, let end = selectionEnd else { return nil }
         let normalized = normalizeSelection(start: start, end: end)
         let sRow = normalized.start.row
@@ -2213,213 +2213,77 @@ class TerminalNSView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
-    /// Timestamp of the last handled key event, for deduplication.
-    /// macOS may deliver the same event via both performKeyEquivalent AND keyDown;
-    /// this prevents processing it twice.
-    private var lastHandledEventTimestamp: TimeInterval = 0
+    // MARK: - Keyboard Handler
+
+    /// Centralized keyboard handler — owns all key mapping, IME integration,
+    /// and fullwidth normalization logic. See TerminalKeyboardHandler.swift.
+    private lazy var keyboardHandler: TerminalKeyboardHandler = {
+        let handler = TerminalKeyboardHandler()
+        handler.delegate = self
+        return handler
+    }()
 
     /// Intercept key equivalents to prevent the menu system or parent SwiftUI views
     /// from consuming keys that should go to the terminal PTY.
-    /// This is called BEFORE keyDown in the responder chain.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        // Let ⌘-based shortcuts through to the menu system (⌘Q, ⌘T, etc.)
-        // EXCEPT ⌘C and ⌘V which we handle ourselves
-        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
-            if terminalHandle != nil {
-                if event.charactersIgnoringModifiers == "c" {
-                    if let text = selectedText() {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(text, forType: .string)
-                        return true
-                    }
-                    return super.performKeyEquivalent(with: event)
-                }
-                if event.charactersIgnoringModifiers == "v" {
-                    handleKeyEvent(event)
-                    return true
-                }
-            }
-            return super.performKeyEquivalent(with: event)
-        }
-        // All non-⌘ keys: handle in the terminal (prevents SwiftUI/menu interception)
-        handleKeyEvent(event)
-        return true
+        return keyboardHandler.handlePerformKeyEquivalent(event, view: self)
     }
 
     override func keyDown(with event: NSEvent) {
-        handleKeyEvent(event)
+        keyboardHandler.handleKeyDown(event, view: self)
     }
 
-    /// Unified key event handler. Called from both performKeyEquivalent and keyDown.
-    /// Uses timestamp-based deduplication to prevent double-processing.
-    private func handleKeyEvent(_ event: NSEvent) {
-        // Deduplicate: macOS may deliver the same event via both
-        // performKeyEquivalent and keyDown (or via TerminalScrollView forwarding)
-        guard event.timestamp != lastHandledEventTimestamp else {
-            Self.debugLog("[Key] SKIP duplicate event ts=\(String(format: "%.4f", event.timestamp)) keyCode=\(event.keyCode)")
-            return
-        }
-        lastHandledEventTimestamp = event.timestamp
+    // MARK: - NSTextInputClient (delegated to keyboard handler)
 
-        // ⌘C: copy selection
-        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
-            && event.charactersIgnoringModifiers == "c" {
-            if let text = selectedText() {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
-                return
-            }
-        }
-
-        // ⌘V: paste (with bracketed paste support)
-        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
-            && event.charactersIgnoringModifiers == "v" {
-            if let text = NSPasteboard.general.string(forType: .string) {
-                if let handle = terminalHandle, !text.isEmpty {
-                    if bracketedPasteMode {
-                        let prefix: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]
-                        let suffix: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]
-                        pier_terminal_write(handle, prefix, UInt(prefix.count))
-                        let bytes = Array(text.utf8)
-                        pier_terminal_write(handle, bytes, UInt(bytes.count))
-                        pier_terminal_write(handle, suffix, UInt(suffix.count))
-                    } else {
-                        let bytes = Array(text.utf8)
-                        pier_terminal_write(handle, bytes, UInt(bytes.count))
-                    }
-                }
-                return
-            }
-        }
-
-        guard let handle = terminalHandle else { return }
-
-        var bytes: [UInt8] = []
-
-        let chars = event.characters ?? ""
-        let keyCode = event.keyCode
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-
-        // Handle special keys by keyCode
-        switch keyCode {
-        case 36: // Return
-            detectSSHCommand()
-            bytes = [0x0D]
-        case 51: // Backspace
-            bytes = [0x7F]
-        case 53: // Escape
-            bytes = [0x1B]
-        case 123: // Left arrow
-            bytes = applicationCursorKeys ? [0x1B, 0x4F, 0x44] : [0x1B, 0x5B, 0x44]
-        case 124: // Right arrow
-            bytes = applicationCursorKeys ? [0x1B, 0x4F, 0x43] : [0x1B, 0x5B, 0x43]
-        case 125: // Down arrow
-            bytes = applicationCursorKeys ? [0x1B, 0x4F, 0x42] : [0x1B, 0x5B, 0x42]
-        case 126: // Up arrow
-            bytes = applicationCursorKeys ? [0x1B, 0x4F, 0x41] : [0x1B, 0x5B, 0x41]
-        case 48: // Tab
-            bytes = [0x09]
-        case 115: // Home
-            bytes = [0x1B, 0x5B, 0x48]
-        case 119: // End
-            bytes = [0x1B, 0x5B, 0x46]
-        case 117: // Forward Delete
-            bytes = [0x1B, 0x5B, 0x33, 0x7E]
-        case 116: // Page Up
-            bytes = [0x1B, 0x5B, 0x35, 0x7E]
-        case 121: // Page Down
-            bytes = [0x1B, 0x5B, 0x36, 0x7E]
-        // Function keys F1-F12
-        case 122: bytes = [0x1B, 0x4F, 0x50]
-        case 120: bytes = [0x1B, 0x4F, 0x51]
-        case 99:  bytes = [0x1B, 0x4F, 0x52]
-        case 118: bytes = [0x1B, 0x4F, 0x53]
-        case 96:  bytes = [0x1B, 0x5B, 0x31, 0x35, 0x7E]
-        case 97:  bytes = [0x1B, 0x5B, 0x31, 0x37, 0x7E]
-        case 98:  bytes = [0x1B, 0x5B, 0x31, 0x38, 0x7E]
-        case 100: bytes = [0x1B, 0x5B, 0x31, 0x39, 0x7E]
-        case 101: bytes = [0x1B, 0x5B, 0x32, 0x30, 0x7E]
-        case 109: bytes = [0x1B, 0x5B, 0x32, 0x31, 0x7E]
-        case 103: bytes = [0x1B, 0x5B, 0x32, 0x33, 0x7E]
-        case 111: bytes = [0x1B, 0x5B, 0x32, 0x34, 0x7E]
-        default:
-            // Ctrl+key shortcuts
-            if modifiers.contains(.control) {
-                if let raw = event.charactersIgnoringModifiers?.lowercased(),
-                   let ch = raw.first, ch >= "a" && ch <= "z" {
-                    bytes = [UInt8(ch.asciiValue! - 96)]
-                } else {
-                    bytes = Array(chars.utf8)
-                }
-            } else if !chars.isEmpty {
-                // Normalize fullwidth CJK punctuation to ASCII halfwidth equivalents.
-                // Chinese/Japanese input methods often produce fullwidth versions of
-                // shell-critical characters (e.g. ｜ instead of |), which shells cannot
-                // interpret as operators.
-                let normalized = Self.normalizeFullwidthChars(chars)
-                bytes = Array(normalized.utf8)
-            }
-        }
-
-        if !bytes.isEmpty {
-            let hexBytes = bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
-            Self.debugLog("[Key] keyCode=\(keyCode) chars='\(chars)' modifiers=0x\(String(modifiers.rawValue, radix: 16)) bytes=\(hexBytes) altScreen=\(useAlternateScreen ? 1 : 0)")
-            selectionStart = nil
-            selectionEnd = nil
-            pier_terminal_write(handle, bytes, UInt(bytes.count))
-        } else {
-            Self.debugLog("[Key] keyCode=\(keyCode) chars='\(chars)' modifiers=0x\(String(modifiers.rawValue, radix: 16)) -> NO BYTES (dropped)")
-        }
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        keyboardHandler.handleInsertText(string)
     }
 
-    // MARK: - Fullwidth → Halfwidth Normalization
+    override func doCommand(by commandSelector: Selector) {
+        keyboardHandler.handleDoCommandBySelector(commandSelector)
+    }
 
-    /// Map of fullwidth CJK punctuation to their ASCII halfwidth equivalents.
-    /// These characters are commonly produced by Chinese/Japanese input methods
-    /// and will break shell commands if sent as-is.
-    private static let fullwidthToHalfwidth: [Character: Character] = [
-        "｜": "|",   // pipe
-        "＞": ">",   // redirect
-        "＜": "<",   // redirect
-        "；": ";",   // command separator
-        "＆": "&",   // background / logical AND
-        "（": "(",   // subshell
-        "）": ")",
-        "｛": "{",   // brace expansion
-        "｝": "}",
-        "［": "[",   // test
-        "］": "]",
-        "＇": "'",   // single quote
-        "＂": "\"",  // double quote
-        "～": "~",   // home directory
-        "＄": "$",   // variable
-        "＃": "#",   // comment
-        "＊": "*",   // glob
-        "？": "?",   // glob
-        "！": "!",   // history
-        "＝": "=",   // assignment
-        "＋": "+",   // arithmetic
-        "＠": "@",   // user@host
-        "＼": "\\",  // escape
-        "／": "/",   // path separator
-        "：": ":",   // PATH separator
-        "．": ".",   // hidden file / current dir
-        "，": ",",   // argument separator
-    ]
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        keyboardHandler.handleSetMarkedText(string, selectedRange: selectedRange)
+        setNeedsDisplay(bounds)
+    }
 
-    /// Replace fullwidth CJK characters with their halfwidth ASCII equivalents.
-    static func normalizeFullwidthChars(_ input: String) -> String {
-        // Fast path: if no characters need conversion, return as-is
-        guard input.contains(where: { fullwidthToHalfwidth[$0] != nil }) else {
-            return input
-        }
-        return String(input.map { fullwidthToHalfwidth[$0] ?? $0 })
+    func unmarkText() {
+        keyboardHandler.handleUnmarkText()
+    }
+
+    func selectedRange() -> NSRange {
+        return NSRange(location: NSNotFound, length: 0)
+    }
+
+    func markedRange() -> NSRange {
+        return keyboardHandler.markedTextRange
+    }
+
+    func hasMarkedText() -> Bool {
+        return keyboardHandler.markedText != nil && (keyboardHandler.markedText?.length ?? 0) > 0
+    }
+
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        return nil
+    }
+
+    func validAttributedString(for proposedString: NSAttributedString, selectedRange: NSRange) -> (NSAttributedString, NSRange) {
+        return (proposedString, selectedRange)
+    }
+
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        return keyboardHandler.firstRect(in: self)
+    }
+
+    func characterIndex(for point: NSPoint) -> Int {
+        return 0
     }
 
     // MARK: - SSH Command Detection
 
     /// Read the current screen line when Enter is pressed and detect SSH commands.
-    private func detectSSHCommand() {
+    func detectSSHCommand() {
         guard cursorY >= 0, cursorY < screen.count else { return }
         let line = String(screen[cursorY].map { $0.character }).trimmingCharacters(in: .whitespaces)
         // Strip shell prompt: take everything after the last $ or # or %
@@ -2723,5 +2587,20 @@ class TerminalNSView: NSView {
             )
             TerminalNSView.ptyCache[sessionId] = entry
         }
+    }
+}
+
+// MARK: - TerminalKeyboardDelegate Conformance
+
+extension TerminalNSView: TerminalKeyboardDelegate {
+
+    func clearSelection() {
+        selectionStart = nil
+        selectionEnd = nil
+    }
+
+    func writeToPTY(_ bytes: [UInt8]) {
+        guard let handle = terminalHandle, !bytes.isEmpty else { return }
+        pier_terminal_write(handle, bytes, UInt(bytes.count))
     }
 }

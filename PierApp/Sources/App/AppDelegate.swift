@@ -27,6 +27,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize Rust core exactly once (fixes B1: was in onAppear, could fire multiple times)
         pier_init()
 
+        // Ensure SSH ControlMaster config is set up for manually-typed SSH commands
+        setupSSHControlMasterConfig()
+
         // Register bundled Nerd Font for terminal icon support (eza --icons, etc.)
         registerBundledFonts()
 
@@ -83,4 +86,61 @@ private func registerBundledFonts() {
 
 extension Notification.Name {
     static let appWillTerminate = Notification.Name("pier.appWillTerminate")
+}
+
+/// Set up SSH ControlMaster configuration so that ANY ssh command typed in
+/// the Pier terminal will automatically create a ControlMaster socket at
+/// the path that `SSHControlMaster` expects (`/tmp/pier-ssh-%r@%h:%p`).
+///
+/// This enables the right panel to detect and reuse manually-typed SSH sessions.
+///
+/// Steps:
+/// 1. Write `/tmp/pier-ssh-config` with ControlMaster settings.
+/// 2. Ensure `~/.ssh/config` has `Include /tmp/pier-ssh-config` as the FIRST line.
+private func setupSSHControlMasterConfig() {
+    let pierConfigPath = "/tmp/pier-ssh-config"
+    let pierConfig = """
+    # Pier Terminal — auto-generated SSH config for ControlMaster multiplexing.
+    # This file is managed by Pier and will be recreated on each launch.
+    # Do NOT edit manually.
+    Host *
+        ControlMaster auto
+        ControlPath /tmp/pier-ssh-%r@%h:%p
+        ControlPersist 600
+    """
+
+    // Step 1: Write Pier SSH config
+    do {
+        try pierConfig.write(toFile: pierConfigPath, atomically: true, encoding: .utf8)
+    } catch {
+        NSLog("[Pier] Failed to write SSH config: \(error)")
+        return
+    }
+
+    // Step 2: Ensure ~/.ssh/config includes our file
+    let sshDir = NSHomeDirectory() + "/.ssh"
+    let sshConfigPath = sshDir + "/config"
+    let includeLine = "Include /tmp/pier-ssh-config"
+
+    // Create ~/.ssh directory if it doesn't exist
+    let fm = FileManager.default
+    if !fm.fileExists(atPath: sshDir) {
+        try? fm.createDirectory(atPath: sshDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    }
+
+    // Read existing config or start fresh
+    var configContent = (try? String(contentsOfFile: sshConfigPath, encoding: .utf8)) ?? ""
+
+    // Check if Include is already present
+    if !configContent.contains(includeLine) {
+        // Insert Include as the FIRST line (SSH processes config top-down, first match wins)
+        configContent = includeLine + "\n\n" + configContent
+        do {
+            try configContent.write(toFile: sshConfigPath, atomically: true, encoding: .utf8)
+            // Ensure correct permissions (SSH requires 600)
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sshConfigPath)
+        } catch {
+            NSLog("[Pier] Failed to update ~/.ssh/config: \(error)")
+        }
+    }
 }

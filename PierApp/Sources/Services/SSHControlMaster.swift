@@ -57,21 +57,63 @@ class SSHControlMaster: ObservableObject {
 
     /// Wait for the ControlMaster socket to become available.
     /// The terminal SSH process creates the socket after successful authentication.
+    ///
+    /// If the socket doesn't appear within `spawnDelay`, this method will attempt to
+    /// create a ControlMaster connection independently (for manually-typed SSH commands
+    /// that don't include ControlMaster options).
+    ///
     /// - Parameters:
     ///   - maxWait: Maximum time to wait in seconds
     ///   - checkInterval: Time between checks in seconds
+    ///   - spawnDelay: Seconds to wait before attempting to spawn our own ControlMaster
     /// - Returns: true if socket became available, false if timed out
-    func waitForSocket(maxWait: TimeInterval = 60, checkInterval: TimeInterval = 0.5) async -> Bool {
+    func waitForSocket(maxWait: TimeInterval = 60, checkInterval: TimeInterval = 0.5, spawnDelay: TimeInterval = 5) async -> Bool {
         let deadline = Date().addingTimeInterval(maxWait)
+        let spawnAfter = Date().addingTimeInterval(spawnDelay)
+        var didSpawn = false
 
         while Date() < deadline {
             if await isConnected {
                 return true
             }
+
+            // If socket hasn't appeared after spawnDelay, try to create it ourselves.
+            // This handles the case where the user typed `ssh` manually without ControlMaster args.
+            if !didSpawn && Date() >= spawnAfter {
+                didSpawn = true
+                spawnControlMaster()
+            }
+
             try? await Task.sleep(nanoseconds: UInt64(checkInterval * 1_000_000_000))
         }
 
         return false
+    }
+
+    /// Spawn a background SSH process to create a ControlMaster socket.
+    /// Uses `-N -f` to fork into the background without executing a remote command.
+    /// Requires passwordless auth (SSH keys or agent) since `-o BatchMode=yes` is set.
+    private func spawnControlMaster() {
+        let args = [
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPath=\(socketPath)",
+            "-o", "ControlPersist=600",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            "-p", "\(port)",
+            "-N", "-f",  // No command, fork to background
+            "\(username)@\(host)",
+        ]
+        print("[SSHControlMaster] Spawning background ControlMaster: ssh \(args.joined(separator: " "))")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = args
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        // Process runs async in the background — we don't wait for it.
+        // The socket will appear when SSH connects successfully.
     }
 
     // MARK: - Command Execution

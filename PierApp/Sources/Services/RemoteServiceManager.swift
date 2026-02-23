@@ -71,8 +71,10 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     // MARK: - Private
 
-    /// SSH ControlMaster for executing commands via the terminal's connection.
-    private var controlMaster: SSHControlMaster?
+    /// SSH backend for executing commands via the terminal's connection.
+    /// Currently uses `SystemSSHBackend` (system /usr/bin/ssh + ControlMaster).
+    /// Future: can be swapped to `LibSSHBackend` etc.
+    private var backend: (any SSHBackend)?
     /// Currently connected profile ID (if any).
     private var currentProfileId: UUID?
     /// Task that polls for ControlMaster socket readiness.
@@ -98,7 +100,7 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     /// Retry connection with a specific password (e.g. after user typed it in terminal).
     func retryConnect(profile: ConnectionProfile, password: String) {
-        if controlMaster != nil { disconnect() }
+        if backend != nil { disconnect() }
         currentProfileId = profile.id
         connectViaControlMaster(host: profile.host, port: profile.port, username: profile.username)
     }
@@ -114,7 +116,7 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         connectViaControlMaster(host: host, port: port, username: username)
     }
 
-    /// Core connection method: create SSHControlMaster and wait for the socket.
+    /// Core connection method: create SSH backend and wait for the connection.
     private func connectViaControlMaster(host: String, port: UInt16, username: String) {
         guard !isConnecting else { return }
 
@@ -126,12 +128,12 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         errorMessage = nil
         detectedServices = []
 
-        let cm = SSHControlMaster(host: host, port: port, username: username)
-        controlMaster = cm
+        let sshBackend = SystemSSHBackend(host: host, port: port, username: username)
+        backend = sshBackend
 
         socketWaitTask = Task { [weak self] in
-            // Wait up to 60 seconds for the terminal to establish the ControlMaster socket
-            let connected = await cm.waitForSocket(maxWait: 60, checkInterval: 0.5)
+            // Wait up to 60 seconds for the terminal to establish the connection
+            let connected = await sshBackend.waitForSocket(maxWait: 60)
 
             guard !Task.isCancelled else { return }
             guard let self = self else { return }
@@ -164,21 +166,21 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         connectedHost = ""
         connectionStatus = String(localized: "ssh.disconnected")
         currentProfileId = nil
-        // Note: we do NOT call controlMaster.cleanup() — the terminal still owns the SSH connection.
+        // Note: we do NOT call backend.cleanup() — the terminal still owns the SSH connection.
         // The ControlPersist setting keeps the socket alive.
-        controlMaster = nil
+        backend = nil
     }
 
     // MARK: - Service Detection
 
     /// Probe the remote server for installed services via ControlMaster.
     private func detectServices() async {
-        guard let cm = controlMaster else { return }
+        guard let be = backend else { return }
 
         isDetecting = true
         connectionStatus = String(localized: "ssh.detectingServices")
 
-        let serviceInfos = await cm.detectAllServices()
+        let serviceInfos = await be.detectAllServices()
 
         guard !Task.isCancelled else { return }
 
@@ -204,13 +206,13 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     /// Auto-establish tunnels for running services that have default port mappings.
     private func autoEstablishTunnels() async {
-        guard let cm = controlMaster else { return }
+        guard let be = backend else { return }
         let services = detectedServices.filter(\.isRunning)
 
         for service in services {
             guard let mapping = ServiceTunnel.defaultMappings[service.name] else { continue }
 
-            let success = await cm.startPortForward(
+            let success = await be.startPortForward(
                 localPort: mapping.localPort,
                 remoteHost: "127.0.0.1",
                 remotePort: mapping.remotePort
@@ -229,13 +231,13 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     /// Stop all active tunnels.
     func stopAllTunnels() {
-        guard let cm = controlMaster else {
+        guard let be = backend else {
             activeTunnels.removeAll()
             return
         }
         for tunnel in activeTunnels {
             Task {
-                _ = await cm.stopPortForward(
+                _ = await be.stopPortForward(
                     localPort: tunnel.localPort,
                     remoteHost: tunnel.remoteHost,
                     remotePort: tunnel.remotePort
@@ -247,11 +249,11 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     /// Stop a single tunnel by service name.
     func stopTunnel(for serviceName: String) {
-        guard let cm = controlMaster,
+        guard let be = backend,
               let idx = activeTunnels.firstIndex(where: { $0.serviceName == serviceName }) else { return }
         let tunnel = activeTunnels[idx]
         Task {
-            _ = await cm.stopPortForward(
+            _ = await be.stopPortForward(
                 localPort: tunnel.localPort,
                 remoteHost: tunnel.remoteHost,
                 remotePort: tunnel.remotePort
@@ -315,10 +317,10 @@ class RemoteServiceManager: ObservableObject, Identifiable {
 
     /// Execute a command on the remote server with a timeout.
     func exec(_ command: String, timeout: TimeInterval = 30) async -> (exitCode: Int, stdout: String) {
-        guard let cm = controlMaster, isConnected else {
+        guard let be = backend, isConnected else {
             return (-1, "Not connected")
         }
-        return await cm.exec(command, timeout: timeout)
+        return await be.exec(command, timeout: timeout)
     }
 
     // MARK: - Panel Mode Filtering

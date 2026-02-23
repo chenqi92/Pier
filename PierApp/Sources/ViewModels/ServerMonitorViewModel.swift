@@ -91,6 +91,10 @@ class ServerMonitorViewModel: ObservableObject {
     private var lastNetworkRx: UInt64 = 0
     private var lastNetworkTx: UInt64 = 0
     private var lastSnapshotTime: Date?
+    // CPU delta calculation: /proc/stat values are cumulative since boot,
+    // so we need to compute (delta_busy / delta_total) between polls.
+    private var lastCpuTotal: Double = 0
+    private var lastCpuIdle: Double = 0
 
     /// Static in-memory cache keyed by server host string.
     private static var cache: [String: CachedMonitorData] = [:]
@@ -184,6 +188,8 @@ class ServerMonitorViewModel: ObservableObject {
         lastNetworkRx = 0
         lastNetworkTx = 0
         lastSnapshotTime = nil
+        lastCpuTotal = 0
+        lastCpuIdle = 0
     }
 
     func startMonitoring() {
@@ -273,12 +279,19 @@ class ServerMonitorViewModel: ObservableObject {
 
         for line in lines {
             if line.hasPrefix("cpu ") {
-                // Parse /proc/stat cpu line
+                // Parse /proc/stat cpu line — values are cumulative since boot
                 let parts = line.split(separator: " ").dropFirst().compactMap { Double($0) }
                 if parts.count >= 4 {
-                    let idle = parts[3]
+                    let idle = parts[3] + (parts.count > 4 ? parts[4] : 0)  // idle + iowait
                     let total = parts.reduce(0, +)
-                    cpuUsage = total > 0 ? ((total - idle) / total) * 100 : 0
+                    // Calculate real-time CPU from delta between this poll and the last
+                    if lastCpuTotal > 0 {
+                        let deltaTotal = total - lastCpuTotal
+                        let deltaIdle = idle - lastCpuIdle
+                        cpuUsage = deltaTotal > 0 ? ((deltaTotal - deltaIdle) / deltaTotal) * 100 : 0
+                    }
+                    lastCpuTotal = total
+                    lastCpuIdle = idle
                 }
             } else if line.hasPrefix("MEM ") {
                 // Parsed from awk: MEM total used free buff/cache available
