@@ -113,6 +113,18 @@ struct PierApp: App {
                         NSWorkspace.shared.open(url)
                     }
                 }
+
+                Divider()
+
+                Button(LS("updater.checkForUpdates")) {
+                    Task {
+                        await updateChecker.checkForUpdates()
+                        if updateChecker.updateAvailable {
+                            showUpdateAlert = true
+                        }
+                    }
+                }
+                .disabled(updateChecker.isChecking)
             }
         }
 

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +31,9 @@ jobs:
             echo "❌ Tag v${{ steps.version.outputs.version }} already exists"
             exit 1
           fi
+
+      - name: Verify Swift version
+        run: swift --version
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
