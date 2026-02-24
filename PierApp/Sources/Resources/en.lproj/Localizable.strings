@@ -160,10 +160,16 @@
 "sftp.open" = "Open";
 "sftp.delete" = "Delete";
 "sftp.deleteFailed" = "Failed to delete file";
+"sftp.confirmDelete" = "Confirm Delete";
 "sftp.mkdirFailed" = "Failed to create folder";
 "sftp.listFailed" = "Failed to list directory";
-"sftp.uploadNotReady" = "File upload via SFTP is not yet available";
-"sftp.downloadNotReady" = "File download via SFTP is not yet available";
+"sftp.uploading" = "Uploading %@...";
+"sftp.uploadSuccess" = "%@ uploaded successfully";
+"sftp.uploadFailed" = "Upload failed: %@";
+"sftp.downloading" = "Downloading %@...";
+"sftp.downloadSuccess" = "%@ downloaded successfully";
+"sftp.downloadFailed" = "Download failed: %@";
+"sftp.download" = "Download";
 
 /* ═══════════════════════════════════════
    Settings
@@ -862,6 +868,7 @@
 "db.importSection" = "SQL File Import";
 "db.importDesc" = "Select a local SQL file to import into the remote database";
 "db.importStarting" = "Preparing import...";
+"db.importUploading" = "Uploading SQL file...";
 "db.importRunning" = "Importing...";
 "db.importSuccess" = "Import successful";
 "db.targetDatabase" = "Target Database";

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// MySQL database client with visual query, table browsing, config viewer, and import/export.
 struct DatabaseClientView: View {
-    @StateObject private var viewModel = DatabaseViewModel()
+    @ObservedObject var viewModel: DatabaseViewModel
     @ObservedObject var serviceManager: RemoteServiceManager
     @State private var showExportAlert = false
     @State private var exportedFileName = ""

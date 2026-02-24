@@ -109,11 +109,62 @@ class RemoteFileViewModel: ObservableObject {
     }
 
     func uploadFile(localPath: String) {
-        statusMessage = String(localized: "sftp.uploadNotReady")
+        guard let sm = serviceManager, sm.isConnected else {
+            statusMessage = String(localized: "sftp.notConnected")
+            return
+        }
+
+        let fileName = (localPath as NSString).lastPathComponent
+        let remoteDest = currentRemotePath == "/" ? "/\(fileName)" : "\(currentRemotePath)/\(fileName)"
+
+        statusMessage = String(format: String(localized: "sftp.uploading"), fileName)
+        transferProgress = TransferProgress(fileName: fileName, fraction: 0, totalBytes: 0, transferredBytes: 0)
+
+        Task {
+            let result = await sm.uploadFile(localPath: localPath, remotePath: remoteDest)
+            transferProgress = nil
+
+            if result.success {
+                statusMessage = String(format: String(localized: "sftp.uploadSuccess"), fileName)
+                loadRemoteDirectory()
+                // Auto-clear success message after 3 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    if self?.statusMessage?.contains(fileName) == true {
+                        self?.statusMessage = nil
+                    }
+                }
+            } else {
+                statusMessage = String(format: String(localized: "sftp.uploadFailed"), result.error ?? "Unknown error")
+            }
+        }
     }
 
-    func downloadFile(remotePath: String, localPath: String) {
-        statusMessage = String(localized: "sftp.downloadNotReady")
+    func downloadFile(remotePath: String, toLocalPath localPath: String) {
+        guard let sm = serviceManager, sm.isConnected else {
+            statusMessage = String(localized: "sftp.notConnected")
+            return
+        }
+
+        let fileName = (remotePath as NSString).lastPathComponent
+
+        statusMessage = String(format: String(localized: "sftp.downloading"), fileName)
+        transferProgress = TransferProgress(fileName: fileName, fraction: 0, totalBytes: 0, transferredBytes: 0)
+
+        Task {
+            let result = await sm.downloadFile(remotePath: remotePath, localPath: localPath)
+            transferProgress = nil
+
+            if result.success {
+                statusMessage = String(format: String(localized: "sftp.downloadSuccess"), fileName)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    if self?.statusMessage?.contains(fileName) == true {
+                        self?.statusMessage = nil
+                    }
+                }
+            } else {
+                statusMessage = String(format: String(localized: "sftp.downloadFailed"), result.error ?? "Unknown error")
+            }
+        }
     }
 
     func deleteFile(_ path: String) {

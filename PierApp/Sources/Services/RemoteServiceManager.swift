@@ -323,6 +323,22 @@ class RemoteServiceManager: ObservableObject, Identifiable {
         return await be.exec(command, timeout: timeout)
     }
 
+    /// Upload a local file to the remote server via SCP.
+    func uploadFile(localPath: String, remotePath: String) async -> (success: Bool, error: String?) {
+        guard let be = backend, isConnected else {
+            return (false, "Not connected")
+        }
+        return await be.uploadFile(localPath: localPath, remotePath: remotePath)
+    }
+
+    /// Download a file from the remote server to local via SCP.
+    func downloadFile(remotePath: String, localPath: String) async -> (success: Bool, error: String?) {
+        guard let be = backend, isConnected else {
+            return (false, "Not connected")
+        }
+        return await be.downloadFile(remotePath: remotePath, localPath: localPath)
+    }
+
     // MARK: - Panel Mode Filtering
 
     /// Available panel modes based on connection status and detected services.

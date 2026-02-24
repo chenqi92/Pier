@@ -7,6 +7,7 @@ struct RightPanelView: View {
     @State private var selectedMode: RightPanelMode
     @State private var markdownPath: String? = nil
     @StateObject private var remoteFileVM = RemoteFileViewModel()
+    @StateObject private var databaseVM = DatabaseViewModel()
     @ObservedObject var serviceManager: RemoteServiceManager
 
     init(serviceManager: RemoteServiceManager) {
@@ -58,7 +59,7 @@ struct RightPanelView: View {
                 case .git:
                     GitPanelView()
                 case .database:
-                    DatabaseClientView(serviceManager: serviceManager)
+                    DatabaseClientView(viewModel: databaseVM, serviceManager: serviceManager)
                 case .redis:
                     RedisClientView()
                 case .logViewer:
@@ -74,6 +75,7 @@ struct RightPanelView: View {
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         .onAppear {
             remoteFileVM.serviceManager = serviceManager
+            databaseVM.serviceManager = serviceManager
             if serviceManager.isConnected {
                 remoteFileVM.onConnectionChanged(connected: true)
             }
@@ -91,10 +93,12 @@ struct RightPanelView: View {
             if connected {
                 // Auto-switch to monitor dashboard and load remote files
                 remoteFileVM.serviceManager = serviceManager
+                databaseVM.serviceManager = serviceManager
                 remoteFileVM.onConnectionChanged(connected: true)
                 selectedMode = .monitor
             } else {
                 remoteFileVM.onConnectionChanged(connected: false)
+                databaseVM.disconnect()
                 if selectedMode.context == .remote {
                     selectedMode = .markdown
                 }
@@ -635,6 +639,8 @@ struct RemoteFileView: View {
     @ObservedObject var viewModel: RemoteFileViewModel
     @State private var showNewFolderAlert = false
     @State private var newFolderName = ""
+    @State private var showDeleteConfirm = false
+    @State private var fileToDelete: RemoteFile?
 
     private static let sizeFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -719,6 +725,21 @@ struct RemoteFileView: View {
             }
             Button(LS("sftp.cancel"), role: .cancel) {
                 newFolderName = ""
+            }
+        }
+        .alert(LS("sftp.confirmDelete"), isPresented: $showDeleteConfirm) {
+            Button(LS("sftp.delete"), role: .destructive) {
+                if let file = fileToDelete {
+                    viewModel.deleteFile(file.path)
+                    fileToDelete = nil
+                }
+            }
+            Button(LS("sftp.cancel"), role: .cancel) {
+                fileToDelete = nil
+            }
+        } message: {
+            if let file = fileToDelete {
+                Text(file.name)
             }
         }
     }
@@ -823,10 +844,23 @@ struct RemoteFileView: View {
                         } label: {
                             Label(LS("sftp.open"), systemImage: "folder")
                         }
+                    } else {
+                        Button {
+                            let fileName = (file.path as NSString).lastPathComponent
+                            let panel = NSSavePanel()
+                            panel.nameFieldStringValue = fileName
+                            panel.canCreateDirectories = true
+                            if panel.runModal() == .OK, let url = panel.url {
+                                viewModel.downloadFile(remotePath: file.path, toLocalPath: url.path)
+                            }
+                        } label: {
+                            Label(LS("sftp.download"), systemImage: "arrow.down.circle")
+                        }
                     }
                     Divider()
                     Button(role: .destructive) {
-                        viewModel.deleteFile(file.path)
+                        fileToDelete = file
+                        showDeleteConfirm = true
                     } label: {
                         Label(LS("sftp.delete"), systemImage: "trash")
                     }

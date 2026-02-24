@@ -162,6 +162,47 @@ class SSHControlMaster: ObservableObject {
         return exitCode == 0
     }
 
+    // MARK: - File Transfer (SCP via ControlMaster)
+
+    /// Upload a local file to the remote server via scp.
+    func uploadFile(localPath: String, remotePath: String) async -> (success: Bool, error: String?) {
+        // Shell-escape remote path for scp (handles spaces, special chars)
+        let escapedRemote = remotePath.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: " ", with: "\\ ")
+        let args = [
+            "-o", "ControlPath=\(socketPath)",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "BatchMode=yes",
+            "-P", "\(port)",
+            "-r",  // Support directory uploads
+            localPath,
+            "\(username)@\(host):\(escapedRemote)",
+        ]
+        let (exitCode, output) = await runProcess("/usr/bin/scp", arguments: args, timeout: 300)
+        if exitCode == 0 {
+            return (true, nil)
+        }
+        return (false, output.isEmpty ? "SCP upload failed with exit code \(exitCode)" : output)
+    }
+
+    /// Download a file from the remote server to local via scp.
+    func downloadFile(remotePath: String, localPath: String) async -> (success: Bool, error: String?) {
+        let escapedRemote = remotePath.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: " ", with: "\\ ")
+        let args = [
+            "-o", "ControlPath=\(socketPath)",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "BatchMode=yes",
+            "-P", "\(port)",
+            "-r",  // Support directory downloads
+            "\(username)@\(host):\(escapedRemote)",
+            localPath,
+        ]
+        let (exitCode, output) = await runProcess("/usr/bin/scp", arguments: args, timeout: 300)
+        if exitCode == 0 {
+            return (true, nil)
+        }
+        return (false, output.isEmpty ? "SCP download failed with exit code \(exitCode)" : output)
+    }
+
     // MARK: - Cleanup
 
     /// Gracefully close the ControlMaster connection.
@@ -216,8 +257,12 @@ class SSHControlMaster: ObservableObject {
                 process.waitUntilExit()
 
                 let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let stdoutStr = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let stderrStr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                // Combine: prefer stdout, append stderr if stdout is empty or on error
                 let exitCode = Int(process.terminationStatus)
+                let output = stdoutStr.isEmpty ? stderrStr : (exitCode != 0 && !stderrStr.isEmpty ? stdoutStr + "\n" + stderrStr : stdoutStr)
 
                 Task { @MainActor in
                     if guard_.tryResume() {

@@ -113,6 +113,9 @@ class DatabaseViewModel: ObservableObject {
     /// Remote service manager for SSH command execution
     weak var serviceManager: RemoteServiceManager?
 
+    /// Debounced history save
+    private var historySaveWork: DispatchWorkItem?
+
     init() {
         loadSavedConnections()
         loadHistory()
@@ -204,6 +207,12 @@ class DatabaseViewModel: ObservableObject {
         resultRows = []
         queryError = nil
         connectionName = ""
+        selectedRows.removeAll()
+        editingCell = nil
+        editingValue = ""
+        primaryKeyColumn = nil
+        lastSelectQuery = ""
+        selectedTable = nil
     }
 
     // MARK: - Database Operations
@@ -403,15 +412,31 @@ class DatabaseViewModel: ObservableObject {
         }
     }
 
-    /// Refresh the current query results
+    /// Refresh the current query results without altering the editor text
     func refreshCurrentQuery() {
         guard !lastSelectQuery.isEmpty else { return }
-        let saved = queryText
-        queryText = lastSelectQuery
-        executeQuery()
-        // Don't overwrite the user's editor text
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.queryText = saved
+
+        isExecuting = true
+        queryError = nil
+        selectedRows.removeAll()
+        editingCell = nil
+
+        Task {
+            let start = Date()
+            let result = await executeMysql(lastSelectQuery, db: currentDB)
+            let elapsed = Date().timeIntervalSince(start)
+
+            isExecuting = false
+            lastQueryTime = elapsed
+
+            if let error = result.error {
+                queryError = error
+            } else {
+                resultColumns = result.columns
+                resultRows = result.rows
+                resultRowCount = result.rows.count
+                queryError = nil
+            }
         }
     }
 
@@ -436,7 +461,12 @@ class DatabaseViewModel: ObservableObject {
     private func escapeSql(_ value: String) -> String {
         value
             .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\0", with: "\\0")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\u{1a}", with: "\\Z")
             .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     // MARK: - MySQL Execution (via SSH)
@@ -657,8 +687,11 @@ class DatabaseViewModel: ObservableObject {
             let timestamp = ISO8601DateFormatter().string(from: Date())
                 .replacingOccurrences(of: ":", with: "-")
             let filename = "pier_dump_\(database)_\(timestamp).sql"
-            let url = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-                .appendingPathComponent(filename)
+            guard let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
+                exportProgress = "❌ Cannot find Downloads directory"
+                return
+            }
+            let url = downloadsDir.appendingPathComponent(filename)
 
             do {
                 try output.write(to: url, atomically: true, encoding: .utf8)
@@ -669,34 +702,38 @@ class DatabaseViewModel: ObservableObject {
         }
     }
 
-    /// Import SQL file to remote server
+    /// Import SQL file to remote server via SCP + remote mysql
     func importSQL(from localURL: URL, toDatabase database: String) {
         guard let sm = serviceManager, sm.isConnected else { return }
         isImporting = true
         importProgress = LS("db.importStarting")
 
         Task {
-            guard let content = try? String(contentsOf: localURL, encoding: .utf8) else {
+            // Step 1: Upload SQL file to remote /tmp via SCP
+            let remoteFileName = "pier_import_\(UUID().uuidString.prefix(8)).sql"
+            let remoteTmpPath = "/tmp/\(remoteFileName)"
+
+            importProgress = LS("db.importUploading")
+            let uploadResult = await sm.uploadFile(localPath: localURL.path, remotePath: remoteTmpPath)
+
+            guard uploadResult.success else {
                 isImporting = false
-                importProgress = "❌ Failed to read file"
+                importProgress = "❌ Upload failed: \(uploadResult.error ?? "Unknown")"
                 return
             }
 
-            // For large files we'd need to use SCP/SFTP upload + remote source.
-            // For moderate files, pipe through SSH stdin.
-            let escapedContent = content.replacingOccurrences(of: "'", with: "'\\''")
-
+            // Step 2: Execute the uploaded SQL file on the remote server
             var cmd = "mysql -h \(currentHost) -P \(currentPort) -u \(currentUser)"
             if !currentPassword.isEmpty {
                 cmd = "MYSQL_PWD='\(currentPassword.replacingOccurrences(of: "'", with: "'\\''"))' " + cmd
             }
-            cmd += " -D \(database)"
-
-            // Use heredoc to pipe SQL content
-            let fullCmd = "echo '\(escapedContent)' | \(cmd)"
+            cmd += " -D \(database) < \(remoteTmpPath)"
 
             importProgress = LS("db.importRunning")
-            let (code, output) = await sm.exec(fullCmd, timeout: 300)
+            let (code, output) = await sm.exec(cmd, timeout: 300)
+
+            // Step 3: Clean up the temp file
+            _ = await sm.exec("rm -f \(remoteTmpPath)", timeout: 10)
 
             isImporting = false
 
@@ -761,8 +798,14 @@ class DatabaseViewModel: ObservableObject {
     }
 
     private func saveHistory() {
-        guard let data = try? JSONEncoder().encode(queryHistory) else { return }
-        try? data.write(to: Self.historyURL, options: .atomic)
+        historySaveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            guard let data = try? JSONEncoder().encode(self.queryHistory) else { return }
+            try? data.write(to: Self.historyURL, options: .atomic)
+        }
+        historySaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
     func clearHistory() {
@@ -779,8 +822,8 @@ class DatabaseViewModel: ObservableObject {
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
         let filename = "pier_export_\(timestamp).csv"
-        let url = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-            .appendingPathComponent(filename)
+        guard let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return nil }
+        let url = downloadsDir.appendingPathComponent(filename)
 
         var csv = resultColumns.joined(separator: ",") + "\n"
         for row in resultRows {
@@ -806,8 +849,8 @@ class DatabaseViewModel: ObservableObject {
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
         let filename = "pier_export_\(timestamp).json"
-        let url = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-            .appendingPathComponent(filename)
+        guard let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return nil }
+        let url = downloadsDir.appendingPathComponent(filename)
 
         let records: [[String: String]] = resultRows.map { row in
             var dict: [String: String] = [:]

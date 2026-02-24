@@ -160,10 +160,16 @@
 "sftp.open" = "打开";
 "sftp.delete" = "删除";
 "sftp.deleteFailed" = "删除文件失败";
+"sftp.confirmDelete" = "确认删除";
 "sftp.mkdirFailed" = "创建文件夹失败";
 "sftp.listFailed" = "列出目录失败";
-"sftp.uploadNotReady" = "SFTP 文件上传功能尚未可用";
-"sftp.downloadNotReady" = "SFTP 文件下载功能尚未可用";
+"sftp.uploading" = "正在上传 %@...";
+"sftp.uploadSuccess" = "%@ 上传成功";
+"sftp.uploadFailed" = "上传失败: %@";
+"sftp.downloading" = "正在下载 %@...";
+"sftp.downloadSuccess" = "%@ 下载成功";
+"sftp.downloadFailed" = "下载失败: %@";
+"sftp.download" = "下载";
 
 /* ═══════════════════════════════════════
    设置
@@ -862,6 +868,7 @@
 "db.importSection" = "SQL 文件导入";
 "db.importDesc" = "选择本地 SQL 文件导入到远程数据库";
 "db.importStarting" = "准备导入...";
+"db.importUploading" = "正在上传 SQL 文件...";
 "db.importRunning" = "正在导入...";
 "db.importSuccess" = "导入成功";
 "db.targetDatabase" = "目标数据库";

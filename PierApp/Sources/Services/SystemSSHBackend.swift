@@ -63,6 +63,14 @@ final class SystemSSHBackend: SSHBackend {
         await controlMaster.detectAllServices()
     }
 
+    func uploadFile(localPath: String, remotePath: String) async -> (success: Bool, error: String?) {
+        await controlMaster.uploadFile(localPath: localPath, remotePath: remotePath)
+    }
+
+    func downloadFile(remotePath: String, localPath: String) async -> (success: Bool, error: String?) {
+        await controlMaster.downloadFile(remotePath: remotePath, localPath: localPath)
+    }
+
     func cleanup() {
         controlMaster.cleanup()
     }
