@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'VERSION'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for build number (git rev-list --count)
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📋 Version: $VERSION"
+
+      - name: Check if tag already exists
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "❌ Tag v${{ steps.version.outputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            pier-core/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('pier-core/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release
+        run: |
+          chmod +x scripts/build_release.sh
+          ./scripts/build_release.sh
+
+      - name: Create Git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.version }}"
+          name: "Pier Terminal v${{ steps.version.outputs.version }}"
+          body: |
+            ## Pier Terminal v${{ steps.version.outputs.version }}
+
+            ### 安装
+            1. 下载 `Pier-${{ steps.version.outputs.version }}.dmg`
+            2. 打开 DMG，将 Pier Terminal 拖入 Applications 文件夹
+            3. 首次打开可能需要在「系统设置 → 隐私与安全性」中允许运行
+
+            ### 系统要求
+            - macOS 14.0 (Sonoma) 或更高版本
+            - Apple Silicon (arm64)
+          files: |
+            build/Pier-${{ steps.version.outputs.version }}.dmg
+          draft: false
+          prerelease: false

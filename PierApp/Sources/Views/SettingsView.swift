@@ -3,12 +3,14 @@ import SwiftUI
 /// Application preferences/settings panel.
 struct SettingsView: View {
     @ObservedObject private var themeManager = AppThemeManager.shared
+    @EnvironmentObject var updateChecker: UpdateChecker
     @State private var selectedSection: SettingsSection = .general
 
     enum SettingsSection: String, CaseIterable, Identifiable {
         case general = "settings.general"
         case terminal = "settings.terminal"
         case shortcuts = "settings.shortcuts"
+        case updates = "settings.updates"
 
         var id: String { rawValue }
 
@@ -17,6 +19,7 @@ struct SettingsView: View {
             case .general: return "gear"
             case .terminal: return "terminal"
             case .shortcuts: return "keyboard"
+            case .updates: return "arrow.triangle.2.circlepath"
             }
         }
     }
@@ -40,6 +43,8 @@ struct SettingsView: View {
                     terminalSettings
                 case .shortcuts:
                     shortcutsSettings
+                case .updates:
+                    updatesSettings
                 }
             }
             .frame(minWidth: 400)
@@ -269,6 +274,83 @@ struct SettingsView: View {
                     shortcutRow("settings.preferences", shortcut: "⌘,")
                 }
                 .padding(4)
+            }
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Updates
+
+    private var updatesSettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(LS("settings.updates"))
+                .font(.title2)
+                .fontWeight(.bold)
+
+            GroupBox(label: Text(LS("updater.updateSettings"))) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle(LS("updater.autoCheck"), isOn: $updateChecker.autoCheckForUpdates)
+                        .font(.caption)
+
+                    if let lastCheck = updateChecker.lastCheckDate {
+                        HStack {
+                            Text(LS("updater.lastCheck"))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(lastCheck, style: .relative)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Divider()
+
+                    HStack {
+                        Text(LS("updater.currentVersionLabel") + " " + updateChecker.currentVersion)
+                            .font(.caption)
+                        Spacer()
+                        Button {
+                            Task {
+                                await updateChecker.checkForUpdates()
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                if updateChecker.isChecking {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                                Text(LS("updater.checkForUpdates"))
+                            }
+                        }
+                        .disabled(updateChecker.isChecking)
+                    }
+
+                    if let status = updateChecker.statusMessage {
+                        HStack(spacing: 4) {
+                            if updateChecker.updateAvailable {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .foregroundColor(.green)
+                                    .font(.caption)
+                                Text(status)
+                                    .font(.caption)
+                                Button(LS("updater.download")) {
+                                    updateChecker.openDownloadPage()
+                                }
+                                .font(.caption)
+                            } else {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                    .font(.caption)
+                                Text(status)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+                .padding(8)
             }
 
             Spacer()

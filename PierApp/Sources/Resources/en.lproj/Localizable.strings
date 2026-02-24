@@ -564,6 +564,16 @@
 "updater.checkForUpdates" = "Check for Updates…";
 "updater.lastCheck" = "Last check";
 "updater.autoCheck" = "Automatically check for updates";
+"updater.newVersionAvailable" = "New Version Available";
+"updater.newVersionDetail" = "Current version: %@\nLatest version: %@";
+"updater.newVersionFormat" = "New version %@ available";
+"updater.download" = "Download";
+"updater.upToDate" = "You're up to date";
+"updater.checkFailed" = "Update check failed";
+"updater.noReleases" = "No releases available";
+"updater.currentVersionLabel" = "Current version:";
+"updater.updateSettings" = "Software Update";
+"settings.updates" = "Updates";
 "release.signing" = "Code Signing";
 "release.notarization" = "Notarization";
 "release.packaging" = "DMG Packaging";

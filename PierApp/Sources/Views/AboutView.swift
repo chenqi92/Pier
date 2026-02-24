@@ -3,6 +3,7 @@ import SwiftUI
 /// Custom About window for Pier Terminal.
 struct AboutView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var updateChecker: UpdateChecker
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
@@ -40,6 +41,51 @@ struct AboutView: View {
             Divider()
                 .frame(width: 200)
 
+            // Check for updates button
+            Button {
+                Task {
+                    await updateChecker.checkForUpdates()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if updateChecker.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 11))
+                    }
+                    Text(LS("updater.checkForUpdates"))
+                        .font(.system(size: 11))
+                }
+            }
+            .disabled(updateChecker.isChecking)
+
+            // Update status
+            if let status = updateChecker.statusMessage {
+                HStack(spacing: 4) {
+                    if updateChecker.updateAvailable {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.system(size: 10))
+                        Text(status)
+                            .font(.system(size: 11))
+                            .foregroundColor(.primary)
+                        Button(LS("updater.download")) {
+                            updateChecker.openDownloadPage()
+                        }
+                        .font(.system(size: 11))
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.system(size: 10))
+                        Text(status)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
             // Copyright
             Text(LS("about.copyright"))
                 .font(.system(size: 10))
@@ -76,6 +122,6 @@ struct AboutView: View {
             .keyboardShortcut(.defaultAction)
         }
         .padding(24)
-        .frame(width: 340, height: 420)
+        .frame(width: 340, height: 480)
     }
 }

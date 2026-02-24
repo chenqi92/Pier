@@ -9,16 +9,38 @@ struct PierApp: App {
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var serviceManager = RemoteServiceManager()
+    @StateObject private var updateChecker = UpdateChecker()
 
     @State private var showAbout = false
+    @State private var showUpdateAlert = false
 
     var body: some Scene {
         WindowGroup {
             MainView()
                 .environmentObject(serviceManager)
+                .environmentObject(updateChecker)
                 .frame(minWidth: 1200, minHeight: 700)
                 .sheet(isPresented: $showAbout) {
                     AboutView()
+                        .environmentObject(updateChecker)
+                }
+                .alert(LS("updater.newVersionAvailable"), isPresented: $showUpdateAlert) {
+                    Button(LS("updater.download")) {
+                        updateChecker.openDownloadPage()
+                    }
+                    Button(LS("common.cancel"), role: .cancel) {}
+                } message: {
+                    Text(String(format: LS("updater.newVersionDetail"),
+                                updateChecker.currentVersion,
+                                updateChecker.latestVersion ?? ""))
+                }
+                .onAppear {
+                    updateChecker.startPeriodicChecks()
+                }
+                .onReceive(updateChecker.$updateAvailable) { available in
+                    if available {
+                        showUpdateAlert = true
+                    }
                 }
         }
         .windowStyle(.titleBar)
@@ -30,6 +52,18 @@ struct PierApp: App {
                 Button(LS("about.menuItem")) {
                     showAbout = true
                 }
+
+                Divider()
+
+                Button(LS("updater.checkForUpdates")) {
+                    Task {
+                        await updateChecker.checkForUpdates()
+                        if updateChecker.updateAvailable {
+                            showUpdateAlert = true
+                        }
+                    }
+                }
+                .disabled(updateChecker.isChecking)
             }
 
             // Custom menu items
@@ -84,6 +118,7 @@ struct PierApp: App {
 
         Settings {
             SettingsView()
+                .environmentObject(updateChecker)
         }
     }
 }
