@@ -836,7 +836,54 @@
 // MARK: - Database Common
 
 "db.rowCountSimple" = "%lld rows";
+"db.rows" = "rows";
 "db.executing" = "Executing...";
+
+// MARK: - Database Extended (SSH Remote Execution)
+
+"db.notConnectedSSH" = "Not connected to remote server via SSH";
+"db.sshDisconnected" = "SSH connection lost";
+"db.sshConnected" = "SSH connected — executing MySQL commands on remote server";
+"db.sshRequired" = "SSH connection required for remote MySQL";
+"db.tabQuery" = "Query";
+"db.tabConfig" = "Config";
+"db.tabImportExport" = "Import/Export";
+"db.mysqlConfig" = "MySQL Configuration";
+"db.loadConfig" = "Load Config";
+"db.loadingConfig" = "Loading configuration...";
+"db.configNotFound" = "MySQL config file not found";
+"db.configHint" = "Click \"Load Config\" to read\nMySQL config from remote server";
+"db.exportSection" = "Database Export (mysqldump)";
+"db.exportDesc" = "Export database structure and data to a local SQL file using mysqldump";
+"db.exportStarting" = "Preparing export...";
+"db.exportRunning" = "Exporting...";
+"db.exportSaved" = "Saved to Downloads";
+"db.exportFailed" = "Export failed";
+"db.importSection" = "SQL File Import";
+"db.importDesc" = "Select a local SQL file to import into the remote database";
+"db.importStarting" = "Preparing import...";
+"db.importRunning" = "Importing...";
+"db.importSuccess" = "Import successful";
+"db.targetDatabase" = "Target Database";
+"db.selectSQLFile" = "Select SQL File";
+"db.detectedInstances" = "Detected MySQL Instances";
+"db.useThis" = "Use";
+"db.showPassword" = "Show password";
+"db.hidePassword" = "Hide password";
+"db.selectAll" = "Select All / Deselect All";
+"db.rowsSelected" = "rows selected";
+"db.deleteRows" = "Delete";
+"db.confirmDelete" = "Confirm Delete";
+"db.deleteConfirmMsg" = "Delete %d selected row(s)? This cannot be undone.";
+"db.delete" = "Delete";
+"common.cancel" = "Cancel";
+"db.noData" = "No results";
+"db.noDataHint" = "Table is empty or query returned no rows";
+"db.copyRow" = "Copy Row";
+"db.deleteRow" = "Delete Row";
+"db.copyCellValue" = "Copy Cell";
+"db.editCell" = "Edit";
+"db.setNull" = "Set to NULL";
 "common.ok" = "OK";
 
 // MARK: - PostgreSQL Extended

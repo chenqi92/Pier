@@ -266,18 +266,54 @@ extension SSHControlMaster {
     }
 
     private func detectMySQL() async -> DetectedServiceInfo? {
+        // First try native mysql CLI on the host
         let (code, _) = await exec("which mysql 2>/dev/null || which mysqld 2>/dev/null", timeout: 10)
-        guard code == 0 else { return nil }
 
-        let (_, versionOut) = await exec("mysql --version 2>/dev/null", timeout: 10)
-        let version = Self.parseVersion(versionOut)
+        if code == 0 {
+            // Native mysql found
+            let (_, versionOut) = await exec("mysql --version 2>/dev/null", timeout: 10)
+            let version = Self.parseVersion(versionOut)
 
-        let status = await checkServiceStatus([
-            "systemctl is-active mysql 2>/dev/null || systemctl is-active mysqld 2>/dev/null || systemctl is-active mariadb 2>/dev/null",
-            "pgrep -x mysqld >/dev/null 2>&1 && echo active",
-        ])
+            let status = await checkServiceStatus([
+                "systemctl is-active mysql 2>/dev/null || systemctl is-active mysqld 2>/dev/null || systemctl is-active mariadb 2>/dev/null",
+                "pgrep -x mysqld >/dev/null 2>&1 && echo active",
+            ])
 
-        return DetectedServiceInfo(name: "mysql", version: version, status: status, port: 3306)
+            return DetectedServiceInfo(name: "mysql", version: version, status: status, port: 3306)
+        }
+
+        // Fallback: check for MySQL running in Docker containers
+        let (dockerCode, dockerOut) = await exec(
+            "docker ps --filter 'ancestor=mysql' --filter 'ancestor=mariadb' --format '{{.ID}}|{{.Image}}|{{.Ports}}' 2>/dev/null || " +
+            "docker ps --format '{{.ID}}|{{.Image}}|{{.Ports}}' 2>/dev/null | grep -i mysql",
+            timeout: 15
+        )
+        guard dockerCode == 0, !dockerOut.isEmpty else { return nil }
+
+        // Parse the first matching container
+        let firstLine = dockerOut.components(separatedBy: "\n").first ?? ""
+        let parts = firstLine.components(separatedBy: "|")
+        guard parts.count >= 2 else { return nil }
+
+        let containerId = parts[0].trimmingCharacters(in: .whitespaces)
+        let image = parts[1].trimmingCharacters(in: .whitespaces)
+
+        // Get version from container
+        let (_, versionOut) = await exec("docker exec \(containerId) mysql --version 2>/dev/null", timeout: 10)
+        let version = versionOut.isEmpty ? Self.parseVersion(image) : Self.parseVersion(versionOut)
+
+        // Parse exposed port (e.g., "0.0.0.0:3306->3306/tcp")
+        var mysqlPort: UInt16 = 3306
+        if parts.count >= 3 {
+            let portsStr = parts[2]
+            // Match patterns like "0.0.0.0:3306->3306/tcp" or ":::3306->3306/tcp"
+            if let range = portsStr.range(of: #"(\d+)->3306"#, options: .regularExpression) {
+                let portStr = portsStr[range].components(separatedBy: "->").first ?? ""
+                if let p = UInt16(portStr) { mysqlPort = p }
+            }
+        }
+
+        return DetectedServiceInfo(name: "mysql", version: version, status: "running", port: mysqlPort)
     }
 
     private func detectRedis() async -> DetectedServiceInfo? {
@@ -358,11 +394,14 @@ extension SSHControlMaster {
 
 /// Lightweight service info returned by SSHControlMaster detection.
 /// Maps directly to the existing `DetectedService` struct used by the UI.
-struct DetectedServiceInfo {
+struct DetectedServiceInfo: Identifiable {
+    var id: String { "\(name)_\(port)" }
     let name: String
     let version: String
     let status: String   // "running" / "stopped"
     let port: UInt16
+
+    var isRunning: Bool { status == "running" || status == "active" }
 }
 
 /// Thread-safe single-resume guard for continuations.

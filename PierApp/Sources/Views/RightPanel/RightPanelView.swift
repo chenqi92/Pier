@@ -58,7 +58,7 @@ struct RightPanelView: View {
                 case .git:
                     GitPanelView()
                 case .database:
-                    DatabaseClientView()
+                    DatabaseClientView(serviceManager: serviceManager)
                 case .redis:
                     RedisClientView()
                 case .logViewer:
@@ -142,7 +142,11 @@ struct RightPanelView: View {
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(.secondary)
 
-                Button(action: { serviceManager.disconnect() }) {
+                Button(action: {
+                    // Send exit to the terminal first, then disconnect the service manager
+                    NotificationCenter.default.post(name: .sendSSHExit, object: serviceManager)
+                    serviceManager.disconnect()
+                }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.caption2)
                         .foregroundColor(.secondary)

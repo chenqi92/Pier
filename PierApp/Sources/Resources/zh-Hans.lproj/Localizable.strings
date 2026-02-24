@@ -836,7 +836,54 @@
 // MARK: - Database Common
 
 "db.rowCountSimple" = "%lld 行";
+"db.rows" = "行";
 "db.executing" = "执行中...";
+
+// MARK: - Database Extended (SSH Remote Execution)
+
+"db.notConnectedSSH" = "未通过 SSH 连接到远程服务器";
+"db.sshDisconnected" = "SSH 连接已断开";
+"db.sshConnected" = "SSH 已连接 — 通过远程服务器执行 MySQL 命令";
+"db.sshRequired" = "需要 SSH 连接才能操作远程 MySQL";
+"db.tabQuery" = "查询";
+"db.tabConfig" = "配置";
+"db.tabImportExport" = "导入/导出";
+"db.mysqlConfig" = "MySQL 配置文件";
+"db.loadConfig" = "加载配置";
+"db.loadingConfig" = "加载配置中...";
+"db.configNotFound" = "未找到 MySQL 配置文件";
+"db.configHint" = "点击「加载配置」从远程服务器\n读取 MySQL 配置文件";
+"db.exportSection" = "数据库导出（mysqldump）";
+"db.exportDesc" = "使用 mysqldump 导出数据库结构和数据到本地 SQL 文件";
+"db.exportStarting" = "准备导出...";
+"db.exportRunning" = "正在导出...";
+"db.exportSaved" = "已保存到下载文件夹";
+"db.exportFailed" = "导出失败";
+"db.importSection" = "SQL 文件导入";
+"db.importDesc" = "选择本地 SQL 文件导入到远程数据库";
+"db.importStarting" = "准备导入...";
+"db.importRunning" = "正在导入...";
+"db.importSuccess" = "导入成功";
+"db.targetDatabase" = "目标数据库";
+"db.selectSQLFile" = "选择 SQL 文件";
+"db.detectedInstances" = "检测到的 MySQL 实例";
+"db.useThis" = "使用";
+"db.showPassword" = "显示密码";
+"db.hidePassword" = "隐藏密码";
+"db.selectAll" = "全选/取消全选";
+"db.rowsSelected" = "行已选中";
+"db.deleteRows" = "删除";
+"db.confirmDelete" = "确认删除";
+"db.deleteConfirmMsg" = "确定删除选中的 %d 行数据吗？此操作不可撤销。";
+"db.delete" = "删除";
+"common.cancel" = "取消";
+"db.noData" = "查询结果为空";
+"db.noDataHint" = "该表暂无数据，或查询未返回任何行";
+"db.copyRow" = "复制整行";
+"db.deleteRow" = "删除此行";
+"db.copyCellValue" = "复制单元格";
+"db.editCell" = "编辑";
+"db.setNull" = "设为 NULL";
 "common.ok" = "确定";
 
 // MARK: - PostgreSQL Extended

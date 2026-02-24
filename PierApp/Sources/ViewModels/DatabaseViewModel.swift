@@ -41,6 +41,13 @@ struct QueryHistoryEntry: Identifiable, Codable {
     }
 }
 
+/// Parsed MySQL config file section
+struct MySQLConfigSection: Identifiable {
+    let id = UUID()
+    var name: String   // e.g. "mysqld", "client"
+    var entries: [(key: String, value: String)]
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -57,6 +64,7 @@ class DatabaseViewModel: ObservableObject {
     @Published var formUsername = "root"
     @Published var formPassword = ""
     @Published var formDatabase = ""
+    @Published var showPassword = false
 
     // Database browser
     @Published var databases: [String] = []
@@ -73,8 +81,27 @@ class DatabaseViewModel: ObservableObject {
     @Published var lastQueryTime: TimeInterval? = nil
     @Published var resultRowCount: Int? = nil
 
+    // Data manipulation
+    @Published var selectedRows: Set<Int> = []       // Selected row indices
+    @Published var editingCell: (row: Int, col: Int)? = nil
+    @Published var editingValue: String = ""
+    @Published var primaryKeyColumn: String? = nil    // Auto-detected PK column
+    private var lastSelectQuery: String = ""          // For refresh after edit
+
     // Query History
     @Published var queryHistory: [QueryHistoryEntry] = []
+
+    // Config viewer
+    @Published var configSections: [MySQLConfigSection] = []
+    @Published var configRawContent: String = ""
+    @Published var isLoadingConfig = false
+    @Published var configError: String?
+
+    // Import/Export
+    @Published var isExporting = false
+    @Published var isImporting = false
+    @Published var exportProgress: String?
+    @Published var importProgress: String?
 
     // Internal
     private var currentHost = ""
@@ -83,9 +110,25 @@ class DatabaseViewModel: ObservableObject {
     private var currentPassword = ""
     private var currentDB = ""
 
+    /// Remote service manager for SSH command execution
+    weak var serviceManager: RemoteServiceManager?
+
     init() {
         loadSavedConnections()
         loadHistory()
+    }
+
+    /// Auto-fill connection form from detected services.
+    /// Since commands execute on the REMOTE server, we use the remote MySQL port
+    /// (typically 3306), NOT the local SSH tunnel port (e.g. 13306).
+    func autoFillFromDetectedServices() {
+        guard let sm = serviceManager else { return }
+
+        // Check for mysql in detected services
+        if let mysqlService = sm.detectedServices.first(where: { $0.name == "mysql" }) {
+            formHost = "127.0.0.1"
+            formPort = String(mysqlService.port)  // Remote port, NOT tunnel localPort
+        }
     }
 
     // MARK: - Connection
@@ -181,6 +224,8 @@ class DatabaseViewModel: ObservableObject {
         guard !queryText.isEmpty else { return }
         isExecuting = true
         queryError = nil
+        selectedRows.removeAll()
+        editingCell = nil
 
         Task {
             let start = Date()
@@ -211,11 +256,190 @@ class DatabaseViewModel: ObservableObject {
                 resultRows = result.rows
                 resultRowCount = result.rows.count
                 queryError = nil
+
+                // Remember for refresh and detect PK
+                if queryText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .uppercased().hasPrefix("SELECT") {
+                    lastSelectQuery = queryText
+                    if let table = selectedTable {
+                        await detectPrimaryKey(for: table)
+                    }
+                }
             }
         }
     }
 
-    // MARK: - MySQL CLI Execution
+    // MARK: - Data Manipulation
+
+    /// Detect primary key column for a table
+    private func detectPrimaryKey(for table: String) async {
+        let result = await executeMysql(
+            "SHOW KEYS FROM `\(table)` WHERE Key_name = 'PRIMARY';",
+            db: currentDB
+        )
+        if result.error == nil, !result.rows.isEmpty {
+            // Column_name is typically at index 4 in SHOW KEYS output
+            if let colIdx = result.columns.firstIndex(of: "Column_name"),
+               colIdx < result.rows[0].count {
+                primaryKeyColumn = result.rows[0][colIdx]
+            }
+        }
+    }
+
+    /// Build WHERE clause to identify a specific row
+    private func buildWhereClause(forRow rowIndex: Int) -> String? {
+        guard rowIndex < resultRows.count else { return nil }
+        let row = resultRows[rowIndex]
+
+        // Prefer primary key
+        if let pk = primaryKeyColumn,
+           let pkIdx = resultColumns.firstIndex(of: pk),
+           pkIdx < row.count {
+            let val = row[pkIdx]
+            return "`\(pk)` = '\(escapeSql(val))'"
+        }
+
+        // Fallback: match all columns
+        var parts: [String] = []
+        for (i, col) in resultColumns.enumerated() where i < row.count {
+            let val = row[i]
+            if val == "NULL" {
+                parts.append("`\(col)` IS NULL")
+            } else {
+                parts.append("`\(col)` = '\(escapeSql(val))'")
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " AND ")
+    }
+
+    /// Start editing a cell
+    func startEditing(row: Int, col: Int) {
+        guard row < resultRows.count, col < resultColumns.count else { return }
+        editingCell = (row: row, col: col)
+        editingValue = resultRows[row][col]
+    }
+
+    /// Cancel editing
+    func cancelEditing() {
+        editingCell = nil
+        editingValue = ""
+    }
+
+    /// Commit cell edit — generates and executes UPDATE SQL
+    func commitEdit() {
+        guard let cell = editingCell,
+              let table = selectedTable,
+              cell.row < resultRows.count,
+              cell.col < resultColumns.count else {
+            cancelEditing()
+            return
+        }
+
+        let oldValue = resultRows[cell.row][cell.col]
+        let newValue = editingValue
+
+        // Nothing changed
+        if oldValue == newValue {
+            cancelEditing()
+            return
+        }
+
+        guard let whereClause = buildWhereClause(forRow: cell.row) else {
+            queryError = "Cannot determine row identity for UPDATE"
+            cancelEditing()
+            return
+        }
+
+        let colName = resultColumns[cell.col]
+        let setClause = newValue == "NULL"
+            ? "`\(colName)` = NULL"
+            : "`\(colName)` = '\(escapeSql(newValue))'"
+
+        let sql = "UPDATE `\(table)` SET \(setClause) WHERE \(whereClause) LIMIT 1;"
+
+        cancelEditing()
+
+        Task {
+            let result = await executeMysql(sql, db: currentDB)
+            if let error = result.error {
+                queryError = "UPDATE failed: \(error)"
+            } else {
+                queryError = nil
+                // Refresh results
+                refreshCurrentQuery()
+            }
+        }
+    }
+
+    /// Delete selected rows — generates and executes DELETE SQL
+    func deleteSelectedRows() {
+        guard let table = selectedTable, !selectedRows.isEmpty else { return }
+
+        let sortedRows = selectedRows.sorted(by: >)  // Process in reverse to keep indices valid
+        var whereClauses: [String] = []
+
+        for rowIndex in sortedRows {
+            if let clause = buildWhereClause(forRow: rowIndex) {
+                whereClauses.append("(\(clause))")
+            }
+        }
+
+        guard !whereClauses.isEmpty else {
+            queryError = "Cannot determine row identity for DELETE"
+            return
+        }
+
+        let sql = "DELETE FROM `\(table)` WHERE \(whereClauses.joined(separator: " OR "));"
+
+        Task {
+            let result = await executeMysql(sql, db: currentDB)
+            if let error = result.error {
+                queryError = "DELETE failed: \(error)"
+            } else {
+                queryError = nil
+                selectedRows.removeAll()
+                refreshCurrentQuery()
+            }
+        }
+    }
+
+    /// Refresh the current query results
+    func refreshCurrentQuery() {
+        guard !lastSelectQuery.isEmpty else { return }
+        let saved = queryText
+        queryText = lastSelectQuery
+        executeQuery()
+        // Don't overwrite the user's editor text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.queryText = saved
+        }
+    }
+
+    /// Toggle row selection
+    func toggleRowSelection(_ index: Int) {
+        if selectedRows.contains(index) {
+            selectedRows.remove(index)
+        } else {
+            selectedRows.insert(index)
+        }
+    }
+
+    /// Select/deselect all rows
+    func toggleSelectAll() {
+        if selectedRows.count == resultRows.count {
+            selectedRows.removeAll()
+        } else {
+            selectedRows = Set(0..<resultRows.count)
+        }
+    }
+
+    private func escapeSql(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+    }
+
+    // MARK: - MySQL Execution (via SSH)
 
     struct QueryResult {
         let columns: [String]
@@ -231,44 +455,52 @@ class DatabaseViewModel: ObservableObject {
         password: String? = nil,
         db: String? = nil
     ) async -> QueryResult {
+        guard let sm = serviceManager else {
+            return QueryResult(columns: [], rows: [], error: LS("db.notConnectedSSH"))
+        }
+
+        guard sm.isConnected else {
+            return QueryResult(columns: [], rows: [], error: LS("db.sshDisconnected"))
+        }
+
         let h = host ?? currentHost
         let p = port ?? currentPort
         let u = user ?? currentUser
         let pw = password ?? currentPassword
         let d = db ?? currentDB
 
-        var args = [
-            "-h", h,
-            "-P", String(p),
-            "-u", u,
-            "--batch",       // Tab-separated output
-            "--raw",         // Raw output (no escaping)
-            "-e", query
-        ]
+        // Build the mysql command line for remote execution
+        // Escape single quotes in the query for safe shell embedding
+        let escapedQuery = query.replacingOccurrences(of: "'", with: "'\\''")
+
+        var cmd = "mysql -h \(h) -P \(p) -u \(u)"
+
+        if !pw.isEmpty {
+            // Use MYSQL_PWD env var to avoid password in process listing
+            cmd = "MYSQL_PWD='\(pw.replacingOccurrences(of: "'", with: "'\\''"))' " + cmd
+        }
+
+        cmd += " --batch --raw"
 
         if !d.isEmpty {
-            args.append(contentsOf: ["-D", d])
+            cmd += " -D '\(d.replacingOccurrences(of: "'", with: "'\\''"))'"
         }
 
-        // Pass password via environment variable (not CLI arg) to prevent
-        // exposure via `ps aux`. MYSQL_PWD is the standard env var for this.
-        var env: [String: String]? = nil
-        if !pw.isEmpty {
-            env = ["MYSQL_PWD": pw]
-        }
+        cmd += " -e '\(escapedQuery)'"
 
-        let result = await CommandRunner.shared.run(
-            "mysql",
-            arguments: args,
-            environment: env
-        )
+        // Redirect stderr to stdout so we capture MySQL error messages
+        cmd += " 2>&1"
 
-        if !result.succeeded {
-            let errorMsg = result.stderr.isEmpty ? "Unknown error" : result.stderr
+        let (exitCode, output) = await sm.exec(cmd, timeout: 60)
+
+        if exitCode != 0 {
+            let errorMsg = output.isEmpty
+                ? "MySQL error (exit code: \(exitCode)). Check credentials and ensure MySQL is running."
+                : output
             return QueryResult(columns: [], rows: [], error: errorMsg)
         }
 
-        return parseTSV(result.stdout)
+        return parseTSV(output)
     }
 
     private func parseTSV(_ output: String) -> QueryResult {
@@ -285,6 +517,197 @@ class DatabaseViewModel: ObservableObject {
         }
 
         return QueryResult(columns: columns, rows: rows, error: nil)
+    }
+
+    // MARK: - MySQL Config
+
+    /// Load MySQL config from remote server
+    func loadMySQLConfig() {
+        guard let sm = serviceManager, sm.isConnected else {
+            configError = LS("db.sshDisconnected")
+            return
+        }
+
+        isLoadingConfig = true
+        configError = nil
+
+        Task {
+            // Try common config paths
+            let configPaths = [
+                "/etc/mysql/my.cnf",
+                "/etc/my.cnf",
+                "/etc/mysql/mysql.conf.d/mysqld.cnf",
+                "/etc/mysql/conf.d/",
+            ]
+
+            var configContent = ""
+            var foundPath = ""
+
+            for path in configPaths {
+                let (code, output) = await sm.exec("cat \(path) 2>/dev/null", timeout: 10)
+                if code == 0, !output.isEmpty {
+                    configContent += "# Source: \(path)\n\(output)\n\n"
+                    if foundPath.isEmpty { foundPath = path }
+                }
+            }
+
+            isLoadingConfig = false
+
+            if configContent.isEmpty {
+                configError = LS("db.configNotFound")
+                return
+            }
+
+            configRawContent = configContent
+            configSections = parseMySQLConfig(configContent)
+        }
+    }
+
+    /// Save MySQL config to remote server
+    func saveMySQLConfig(_ content: String, toPath path: String) {
+        guard let sm = serviceManager, sm.isConnected else { return }
+
+        Task {
+            // Write via tee to handle sudo
+            let escapedContent = content.replacingOccurrences(of: "'", with: "'\\''")
+            let (code, output) = await sm.exec("echo '\(escapedContent)' | sudo tee \(path) > /dev/null", timeout: 15)
+
+            if code != 0 {
+                configError = "Save failed: \(output)"
+            } else {
+                configError = nil
+            }
+        }
+    }
+
+    private func parseMySQLConfig(_ content: String) -> [MySQLConfigSection] {
+        var sections: [MySQLConfigSection] = []
+        var currentSection = MySQLConfigSection(name: "global", entries: [])
+
+        for line in content.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Skip comments and empty lines
+            if trimmed.isEmpty || trimmed.hasPrefix("#") || trimmed.hasPrefix(";") {
+                continue
+            }
+
+            // Source comment (our own marker)
+            if trimmed.hasPrefix("# Source:") {
+                continue
+            }
+
+            // Section header
+            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+                if !currentSection.entries.isEmpty || currentSection.name != "global" {
+                    sections.append(currentSection)
+                }
+                let name = String(trimmed.dropFirst().dropLast())
+                currentSection = MySQLConfigSection(name: name, entries: [])
+                continue
+            }
+
+            // Key = value or key (no value)
+            if let eqRange = trimmed.range(of: "=") {
+                let key = String(trimmed[trimmed.startIndex..<eqRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let value = String(trimmed[eqRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                currentSection.entries.append((key: key, value: value))
+            } else {
+                currentSection.entries.append((key: trimmed, value: ""))
+            }
+        }
+
+        if !currentSection.entries.isEmpty {
+            sections.append(currentSection)
+        }
+
+        return sections
+    }
+
+    // MARK: - Import / Export
+
+    /// Export database via mysqldump (remote execution, save result locally)
+    func exportDatabase(_ database: String, tables: [String]? = nil) {
+        guard let sm = serviceManager, sm.isConnected else { return }
+        isExporting = true
+        exportProgress = LS("db.exportStarting")
+
+        Task {
+            var cmd = "mysqldump -h \(currentHost) -P \(currentPort) -u \(currentUser)"
+            if !currentPassword.isEmpty {
+                cmd = "MYSQL_PWD='\(currentPassword.replacingOccurrences(of: "'", with: "'\\''"))' " + cmd
+            }
+            cmd += " \(database)"
+
+            if let selectedTables = tables, !selectedTables.isEmpty {
+                cmd += " " + selectedTables.joined(separator: " ")
+            }
+
+            exportProgress = LS("db.exportRunning")
+            let (code, output) = await sm.exec(cmd, timeout: 300)
+
+            isExporting = false
+
+            if code != 0 {
+                exportProgress = "❌ " + output
+                return
+            }
+
+            // Save to local downloads
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
+            let filename = "pier_dump_\(database)_\(timestamp).sql"
+            let url = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+                .appendingPathComponent(filename)
+
+            do {
+                try output.write(to: url, atomically: true, encoding: .utf8)
+                exportProgress = "✅ \(LS("db.exportSaved")): \(filename)"
+            } catch {
+                exportProgress = "❌ \(LS("db.exportFailed")): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Import SQL file to remote server
+    func importSQL(from localURL: URL, toDatabase database: String) {
+        guard let sm = serviceManager, sm.isConnected else { return }
+        isImporting = true
+        importProgress = LS("db.importStarting")
+
+        Task {
+            guard let content = try? String(contentsOf: localURL, encoding: .utf8) else {
+                isImporting = false
+                importProgress = "❌ Failed to read file"
+                return
+            }
+
+            // For large files we'd need to use SCP/SFTP upload + remote source.
+            // For moderate files, pipe through SSH stdin.
+            let escapedContent = content.replacingOccurrences(of: "'", with: "'\\''")
+
+            var cmd = "mysql -h \(currentHost) -P \(currentPort) -u \(currentUser)"
+            if !currentPassword.isEmpty {
+                cmd = "MYSQL_PWD='\(currentPassword.replacingOccurrences(of: "'", with: "'\\''"))' " + cmd
+            }
+            cmd += " -D \(database)"
+
+            // Use heredoc to pipe SQL content
+            let fullCmd = "echo '\(escapedContent)' | \(cmd)"
+
+            importProgress = LS("db.importRunning")
+            let (code, output) = await sm.exec(fullCmd, timeout: 300)
+
+            isImporting = false
+
+            if code != 0 {
+                importProgress = "❌ \(output)"
+            } else {
+                importProgress = "✅ \(LS("db.importSuccess"))"
+                // Refresh tables
+                loadTables(database: database)
+            }
+        }
     }
 
     // MARK: - Saved Connections
@@ -347,7 +770,7 @@ class DatabaseViewModel: ObservableObject {
         saveHistory()
     }
 
-    // MARK: - Data Export
+    // MARK: - Data Export (local result set to CSV/JSON)
 
     /// Export current query results as CSV. Returns the file URL on success.
     func exportToCSV() -> URL? {

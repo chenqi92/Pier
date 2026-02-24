@@ -108,8 +108,8 @@ struct ServiceTunnel: Identifiable, Hashable {
 
     /// Default tunnel mappings for detected services.
     static let defaultMappings: [String: (localPort: UInt16, remotePort: UInt16)] = [
-        "MySQL":      (13306, 3306),
-        "Redis":      (16379, 6379),
-        "PostgreSQL": (15432, 5432),
+        "mysql":      (13306, 3306),
+        "redis":      (16379, 6379),
+        "postgresql": (15432, 5432),
     ]
 }

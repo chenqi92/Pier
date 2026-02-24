@@ -77,6 +77,21 @@ class TerminalViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Listen for disconnect button in right panel — send "exit" to the terminal
+        NotificationCenter.default.publisher(for: .sendSSHExit)
+            .sink { [weak self] notification in
+                guard let self = self,
+                      let sm = notification.object as? RemoteServiceManager else { return }
+                // Find the session that uses this service manager
+                for (sessionId, session) in self.sessions {
+                    if session.remoteServiceManager === sm {
+                        self.sendInputToSession(sessionId, text: "exit\n")
+                        break
+                    }
+                }
+            }
+            .store(in: &cancellables)
+
         // Start with one default tab
         addNewTab()
     }
@@ -309,4 +324,5 @@ extension Notification.Name {
     static let terminalSSHAuthFailed = Notification.Name("pier.terminalSSHAuthFailed")
     static let terminalSSHAuthSuccess = Notification.Name("pier.terminalSSHAuthSuccess")
     static let terminalTabClosed = Notification.Name("pier.terminalTabClosed")
+    static let sendSSHExit = Notification.Name("pier.sendSSHExit")
 }
