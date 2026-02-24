@@ -252,7 +252,7 @@ class FileViewModel: ObservableObject {
         fileMonitor = nil
     }
 
-    nonisolated deinit {
+    deinit {
         // DispatchSource cancel is thread-safe
         fileMonitor?.cancel()
     }
