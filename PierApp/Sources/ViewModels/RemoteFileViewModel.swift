@@ -93,8 +93,10 @@ class RemoteFileViewModel: ObservableObject {
     // MARK: - File Operations
 
     func handleFileDrop(providers: [NSItemProvider]) -> Bool {
+        var handled = false
         for provider in providers {
             if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+                // From Finder or explicit file URL registration
                 provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { [weak self] item, _ in
                     if let data = item as? Data,
                        let url = URL(dataRepresentation: data, relativeTo: nil) {
@@ -103,9 +105,26 @@ class RemoteFileViewModel: ObservableObject {
                         }
                     }
                 }
+                handled = true
+            } else if provider.hasItemConformingToTypeIdentifier("public.utf8-plain-text") {
+                // Fallback: plain text file path (e.g. from left panel drag)
+                provider.loadItem(forTypeIdentifier: "public.utf8-plain-text", options: nil) { [weak self] item, _ in
+                    var path: String?
+                    if let str = item as? String {
+                        path = str
+                    } else if let data = item as? Data {
+                        path = String(data: data, encoding: .utf8)
+                    }
+                    if let path = path, FileManager.default.fileExists(atPath: path) {
+                        DispatchQueue.main.async {
+                            self?.uploadFile(localPath: path)
+                        }
+                    }
+                }
+                handled = true
             }
         }
-        return true
+        return handled
     }
 
     func uploadFile(localPath: String) {
@@ -121,13 +140,23 @@ class RemoteFileViewModel: ObservableObject {
         transferProgress = TransferProgress(fileName: fileName, fraction: 0, totalBytes: 0, transferredBytes: 0)
 
         Task {
-            let result = await sm.uploadFile(localPath: localPath, remotePath: remoteDest)
+            let result = await sm.uploadFile(localPath: localPath, remotePath: remoteDest) { [weak self] progress in
+                DispatchQueue.main.async {
+                    self?.transferProgress = TransferProgress(
+                        fileName: fileName,
+                        fraction: Double(progress.percent) / 100.0,
+                        totalBytes: 0,
+                        transferredBytes: 0,
+                        speed: progress.speed,
+                        eta: progress.eta
+                    )
+                }
+            }
             transferProgress = nil
 
             if result.success {
                 statusMessage = String(format: String(localized: "sftp.uploadSuccess"), fileName)
                 loadRemoteDirectory()
-                // Auto-clear success message after 3 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                     if self?.statusMessage?.contains(fileName) == true {
                         self?.statusMessage = nil
@@ -151,7 +180,18 @@ class RemoteFileViewModel: ObservableObject {
         transferProgress = TransferProgress(fileName: fileName, fraction: 0, totalBytes: 0, transferredBytes: 0)
 
         Task {
-            let result = await sm.downloadFile(remotePath: remotePath, localPath: localPath)
+            let result = await sm.downloadFile(remotePath: remotePath, localPath: localPath) { [weak self] progress in
+                DispatchQueue.main.async {
+                    self?.transferProgress = TransferProgress(
+                        fileName: fileName,
+                        fraction: Double(progress.percent) / 100.0,
+                        totalBytes: 0,
+                        transferredBytes: 0,
+                        speed: progress.speed,
+                        eta: progress.eta
+                    )
+                }
+            }
             transferProgress = nil
 
             if result.success {

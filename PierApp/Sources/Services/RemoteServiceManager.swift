@@ -324,19 +324,19 @@ class RemoteServiceManager: ObservableObject, Identifiable {
     }
 
     /// Upload a local file to the remote server via SCP.
-    func uploadFile(localPath: String, remotePath: String) async -> (success: Bool, error: String?) {
+    func uploadFile(localPath: String, remotePath: String, onProgress: (@Sendable (SSHControlMaster.SCPProgress) -> Void)? = nil) async -> (success: Bool, error: String?) {
         guard let be = backend, isConnected else {
             return (false, "Not connected")
         }
-        return await be.uploadFile(localPath: localPath, remotePath: remotePath)
+        return await be.uploadFile(localPath: localPath, remotePath: remotePath, onProgress: onProgress)
     }
 
     /// Download a file from the remote server to local via SCP.
-    func downloadFile(remotePath: String, localPath: String) async -> (success: Bool, error: String?) {
+    func downloadFile(remotePath: String, localPath: String, onProgress: (@Sendable (SSHControlMaster.SCPProgress) -> Void)? = nil) async -> (success: Bool, error: String?) {
         guard let be = backend, isConnected else {
             return (false, "Not connected")
         }
-        return await be.downloadFile(remotePath: remotePath, localPath: localPath)
+        return await be.downloadFile(remotePath: remotePath, localPath: localPath, onProgress: onProgress)
     }
 
     // MARK: - Panel Mode Filtering

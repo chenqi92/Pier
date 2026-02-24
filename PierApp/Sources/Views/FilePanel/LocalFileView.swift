@@ -190,8 +190,9 @@ struct LocalFileView: View {
                         LocalFileView.fileContextMenu(for: item, viewModel: viewModel)
                     }
                     .onDrag {
-                        NSItemProvider(contentsOf: URL(fileURLWithPath: item.path))
-                            ?? NSItemProvider()
+                        // Use NSURL as item — automatically registers public.file-url
+                        let url = NSURL(fileURLWithPath: item.path)
+                        return NSItemProvider(object: url)
                     }
             }
         }

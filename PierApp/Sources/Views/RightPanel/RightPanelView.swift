@@ -712,7 +712,7 @@ struct RemoteFileView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+        .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: nil) { providers in
             viewModel.handleFileDrop(providers: providers)
         }
         .alert(LS("sftp.newFolder"), isPresented: $showNewFolderAlert) {

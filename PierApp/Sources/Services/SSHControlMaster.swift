@@ -164,43 +164,190 @@ class SSHControlMaster: ObservableObject {
 
     // MARK: - File Transfer (SCP via ControlMaster)
 
-    /// Upload a local file to the remote server via scp.
-    func uploadFile(localPath: String, remotePath: String) async -> (success: Bool, error: String?) {
-        // Shell-escape remote path for scp (handles spaces, special chars)
-        let escapedRemote = remotePath.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: " ", with: "\\ ")
-        let args = [
-            "-o", "ControlPath=\(socketPath)",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "BatchMode=yes",
-            "-P", "\(port)",
-            "-r",  // Support directory uploads
-            localPath,
-            "\(username)@\(host):\(escapedRemote)",
-        ]
-        let (exitCode, output) = await runProcess("/usr/bin/scp", arguments: args, timeout: 300)
-        if exitCode == 0 {
-            return (true, nil)
-        }
-        return (false, output.isEmpty ? "SCP upload failed with exit code \(exitCode)" : output)
+    /// SCP progress info parsed from stderr output.
+    struct SCPProgress {
+        let percent: Int
+        let speed: String      // e.g. "1.2MB/s"
+        let eta: String         // e.g. "00:05"
     }
 
-    /// Download a file from the remote server to local via scp.
-    func downloadFile(remotePath: String, localPath: String) async -> (success: Bool, error: String?) {
+    /// Upload a local file to the remote server via scp with progress reporting.
+    func uploadFile(
+        localPath: String,
+        remotePath: String,
+        onProgress: (@Sendable (SCPProgress) -> Void)? = nil
+    ) async -> (success: Bool, error: String?) {
         let escapedRemote = remotePath.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: " ", with: "\\ ")
         let args = [
             "-o", "ControlPath=\(socketPath)",
             "-o", "StrictHostKeyChecking=no",
             "-o", "BatchMode=yes",
             "-P", "\(port)",
-            "-r",  // Support directory downloads
+            "-r",
+            localPath,
+            "\(username)@\(host):\(escapedRemote)",
+        ]
+        return await runSCPWithProgress("/usr/bin/scp", arguments: args, timeout: 300, onProgress: onProgress)
+    }
+
+    /// Download a file from the remote server to local via scp with progress reporting.
+    func downloadFile(
+        remotePath: String,
+        localPath: String,
+        onProgress: (@Sendable (SCPProgress) -> Void)? = nil
+    ) async -> (success: Bool, error: String?) {
+        let escapedRemote = remotePath.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: " ", with: "\\ ")
+        let args = [
+            "-o", "ControlPath=\(socketPath)",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "BatchMode=yes",
+            "-P", "\(port)",
+            "-r",
             "\(username)@\(host):\(escapedRemote)",
             localPath,
         ]
-        let (exitCode, output) = await runProcess("/usr/bin/scp", arguments: args, timeout: 300)
-        if exitCode == 0 {
-            return (true, nil)
+        return await runSCPWithProgress("/usr/bin/scp", arguments: args, timeout: 300, onProgress: onProgress)
+    }
+
+    /// Run SCP process with real-time stderr progress parsing.
+    /// SCP outputs progress to stderr in format: `filename  XX%  XXXKB  XXX.XKB/s  XX:XX\r`
+    private func runSCPWithProgress(
+        _ executablePath: String,
+        arguments: [String],
+        timeout: TimeInterval,
+        onProgress: (@Sendable (SCPProgress) -> Void)?
+    ) async -> (success: Bool, error: String?) {
+        await withCheckedContinuation { continuation in
+            let guard_ = SingleResumeContinuationGuard()
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: executablePath)
+            process.arguments = arguments
+
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+
+            // Stream stderr to parse progress in real time
+            var stderrBuffer = ""
+            if onProgress != nil {
+                stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    guard !data.isEmpty else { return }
+                    guard let chunk = String(data: data, encoding: .utf8) else { return }
+                    stderrBuffer += chunk
+
+                    // SCP uses \r to overwrite progress lines.
+                    // Split on \r to get the latest progress update.
+                    let parts = stderrBuffer.split(separator: "\r", omittingEmptySubsequences: true)
+                    if let lastLine = parts.last {
+                        if let progress = Self.parseSCPProgress(String(lastLine)) {
+                            onProgress?(progress)
+                        }
+                    }
+                    // Keep only the last part (incomplete line) in buffer
+                    if stderrBuffer.hasSuffix("\r") || stderrBuffer.hasSuffix("\n") {
+                        stderrBuffer = ""
+                    } else if let last = parts.last {
+                        stderrBuffer = String(last)
+                    }
+                }
+            }
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try process.run()
+                } catch {
+                    stderrPipe.fileHandleForReading.readabilityHandler = nil
+                    Task { @MainActor in
+                        if guard_.tryResume() {
+                            continuation.resume(returning: (false, "Failed to launch: \(error.localizedDescription)"))
+                        }
+                    }
+                    return
+                }
+
+                // Read stdout concurrently (in case scp writes anything)
+                var stdoutData = Data()
+                let readGroup = DispatchGroup()
+                readGroup.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                    readGroup.leave()
+                }
+
+                // If no progress handler, also read stderr concurrently
+                var stderrData = Data()
+                if onProgress == nil {
+                    readGroup.enter()
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                        readGroup.leave()
+                    }
+                }
+
+                readGroup.wait()
+                process.waitUntilExit()
+
+                // Clean up handler
+                stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+                // If using progress handler, read remaining stderr
+                if onProgress != nil {
+                    stderrData = stderrPipe.fileHandleForReading.availableData
+                }
+
+                let exitCode = Int(process.terminationStatus)
+                let stdoutStr = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let stderrStr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? stderrBuffer
+
+                Task { @MainActor in
+                    if guard_.tryResume() {
+                        if exitCode == 0 {
+                            continuation.resume(returning: (true, nil))
+                        } else {
+                            let errorMsg = stderrStr.isEmpty ? stdoutStr : stderrStr
+                            continuation.resume(returning: (false, errorMsg.isEmpty ? "SCP failed with exit code \(exitCode)" : errorMsg))
+                        }
+                    }
+                }
+            }
+
+            // Timeout
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                if guard_.tryResume() {
+                    if process.isRunning { process.terminate() }
+                    stderrPipe.fileHandleForReading.readabilityHandler = nil
+                    continuation.resume(returning: (false, "Transfer timed out after \(Int(timeout))s"))
+                }
+            }
         }
-        return (false, output.isEmpty ? "SCP download failed with exit code \(exitCode)" : output)
+    }
+
+    /// Parse SCP progress line.
+    /// Format: `filename                          XX%  XXXKB  XXX.XKB/s  XX:XX`
+    nonisolated static func parseSCPProgress(_ line: String) -> SCPProgress? {
+        // Match pattern:  XX%  (size)  (speed)  (eta)
+        // Example: "test.zip     42%  128KB  1.2MB/s   00:03"
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Use regex to find: percentage, speed, ETA
+        // SCP format: <filename> <spaces> <percent>% <size> <speed> <eta>
+        let pattern = #"(\d{1,3})%\s+[\d.]+\w+\s+([\d.]+\w+/s)\s+(\d+:\d+|--:--)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) else {
+            return nil
+        }
+
+        let percentStr = String(trimmed[Range(match.range(at: 1), in: trimmed)!])
+        let speed = String(trimmed[Range(match.range(at: 2), in: trimmed)!])
+        let eta = String(trimmed[Range(match.range(at: 3), in: trimmed)!])
+
+        guard let percent = Int(percentStr) else { return nil }
+        return SCPProgress(percent: percent, speed: speed, eta: eta)
     }
 
     // MARK: - Cleanup
@@ -254,13 +401,30 @@ class SSHControlMaster: ObservableObject {
                     return
                 }
 
+                // CRITICAL: Read stdout/stderr CONCURRENTLY and BEFORE waitUntilExit().
+                // macOS pipe buffer is only 64KB. If the process output exceeds this,
+                // the process blocks on write, and waitUntilExit() would deadlock.
+                var stdoutData = Data()
+                var stderrData = Data()
+                let readGroup = DispatchGroup()
+
+                readGroup.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                    readGroup.leave()
+                }
+                readGroup.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    readGroup.leave()
+                }
+
+                // Wait for both reads to complete (they finish when process closes pipes)
+                readGroup.wait()
                 process.waitUntilExit()
 
-                let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                let stdoutStr = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let stdoutStr = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let stderrStr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                // Combine: prefer stdout, append stderr if stdout is empty or on error
                 let exitCode = Int(process.terminationStatus)
                 let output = stdoutStr.isEmpty ? stderrStr : (exitCode != 0 && !stderrStr.isEmpty ? stdoutStr + "\n" + stderrStr : stdoutStr)
 

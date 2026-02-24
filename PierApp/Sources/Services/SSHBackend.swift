@@ -51,18 +51,10 @@ protocol SSHBackend: AnyObject {
     func detectAllServices() async -> [DetectedServiceInfo]
 
     /// Upload a local file to the remote server via SCP.
-    /// - Parameters:
-    ///   - localPath: Absolute path to the local file.
-    ///   - remotePath: Destination path on the remote server.
-    /// - Returns: Tuple of (success, error message if failed).
-    func uploadFile(localPath: String, remotePath: String) async -> (success: Bool, error: String?)
+    func uploadFile(localPath: String, remotePath: String, onProgress: (@Sendable (SSHControlMaster.SCPProgress) -> Void)?) async -> (success: Bool, error: String?)
 
     /// Download a file from the remote server to local via SCP.
-    /// - Parameters:
-    ///   - remotePath: Path on the remote server.
-    ///   - localPath: Destination path on the local machine.
-    /// - Returns: Tuple of (success, error message if failed).
-    func downloadFile(remotePath: String, localPath: String) async -> (success: Bool, error: String?)
+    func downloadFile(remotePath: String, localPath: String, onProgress: (@Sendable (SSHControlMaster.SCPProgress) -> Void)?) async -> (success: Bool, error: String?)
 
     /// Clean up and release resources.
     func cleanup()

@@ -77,9 +77,18 @@ struct TransferProgress {
     let fraction: Double
     let totalBytes: UInt64
     let transferredBytes: UInt64
+    var speed: String = ""     // e.g. "1.2MB/s"
+    var eta: String = ""       // e.g. "00:05"
 
     var description: String {
         let pct = Int(fraction * 100)
-        return "\(fileName) — \(pct)%"
+        var parts = ["\(fileName)", "\(pct)%"]
+        if !speed.isEmpty {
+            parts.append(speed)
+        }
+        if !eta.isEmpty && eta != "--:--" {
+            parts.append("ETA \(eta)")
+        }
+        return parts.joined(separator: " · ")
     }
 }
