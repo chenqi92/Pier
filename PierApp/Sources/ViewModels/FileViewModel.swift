@@ -129,8 +129,10 @@ class FileViewModel: ObservableObject {
         stopMonitoring()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // Only load 1 level deep — children are lazy-loaded on expand
-            let items = self?.buildFileTree(at: path, depth: 0, maxDepth: 1) ?? []
+            // Only list current level — do NOT read into subdirectories to avoid
+            // TCC permission prompts for protected folders (~/Music, ~/Pictures, etc.)
+            // Children and childCount are loaded lazily when user navigates in.
+            let items = self?.buildFileTree(at: path, depth: 0, maxDepth: 0) ?? []
 
             DispatchQueue.main.async {
                 self?.allFiles = items
@@ -151,8 +153,9 @@ class FileViewModel: ObservableObject {
 
     private func loadChildren(for item: FileItem) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // Load 1 level of children
-            let children = self?.buildFileTree(at: item.path, depth: 0, maxDepth: 1) ?? []
+            // Load 1 level of children (user has navigated into this directory,
+            // so TCC prompt is expected and appropriate)
+            let children = self?.buildFileTree(at: item.path, depth: 0, maxDepth: 0) ?? []
 
             DispatchQueue.main.async {
                 item.children = children
@@ -168,6 +171,16 @@ class FileViewModel: ObservableObject {
             return []
         }
 
+        // Detect if we're listing the user's home directory — TCC-protected
+        // folders (Desktop, Documents, Downloads, etc.) must not be stat'd
+        // to avoid permission prompts on launch.
+        let homePath = NSHomeDirectory()
+        let isHomeDir = (path as NSString).standardizingPath == (homePath as NSString).standardizingPath
+        let tccProtectedNames: Set<String> = [
+            "Desktop", "Documents", "Downloads",
+            "Music", "Pictures", "Movies"
+        ]
+
         var items: [FileItem] = []
 
         for name in contents.sorted(by: { $0.lowercased() < $1.lowercased() }) {
@@ -175,6 +188,25 @@ class FileViewModel: ObservableObject {
             if name.hasPrefix(".") { continue }
 
             let fullPath = (path as NSString).appendingPathComponent(name)
+
+            // For TCC-protected directories in ~, create a lightweight entry
+            // without calling stat/attributesOfItem to avoid permission prompts.
+            if isHomeDir && tccProtectedNames.contains(name) {
+                let item = FileItem(
+                    name: name,
+                    path: fullPath,
+                    isDirectory: true,
+                    size: 0,
+                    modifiedDate: nil,
+                    permissions: "",
+                    ownerName: "",
+                    childCount: nil,
+                    children: nil
+                )
+                items.append(item)
+                continue
+            }
+
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: fullPath, isDirectory: &isDir) else { continue }
 
@@ -191,9 +223,9 @@ class FileViewModel: ObservableObject {
                 if depth < maxDepth {
                     children = buildFileTree(at: fullPath, depth: depth + 1, maxDepth: maxDepth)
                 }
-                // Count visible (non-hidden) items for directory badge
-                childCount = (try? fm.contentsOfDirectory(atPath: fullPath)
-                    .filter { !$0.hasPrefix(".") }.count) ?? 0
+                // childCount is intentionally NOT computed here to avoid triggering
+                // TCC permission prompts. It will be set when user actually enters
+                // the directory via navigateTo() or ensureChildrenLoaded().
             }
 
             let item = FileItem(
