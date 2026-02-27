@@ -2,14 +2,17 @@
 # ============================================================
 # Pier — CI Release Build Script
 # ============================================================
-# Builds a release .app bundle with the version from VERSION file
-# injected into Info.plist.
+# Builds a release .app bundle + DMG with code signing support.
+#
+# Environment variables (optional, for CI):
+#   SIGNING_IDENTITY  — e.g. "Developer ID Application: Name (TEAMID)"
 #
 # Usage:
 #   ./scripts/build_release.sh
 #
 # Output:
-#   build/Pier.app  — ready-to-distribute macOS app bundle
+#   build/Pier.app                — macOS app bundle
+#   build/Pier-{VERSION}.dmg     — distributable disk image
 # ============================================================
 
 set -euo pipefail
@@ -81,12 +84,25 @@ if [ -d "$RESOURCES_BUNDLE" ]; then
     cp -R "$RESOURCES_BUNDLE" "$APP_BUNDLE/Contents/Resources/"
 fi
 
-# Ad-hoc sign (no developer certificate)
-codesign --force --sign - "$APP_BUNDLE" 2>/dev/null || true
+# ── Step 5: Code Signing ──
+IDENTITY="${SIGNING_IDENTITY:-}"
+if [ -n "$IDENTITY" ]; then
+    echo ""
+    echo "🔏 Signing with: $IDENTITY"
+    codesign --deep --force --options runtime \
+        --sign "$IDENTITY" \
+        --entitlements scripts/Pier.entitlements \
+        "$APP_BUNDLE"
+    echo "✅ App signed with Developer ID"
+else
+    echo ""
+    echo "⚠️  No SIGNING_IDENTITY set, using ad-hoc signature"
+    codesign --force --sign - "$APP_BUNDLE" 2>/dev/null || true
+fi
 
 echo "✅ App bundle assembled: $APP_BUNDLE"
 
-# ── Step 5: Create DMG ──
+# ── Step 6: Create DMG ──
 echo ""
 echo "📀 Creating DMG..."
 
@@ -108,6 +124,12 @@ hdiutil create \
     "$DMG_OUTPUT"
 
 rm -rf "$STAGING"
+
+# Sign the DMG too
+if [ -n "$IDENTITY" ]; then
+    codesign --force --sign "$IDENTITY" "$DMG_OUTPUT"
+    echo "✅ DMG signed"
+fi
 
 echo "✅ DMG created: $DMG_OUTPUT ($(du -sh "$DMG_OUTPUT" | cut -f1))"
 echo ""

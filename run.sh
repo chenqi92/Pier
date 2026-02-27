@@ -65,7 +65,16 @@ echo ""
 
 cd "$SCRIPT_DIR"
 
-# ── Step 3: 构建 Swift 应用 ──
+# ── Step 3: 注入 VERSION 到 Info.plist ──
+if [ -f "VERSION" ]; then
+    DEV_VERSION=$(cat VERSION | tr -d '[:space:]')
+    if [ -n "$DEV_VERSION" ]; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${DEV_VERSION}" PierApp/Info.plist
+        echo "📝 版本号已注入: ${DEV_VERSION}"
+    fi
+fi
+
+# ── Step 4: 构建 Swift 应用 ──
 echo "🍎 构建 PierApp (Swift)..."
 
 if [ "$MODE" = "release" ]; then
