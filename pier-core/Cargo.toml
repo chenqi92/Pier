@@ -6,7 +6,7 @@ description = "Core engine for Pier Terminal - terminal emulation, SSH/SFTP, fil
 
 [lib]
 name = "pier_core"
-crate-type = ["staticlib", "cdylib"]
+crate-type = ["staticlib"]
 
 [dependencies]
 # Terminal emulation

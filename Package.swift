@@ -31,6 +31,13 @@ let package = Package(
                     "-L", "pier-core/target/release",
                     "-L", "pier-core/target/debug",
                     "-lpier_core",
+                    // OpenSSL (Homebrew, static) — required by git2, russh (libssh2)
+                    "/opt/homebrew/opt/openssl@3/lib/libssl.a",
+                    "/opt/homebrew/opt/openssl@3/lib/libcrypto.a",
+                    // zlib — required by git2 (compression)
+                    "-lz",
+                    // iconv — required by git2 (path encoding)
+                    "-liconv",
                 ]),
                 // System frameworks needed
                 .linkedFramework("Security"),
